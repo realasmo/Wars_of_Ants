@@ -1,0 +1,13 @@
+# Rust
+/target
+core/pkg
+
+# Node
+node_modules/
+dist/
+*.local
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
