@@ -39,9 +39,9 @@ AntWar.io is a great proof of concept, but it is not perfect and no longer maint
 - Goal of the test slice: prove the architecture end-to-end, not to ship content.
 
 ### Roadmap (confirmed)
-0. **Repo foundation** — monorepo (`core/`, `server/`, `client/`, `docs/`), toolchains (cargo + wasm-pack + Vite), CI, initial push.
-1. **Core simulation** (Rust, headless) — deterministic fixed-timestep ticks, ECS, tilemap + digging, Queen/Worker economy, A* pathfinding, command API, WASM bindings, sim tests.
-2. **First playable** — PixiJS client with placeholder/procedural art, `LocalTransport` → WASM core, HUD, basic audio. *Milestone 1: dig, gather, grow the colony, queen death = game over.*
+0. ✅ **Repo foundation** — monorepo (`core/`, `server/`, `client/`, `docs/`), toolchains (cargo + wasm-pack + Vite), CI, initial push.
+1. ✅ **Core simulation** (Rust, headless) — deterministic fixed-timestep ticks (20 tps), hecs ECS, seeded PCG RNG, two-layer tilemap + digging, A* pathfinding (dig-aware costs), Queen/Worker economy (gather → feed → eggs → hatch), starvation/queen-death loss condition, command API (`Move`, `Dig`), WASM bindings, headless sim tests (determinism, colony growth, starvation, dig).
+2. **First playable** — PixiJS client with placeholder/procedural art, `LocalTransport` → WASM core, HUD, basic audio. *Milestone 1: dig, gather, grow the colony, queen death = game over.* Includes AI nest expansion (workers dig new chambers when brood space runs out).
 3. **Combat + ecosystem + AI** — predators, day/night, weather, fog of war; remaining content decisions are made and playtested here.
 4. **Server + multiplayer** — `NetworkTransport`, authoritative Axum server, binary snapshots, rooms/lobby, co-op.
 5. **Meta + release** — matchmaker, DB persistence, metrics, deployment, real art pass, balance.

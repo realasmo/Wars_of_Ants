@@ -8,3 +8,6 @@ edition = "2021"
 
 [profile.release]
 lto = true
+
+[profile.test]
+opt-level = 1
