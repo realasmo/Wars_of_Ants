@@ -44,4 +44,8 @@ export class Hud {
   hideDead(): void {
     el('overlay').classList.add('hidden');
   }
+
+  setReplay(active: boolean): void {
+    el('replay-badge').classList.toggle('hidden', !active);
+  }
 }

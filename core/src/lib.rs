@@ -1,3 +1,4 @@
+mod balance;
 mod components;
 mod math;
 mod path;
@@ -5,6 +6,7 @@ mod rng;
 mod sim;
 mod world;
 
+pub use balance::UnitStats;
 pub use components::{AntState, Caste, Layer};
 pub use sim::{Colony, Command, Config, EntitySnap, Sim, DT, TPS};
 pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK};
@@ -79,6 +81,10 @@ impl WoaSim {
 
     pub fn tiles_dug(&self) -> u32 {
         self.inner.tiles_dug()
+    }
+
+    pub fn canonical(&self) -> String {
+        self.inner.canonical_state()
     }
 
     pub fn dims(&self) -> Vec<u32> {

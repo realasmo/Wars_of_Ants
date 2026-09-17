@@ -603,6 +603,7 @@ name = "woa-core"
 version = "0.1.0"
 dependencies = [
  "hecs",
+ "serde_json",
  "wasm-bindgen",
 ]
 

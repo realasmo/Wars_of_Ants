@@ -72,6 +72,10 @@ export class Sim {
     return this.sim.food_super();
   }
 
+  canonical(): string {
+    return this.sim.canonical();
+  }
+
   tileAt(layer: number, x: number, y: number): number {
     if (x < 0 || y < 0 || x >= this.w || y >= this.h) return 4;
     return (this.tilesCache[layer] as Uint8Array)[y * this.w + x];

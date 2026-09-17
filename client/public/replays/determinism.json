@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "name": "determinism",
+  "seed": 42,
+  "ticks": 3000,
+  "note": "Cross-platform determinism script: seed 42 + these commands at these ticks must produce identical canonical states on native and WASM. Also usable as a replay in the client via ?replay=determinism. Semantics: a command applies after the first tick that reaches its tick t.",
+  "cmds": [
+    { "t": 1, "act": "dig", "ant": 3, "tx": 50, "ty": 2 },
+    { "t": 30, "act": "move", "ant": 1, "x": 48.5, "y": 6.5 },
+    { "t": 100, "act": "entrance", "ant": 1 },
+    { "t": 150, "act": "move", "ant": 1, "x": 10.5, "y": 10.5 },
+    { "t": 200, "act": "attack", "ant": 2, "target": 37 },
+    { "t": 400, "act": "dig", "ant": 1, "tx": 52, "ty": 8 },
+    { "t": 800, "act": "entrance", "ant": 1 },
+    { "t": 1500, "act": "attack", "ant": 3, "target": 38 },
+    { "t": 2900, "act": "move", "ant": 2, "x": 48.5, "y": 1.5 }
+  ]
+}

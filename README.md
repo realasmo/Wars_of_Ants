@@ -73,6 +73,27 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 - `__woa.mark('label')` drops a labeled marker into the log (e.g. "bug here").
 - A dump maps 1:1 onto `__woa.click/key/step` calls, so a recorded play session converts mechanically into an e2e regression scenario.
 
+### Replays
+
+- A replay is `{version, seed, cmds}` — the seed plus sim commands stamped with the tick they fire (a command applies after the first tick that reaches its `t`). Determinism makes this a complete record: same seed + same commands = same game.
+- Export a live session from the console: `__woa.replay()` (built from the input recorder's command log).
+- Watch one: put `name.json` in `client/public/replays/` and open `?replay=name` — the game runs it at normal speed with a REPLAY badge; input stays live for camera control.
+- `client/public/replays/determinism.json` is the fixture for the determinism test (below).
+
+### Cross-platform determinism test
+
+- `Sim::canonical_state()` (core, exported to WASM) renders the whole sim state into a platform-independent string. `cargo run --example determinism_dump -- <replay.json>` prints it for the native build.
+- The e2e suite runs the *same* replay file in the browser (WASM) and compares the canonical strings — any character difference is a native-vs-WASM determinism break. Run it via `npm run e2e` (see "Automated playtesting").
+- Verified matching as of 2026-09-18 (seed 42, 3000 ticks, mixed move/dig/entrance/attack commands).
+
+### Versioning rule
+
+- **Every format that crosses a build, process, or network boundary gets a version number from day one.** Currently versioned: replay format (`version: 1`). Coming before first use: the binary snapshot/protocol (Phase 4), save files, and the WASM↔JS interface (`core_version()` already reports the crate version — surface it in the client HUD/debug output when it matters).
+
+### Balance table
+
+- All tunable gameplay numbers (unit HP/damage/cooldown/speed/range per caste and predator, economy constants) live in `core/src/balance.rs` — data only, no logic. Sim code reads them via `stats_for(caste)`; changing a number there is a balance change, not a code change.
+
 ## Undecided (vs. the original game)
 
 The following decisions are **not yet made**. `docs/BASED-ON.md` describes the original game as a reference only — nothing there is a commitment.

@@ -125,3 +125,21 @@ body {
 #overlay button:hover {
   background: #6e4f3a;
 }
+
+#replay-badge {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(94, 58, 32, 0.9);
+  border: 1px solid #b0713c;
+  border-radius: 6px;
+  padding: 3px 12px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #f0d8b8;
+}
+
+#replay-badge.hidden {
+  display: none;
+}

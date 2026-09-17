@@ -4,6 +4,7 @@ import { Hud } from './hud';
 import { Sim, TPS } from './sim';
 import type { Snap } from './sim';
 import { InputLog, r2 } from './inputlog';
+import type { Replay } from './replay';
 
 export class Game {
   sim: Sim;
@@ -18,8 +19,9 @@ export class Game {
   private running = false;
   private hudCounter = 0;
   private deadShown = false;
+  private replay: { cmds: Replay['cmds']; i: number } | null = null;
 
-  private constructor(sim: Sim, renderer: Renderer, seed: number) {
+  private constructor(sim: Sim, renderer: Renderer, seed: number, replay: Replay | null) {
     this.sim = sim;
     this.renderer = renderer;
     this.seed = seed;
@@ -31,12 +33,17 @@ export class Game {
     this.input.onToggleLayer = () => this.toggleLayer();
     this.playerAnt = sim.workers()[0] ?? null;
     this.log.push({ type: 'start', seed, workers: sim.workers().length });
+    if (replay) {
+      this.replay = { cmds: [...replay.cmds].sort((a, b) => a.t - b.t), i: 0 };
+      this.hud.setReplay(true);
+      this.log.push({ type: 'start', note: 'replay', cmds: replay.cmds.length });
+    }
   }
 
-  static async create(host: HTMLElement, seed: number): Promise<Game> {
+  static async create(host: HTMLElement, seed: number, replay: Replay | null = null): Promise<Game> {
     const sim = new Sim(seed);
     const renderer = await Renderer.create(sim, host);
-    return new Game(sim, renderer, seed);
+    return new Game(sim, renderer, seed, replay);
   }
 
   start(): void {
@@ -75,8 +82,33 @@ export class Game {
 
   debugStep(n: number): void {
     if (this.sim.dead) return;
-    for (let i = 0; i < n; i++) this.sim.tick();
+    for (let i = 0; i < n; i++) this.tickWithReplay();
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+  }
+
+  debugReplay(): Record<string, unknown> {
+    const cmds = this.log.dump()
+      .events.filter((e) => e.type === 'cmd' && e.src !== 'replay')
+      .map((e) => {
+        const c: Record<string, unknown> = { t: e.tick, act: e.act, ant: e.ant };
+        if (e.x !== undefined) c.x = e.x;
+        if (e.y !== undefined) c.y = e.y;
+        if (e.tx !== undefined) c.tx = e.tx;
+        if (e.ty !== undefined) c.ty = e.ty;
+        if (e.target !== undefined) c.target = e.target;
+        return c;
+      });
+    return {
+      version: 1,
+      seed: this.seed,
+      name: `session-${new Date().toISOString().slice(0, 19)}`,
+      ticks: this.sim.tickCount,
+      cmds,
+    };
+  }
+
+  debugCanon(): string {
+    return this.sim.canonical();
   }
 
   debugPixel(x: number, y: number): number[] {
@@ -209,7 +241,7 @@ export class Game {
       this.acc += dt;
       const step = 1 / TPS;
       while (this.acc >= step) {
-        this.sim.tick();
+        this.tickWithReplay();
         this.acc -= step;
       }
       if (++this.hudCounter >= 5) {
@@ -228,5 +260,36 @@ export class Game {
     }
     this.renderer.renderEntities(this.acc * TPS, this.playerAnt);
     requestAnimationFrame(this.frame);
+  };
+
+  private tickWithReplay(): void {
+    this.sim.tick();
+    const rp = this.replay;
+    if (!rp) return;
+    let applied = false;
+    while (rp.i < rp.cmds.length && rp.cmds[rp.i].t <= this.sim.tickCount) {
+      const c = rp.cmds[rp.i++];
+      const ev: { type: string; src: string; act: unknown; ant: number } & Record<string, unknown> = {
+        type: 'cmd',
+        src: 'replay',
+        act: c.act,
+        ant: c.ant,
+      };
+      if (c.x !== undefined) ev.x = c.x;
+      if (c.y !== undefined) ev.y = c.y;
+      if (c.tx !== undefined) ev.tx = c.tx;
+      if (c.ty !== undefined) ev.ty = c.ty;
+      if (c.target !== undefined) ev.target = c.target;
+      this.log.push(ev);
+      if (c.act === 'move') this.sim.move(c.ant, c.x ?? 0, c.y ?? 0);
+      else if (c.act === 'dig') this.sim.dig(c.ant, c.tx ?? 0, c.ty ?? 0);
+      else if (c.act === 'attack') this.sim.attack(c.ant, c.target ?? 0);
+      else if (c.act === 'entrance') this.sim.useEntrance(c.ant);
+      applied = true;
+    }
+    if (applied && rp.i >= rp.cmds.length) {
+      this.replay = null;
+      this.hud.setReplay(false);
+    }
   };
 }

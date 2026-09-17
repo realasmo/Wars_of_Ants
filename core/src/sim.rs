@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use hecs::Entity;
 
+use crate::balance::*;
 use crate::components::*;
 use crate::math::Vec2;
 use crate::path::{chebyshev, find_path, manhattan, tile_of};
@@ -10,36 +11,6 @@ use crate::world::{tile_center, Grid, World, DIRT, EMPTY, ROCK};
 
 pub const TPS: u32 = 20;
 pub const DT: f64 = 1.0 / TPS as f64;
-
-pub const WORKER_SPEED: f64 = 3.0;
-pub const DIG_TIME: f64 = 1.2;
-pub const EAT_PERIOD: f64 = 25.0;
-pub const EGG_COST: u32 = 5;
-pub const EGG_TIME: f64 = 45.0;
-pub const LAY_COOLDOWN: f64 = 3.0;
-pub const STARVE_TIME: f64 = 90.0;
-pub const START_FOOD: u32 = 5;
-pub const PILE_AMOUNT: u32 = 45;
-
-pub const WORKER_HP: f64 = 100.0;
-pub const WORKER_DMG: f64 = 8.0;
-pub const SOLDIER_HP: f64 = 130.0;
-pub const SOLDIER_DMG: f64 = 22.0;
-pub const SOLDIER_SPEED: f64 = 2.6;
-pub const QUEEN_HP: f64 = 150.0;
-pub const ATK_CD: f64 = 1.0;
-pub const ANT_RANGE: f64 = 0.9;
-
-pub const SPIDER_HP: f64 = 130.0;
-pub const SPIDER_DMG: f64 = 15.0;
-pub const SPIDER_CD: f64 = 1.2;
-pub const SPIDER_SPEED: f64 = 2.2;
-pub const SPIDER_AGGRO: f64 = 5.0;
-pub const SPIDER_RANGE: f64 = 0.8;
-pub const SPIDER_WANDER: f64 = 8.0;
-pub const SUPER_PER_SPIDER: u32 = 8;
-pub const SOLDIER_COST_GREEN: u32 = 3;
-pub const SOLDIER_COST_SUPER: u32 = 2;
 
 #[derive(Clone)]
 pub struct Config {
@@ -443,20 +414,19 @@ impl Sim {
 
     fn spawn_ant(&mut self, caste: Caste, p: Vec2, layer: Layer) -> u32 {
         let id = self.fresh_id();
-        let (speed, hp, dmg) = match caste {
-            Caste::Queen => (1.0, QUEEN_HP, 0.0),
-            Caste::Worker => (WORKER_SPEED, WORKER_HP, WORKER_DMG),
-            Caste::Soldier => (SOLDIER_SPEED, SOLDIER_HP, SOLDIER_DMG),
-        };
+        let st = stats_for(caste);
         let ent = self.ecs.spawn((
-            Ant { caste, speed },
+            Ant {
+                caste,
+                speed: st.speed,
+            },
             Pos { p, layer },
             AntState::Idle,
             Combat {
-                hp,
-                max_hp: hp,
-                dmg,
-                atk_cd: ATK_CD,
+                hp: st.hp,
+                max_hp: st.hp,
+                dmg: st.dmg,
+                atk_cd: st.atk_cd,
                 atk_t: 0.0,
             },
             Carrying {
@@ -514,11 +484,11 @@ impl Sim {
         let home = (p.x.floor() as u32, p.y.floor() as u32);
         let ent = self.ecs.spawn((
             Predator {
-                hp: SPIDER_HP,
-                max_hp: SPIDER_HP,
-                dmg: SPIDER_DMG,
-                speed: SPIDER_SPEED,
-                atk_cd: SPIDER_CD,
+                hp: SPIDER.hp,
+                max_hp: SPIDER.hp,
+                dmg: SPIDER.dmg,
+                speed: SPIDER.speed,
+                atk_cd: SPIDER.atk_cd,
                 atk_t: 0.0,
                 home,
                 wander_t: 0.0,
@@ -1102,7 +1072,7 @@ impl Sim {
                     };
                     let d = tp.p - new_pos.p;
                     let dist = d.len();
-                    if dist > SPIDER_RANGE {
+                    if dist > SPIDER.range {
                         let step = pred.speed * DT;
                         if dist > step {
                             new_pos.p = new_pos.p + d * (step / dist);
@@ -1389,6 +1359,29 @@ impl Sim {
 
     pub fn tiles_dug(&self) -> u32 {
         self.dug_tiles
+    }
+
+    /// Canonical, platform-independent digest of the full sim state.
+    /// Native and WASM builds must produce byte-identical strings for the
+    /// same seed + command script — this is what the cross-platform
+    /// determinism test compares.
+    pub fn canonical_state(&self) -> String {
+        let mut s = format!(
+            "t={};food={};super={};dead={};dug={};next_id={}",
+            self.tick,
+            self.colony.food,
+            self.colony.food_super,
+            self.colony.dead,
+            self.dug_tiles,
+            self.next_id
+        );
+        for e in self.snapshot() {
+            s.push_str(&format!(
+                "|{},{},{},{},{:.4},{:.4},{:.4},{:.4},{:.4}",
+                e.id, e.kind, e.layer, e.state, e.x, e.y, e.extra, e.hp, e.aux
+            ));
+        }
+        s
     }
 
     pub fn snapshot(&self) -> Vec<EntitySnap> {

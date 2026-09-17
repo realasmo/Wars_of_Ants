@@ -165,6 +165,36 @@ try {
     }
   }
 
+  // --- cross-platform determinism: same replay on native and WASM ---
+  const replayRel = 'client/public/replays/determinism.json';
+  const nativeDump = await new Promise((resolve, reject) => {
+    const rustBin = `${process.env.HOME}/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin`;
+    const p = spawn(
+      'cargo',
+      ['run', '--example', 'determinism_dump', '--', path.resolve(ROOT, '..', replayRel)],
+      { cwd: path.resolve(ROOT, '..'), env: { ...process.env, PATH: `${rustBin}:${process.env.PATH}` } },
+    );
+    let out = '';
+    p.stdout.on('data', (d) => (out += d));
+    p.stderr.on('data', (d) => process.stderr.write(`[cargo] ${d}`));
+    p.on('close', (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`determinism_dump exited ${code}`))));
+  });
+
+  await page.goto(`${baseUrl}?replay=determinism`);
+  await page.waitForFunction(() => window.__woa !== undefined, null, { timeout: 30000 });
+  await page.evaluate(() => window.__woa.step(3000));
+  const wasmCanon = await page.evaluate(() => window.__woa.canon());
+  writeFileSync(path.join(OUT, 's07-wasm-canon.txt'), wasmCanon);
+  writeFileSync(path.join(OUT, 's07-native-canon.txt'), nativeDump);
+  const detOk = wasmCanon === nativeDump;
+  console.log('determinism:', JSON.stringify({ match: detOk, len: wasmCanon.length, nativeLen: nativeDump.length }));
+  if (!detOk) {
+    const at = [...wasmCanon].findIndex((c, i) => c !== nativeDump[i]);
+    failures.push(`native vs WASM canonical state differ at char ${at} (of ${nativeDump.length})`);
+  }
+  const badgeHidden = await page.evaluate(() => document.getElementById('replay-badge').classList.contains('hidden'));
+  if (!badgeHidden) failures.push('REPLAY badge still visible after replay finished');
+
   if (pageErrors.length > 0) failures.push(`page errors: ${pageErrors.slice(0, 5).join(' | ')}`);
   await browser.close();
 } finally {
