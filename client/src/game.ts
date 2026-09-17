@@ -77,9 +77,14 @@ export class Game {
   private handleClick(x: number, y: number, button: number): void {
     if (this.sim.dead || this.playerAnt === null) return;
     const layer = this.renderer.activeLayer;
+    const pick = this.pickEntity(x, y);
+    if (pick && pick.kind === 4) {
+      this.sim.attack(this.playerAnt, pick.id);
+      this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+      return;
+    }
     if (button === 0) {
-      const pick = this.pickEntity(x, y);
-      if (pick && pick.kind === 1) {
+      if (pick && (pick.kind === 1 || pick.kind === 5)) {
         this.playerAnt = pick.id;
       } else {
         this.sim.move(this.playerAnt, x, y);

@@ -21,6 +21,26 @@ pub const STARVE_TIME: f64 = 90.0;
 pub const START_FOOD: u32 = 5;
 pub const PILE_AMOUNT: u32 = 45;
 
+pub const WORKER_HP: f64 = 100.0;
+pub const WORKER_DMG: f64 = 8.0;
+pub const SOLDIER_HP: f64 = 130.0;
+pub const SOLDIER_DMG: f64 = 22.0;
+pub const SOLDIER_SPEED: f64 = 2.6;
+pub const QUEEN_HP: f64 = 150.0;
+pub const ATK_CD: f64 = 1.0;
+pub const ANT_RANGE: f64 = 0.9;
+
+pub const SPIDER_HP: f64 = 130.0;
+pub const SPIDER_DMG: f64 = 15.0;
+pub const SPIDER_CD: f64 = 1.2;
+pub const SPIDER_SPEED: f64 = 2.2;
+pub const SPIDER_AGGRO: f64 = 5.0;
+pub const SPIDER_RANGE: f64 = 0.8;
+pub const SPIDER_WANDER: f64 = 8.0;
+pub const SUPER_PER_SPIDER: u32 = 8;
+pub const SOLDIER_COST_GREEN: u32 = 3;
+pub const SOLDIER_COST_SUPER: u32 = 2;
+
 #[derive(Clone)]
 pub struct Config {
     pub width: u32,
@@ -28,6 +48,7 @@ pub struct Config {
     pub start_workers: u32,
     pub food_clusters: u32,
     pub max_ants: u32,
+    pub spiders: u32,
 }
 
 impl Default for Config {
@@ -38,6 +59,7 @@ impl Default for Config {
             start_workers: 3,
             food_clusters: 6,
             max_ants: 24,
+            spiders: 2,
         }
     }
 }
@@ -46,6 +68,7 @@ impl Default for Config {
 pub enum Command {
     Move { ant: u32, x: f64, y: f64 },
     Dig { ant: u32, tx: u32, ty: u32 },
+    Attack { ant: u32, target: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -57,10 +80,13 @@ pub struct EntitySnap {
     pub y: f64,
     pub state: u8,
     pub extra: f64,
+    pub hp: f64,
+    pub aux: f64,
 }
 
 pub struct Colony {
     pub food: u32,
+    pub food_super: u32,
     pub delivered: u32,
     pub eggs_laid: u32,
     pub dead: bool,
@@ -128,6 +154,7 @@ impl Sim {
             rng,
             colony: Colony {
                 food: START_FOOD,
+                food_super: 0,
                 delivered: 0,
                 eggs_laid: 0,
                 dead: false,
@@ -162,8 +189,18 @@ impl Sim {
                     (cx as i32 + sim.rng.irange(0, 5) as i32 - 2).clamp(1, w as i32 - 2) as u32;
                 let py =
                     (cy as i32 + sim.rng.irange(0, 5) as i32 - 2).clamp(1, h as i32 - 2) as u32;
-                sim.spawn_food(tile_center(px, py), PILE_AMOUNT);
+                sim.spawn_food(tile_center(px, py), PILE_AMOUNT, FoodKind::Green);
             }
+        }
+
+        for _ in 0..sim.config.spiders {
+            let dx = sim.rng.range(-1.0, 1.0);
+            let dy = sim.rng.range(-1.0, 1.0);
+            let len = (dx * dx + dy * dy).sqrt().max(0.001);
+            let dist = sim.rng.range(25.0, 45.0);
+            let sx = ((e as f64 + dx / len * dist) as i32).clamp(2, w as i32 - 3) as f64 + 0.5;
+            let sy = ((dy / len * dist) as i32).clamp(2, h as i32 - 3) as f64 + 0.5;
+            sim.spawn_spider(Vec2::new(sx, sy));
         }
         sim
     }
@@ -177,6 +214,9 @@ impl Sim {
         self.worker_ai();
         self.movement();
         self.digging();
+        self.combat();
+        self.predators();
+        self.cleanup_deaths();
         self.queen_system();
         self.eggs();
         self.cleanup();
@@ -228,6 +268,22 @@ impl Sim {
                 );
                 true
             }
+            Command::Attack { ant, target } => {
+                if !self.is_ant(ant) {
+                    return false;
+                }
+                let Some(&tent) = self.ids.get(&target) else {
+                    return false;
+                };
+                let attackable =
+                    self.ecs.get::<&Predator>(tent).is_ok() || self.ecs.get::<&Ant>(tent).is_ok();
+                if !attackable {
+                    return false;
+                }
+                self.set_job(ant, Job::Manual);
+                self.set_attack_after(ant, Some(target));
+                true
+            }
         }
     }
 
@@ -259,6 +315,14 @@ impl Sim {
         if let Some(&ent) = self.ids.get(&id) {
             if let Ok(mut q) = self.ecs.get::<&mut WorkerAi>(ent) {
                 q.retry = retry;
+            }
+        }
+    }
+
+    fn set_attack_after(&mut self, id: u32, target: Option<u32>) {
+        if let Some(&ent) = self.ids.get(&id) {
+            if let Ok(mut q) = self.ecs.get::<&mut WorkerAi>(ent) {
+                q.attack_after = target;
             }
         }
     }
@@ -370,20 +434,35 @@ impl Sim {
 
     fn spawn_ant(&mut self, caste: Caste, p: Vec2, layer: Layer) -> u32 {
         let id = self.fresh_id();
-        let speed = if caste == Caste::Queen {
-            1.0
-        } else {
-            WORKER_SPEED
+        let (speed, hp, dmg) = match caste {
+            Caste::Queen => (1.0, QUEEN_HP, 0.0),
+            Caste::Worker => (WORKER_SPEED, WORKER_HP, WORKER_DMG),
+            Caste::Soldier => (SOLDIER_SPEED, SOLDIER_HP, SOLDIER_DMG),
         };
         let ent = self.ecs.spawn((
             Ant { caste, speed },
             Pos { p, layer },
             AntState::Idle,
-            Carrying { food: 0 },
+            Combat {
+                hp,
+                max_hp: hp,
+                dmg,
+                atk_cd: ATK_CD,
+                atk_t: 0.0,
+            },
+            Carrying {
+                amount: 0,
+                kind: FoodKind::Green,
+            },
             WorkerAi {
-                job: Job::Idle,
+                job: if caste == Caste::Soldier {
+                    Job::Manual
+                } else {
+                    Job::Idle
+                },
                 retry: 0,
                 pending: None,
+                attack_after: None,
             },
         ));
         self.ids.insert(id, ent);
@@ -391,10 +470,10 @@ impl Sim {
         id
     }
 
-    fn spawn_food(&mut self, p: Vec2, amount: u32) -> u32 {
+    fn spawn_food(&mut self, p: Vec2, amount: u32, kind: FoodKind) -> u32 {
         let id = self.fresh_id();
         let ent = self.ecs.spawn((
-            Food { amount },
+            Food { amount, kind },
             Pos {
                 p,
                 layer: Layer::Surface,
@@ -404,16 +483,42 @@ impl Sim {
         id
     }
 
-    fn spawn_egg(&mut self, p: Vec2) -> u32 {
+    fn spawn_egg(&mut self, p: Vec2, caste: Caste) -> u32 {
         let id = self.fresh_id();
         let ent = self.ecs.spawn((
             Egg {
                 hatch: EGG_TIME,
                 total: EGG_TIME,
+                caste,
             },
             Pos {
                 p,
                 layer: Layer::Underground,
+            },
+        ));
+        self.ids.insert(id, ent);
+        id
+    }
+
+    fn spawn_spider(&mut self, p: Vec2) -> u32 {
+        let id = self.fresh_id();
+        let home = (p.x.floor() as u32, p.y.floor() as u32);
+        let ent = self.ecs.spawn((
+            Predator {
+                hp: SPIDER_HP,
+                max_hp: SPIDER_HP,
+                dmg: SPIDER_DMG,
+                speed: SPIDER_SPEED,
+                atk_cd: SPIDER_CD,
+                atk_t: 0.0,
+                home,
+                wander_t: 0.0,
+                dest: None,
+                target: None,
+            },
+            Pos {
+                p,
+                layer: Layer::Surface,
             },
         ));
         self.ids.insert(id, ent);
@@ -432,19 +537,20 @@ impl Sim {
 
     fn best_food(&self) -> Option<u32> {
         let entrance = self.world.entrance;
-        let mut best: Option<(u32, u32)> = None;
+        let mut best: Option<(u32, u32, u32)> = None;
         for &fid in &self.food_ids() {
             let ent = self.ids[&fid];
-            let tile = match self.ecs.get::<&Pos>(ent) {
-                Ok(q) => tile_of(q.p),
-                Err(_) => continue,
+            let (Ok(fp), Ok(ff)) = (self.ecs.get::<&Pos>(ent), self.ecs.get::<&Food>(ent)) else {
+                continue;
             };
-            let key = (manhattan(tile, entrance), fid);
+            let tile = tile_of(fp.p);
+            let super_first = if ff.kind == FoodKind::Super { 0 } else { 1 };
+            let key = (super_first, manhattan(tile, entrance), fid);
             if best.map(|b| key < b).unwrap_or(true) {
                 best = Some(key);
             }
         }
-        best.map(|(_, fid)| fid)
+        best.map(|(_, _, fid)| fid)
     }
 
     fn tile_occupied(&self, tile: (u32, u32), layer: Layer) -> bool {
@@ -477,7 +583,7 @@ impl Sim {
                 Some(&e) => e,
                 None => continue,
             };
-            let (pos, state, carrying, job, pending, retry) = {
+            let (pos, state, carrying, job, pending, retry, attack_after) = {
                 let mut qo = match self
                     .ecs
                     .query_one::<(&Pos, &AntState, &Carrying, &WorkerAi)>(ent)
@@ -492,10 +598,11 @@ impl Sim {
                 (
                     *q.0,
                     (*q.1).clone(),
-                    q.2.food,
+                    *q.2,
                     q.3.job,
                     q.3.pending,
                     q.3.retry,
+                    q.3.attack_after,
                 )
             };
             if !matches!(state, AntState::Idle) {
@@ -503,6 +610,31 @@ impl Sim {
             }
             if retry > 0 {
                 self.set_retry(id, retry - 1);
+                continue;
+            }
+            if let Some(tid) = attack_after {
+                let tinfo = self.ids.get(&tid).and_then(|&tent| {
+                    self.ecs
+                        .get::<&Pos>(tent)
+                        .ok()
+                        .map(|q| (q.layer, tile_of(q.p)))
+                });
+                match tinfo {
+                    Some((Layer::Surface, _ttile)) if pos.layer == Layer::Surface => {
+                        self.set_pending(id, None);
+                        self.set_attack_after(id, None);
+                        self.set_state(id, AntState::Fighting { target: tid });
+                    }
+                    Some((tlayer, ttile)) => {
+                        if !self.route(id, tlayer, ttile) {
+                            self.set_attack_after(id, None);
+                            self.set_retry(id, 60);
+                        }
+                    }
+                    None => {
+                        self.set_attack_after(id, None);
+                    }
+                }
                 continue;
             }
             if let Some((layer, tile)) = pending {
@@ -515,7 +647,7 @@ impl Sim {
             match job {
                 Job::Manual => {}
                 Job::Idle => {
-                    if carrying > 0 {
+                    if carrying.amount > 0 {
                         self.set_job(id, Job::Deliver);
                     } else if let Some(t) = self.colony.dig_queue.pop() {
                         self.set_job(id, Job::DigTile(t.0, t.1));
@@ -561,12 +693,15 @@ impl Sim {
                     if pos.layer == Layer::Surface {
                         if tile_of(pos.p) == ftile {
                             if amount > 0 {
+                                let mut kind = FoodKind::Green;
                                 if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
                                     q.amount -= 1;
+                                    kind = q.kind;
                                 }
                                 if let Some(&aent) = self.ids.get(&id) {
                                     if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
-                                        q.food = 1;
+                                        q.amount = 1;
+                                        q.kind = kind;
                                     }
                                 }
                                 self.set_job(id, Job::Deliver);
@@ -582,18 +717,21 @@ impl Sim {
                     }
                 }
                 Job::Deliver => {
-                    if carrying == 0 {
+                    if carrying.amount == 0 {
                         self.set_job(id, Job::Idle);
                         continue;
                     }
                     let qtile = self.queen_tile();
                     if pos.layer == Layer::Underground {
                         if chebyshev(tile_of(pos.p), qtile) <= 1 {
-                            self.colony.food += 1;
+                            match carrying.kind {
+                                FoodKind::Green => self.colony.food += 1,
+                                FoodKind::Super => self.colony.food_super += 1,
+                            }
                             self.colony.delivered += 1;
                             if let Some(&aent) = self.ids.get(&id) {
                                 if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
-                                    q.food = 0;
+                                    q.amount = 0;
                                 }
                             }
                             self.set_job(id, Job::Idle);
@@ -768,6 +906,255 @@ impl Sim {
         }
     }
 
+    fn combat(&mut self) {
+        let ids = self.ant_ids();
+        for id in ids {
+            let ent = match self.ids.get(&id) {
+                Some(&e) => e,
+                None => continue,
+            };
+            let (pos, state, speed, dmg, atk_cd, atk_t) = {
+                let mut qo = match self.ecs.query_one::<(&Pos, &AntState, &Ant, &Combat)>(ent) {
+                    Ok(q) => q,
+                    Err(_) => continue,
+                };
+                let q = match qo.get() {
+                    Some(q) => q,
+                    None => continue,
+                };
+                (*q.0, q.1.clone(), q.2.speed, q.3.dmg, q.3.atk_cd, q.3.atk_t)
+            };
+            let target = match state {
+                AntState::Fighting { target } => target,
+                _ => continue,
+            };
+            let Some(&tent) = self.ids.get(&target) else {
+                self.set_state(id, AntState::Idle);
+                self.set_job(id, Job::Idle);
+                continue;
+            };
+            let tpos = self.ecs.get::<&Pos>(tent).map(|q| *q);
+            let tpos = match tpos {
+                Ok(t) => t,
+                Err(_) => {
+                    self.set_state(id, AntState::Idle);
+                    self.set_job(id, Job::Idle);
+                    continue;
+                }
+            };
+            if tpos.layer != pos.layer {
+                self.set_state(id, AntState::Idle);
+                continue;
+            }
+            let mut new_pos = pos;
+            let mut new_t = atk_t;
+            let d = tpos.p - new_pos.p;
+            let dist = d.len();
+            if dist > ANT_RANGE {
+                let step = speed * DT;
+                if dist > step {
+                    new_pos.p = new_pos.p + d * (step / dist);
+                } else {
+                    new_pos.p = tpos.p;
+                }
+                new_t = (new_t - DT).max(0.0);
+            } else {
+                new_t -= DT;
+                if new_t <= 0.0 {
+                    new_t = atk_cd;
+                    if let Ok(mut c) = self.ecs.get::<&mut Combat>(tent) {
+                        c.hp -= dmg;
+                    }
+                    if let Ok(mut p) = self.ecs.get::<&mut Predator>(tent) {
+                        p.hp -= dmg;
+                    }
+                }
+            }
+            if let Some(q) = self
+                .ecs
+                .query_one::<(&mut Pos, &mut Combat)>(ent)
+                .unwrap()
+                .get()
+            {
+                q.0.p = new_pos.p;
+                q.1.atk_t = new_t;
+            }
+        }
+    }
+
+    fn predators(&mut self) {
+        let pids = self
+            .ids
+            .iter()
+            .filter_map(|(&id, &ent)| self.ecs.get::<&Predator>(ent).is_ok().then_some(id))
+            .collect::<Vec<u32>>();
+        for pid in pids {
+            let ent = match self.ids.get(&pid) {
+                Some(&e) => e,
+                None => continue,
+            };
+            let (mut pred, pos) = {
+                let mut qo = match self.ecs.query_one::<(&mut Predator, &Pos)>(ent) {
+                    Ok(q) => q,
+                    Err(_) => continue,
+                };
+                let q = match qo.get() {
+                    Some(q) => q,
+                    None => continue,
+                };
+                (*q.0, *q.1)
+            };
+            if let Some(t) = pred.target {
+                let valid = self
+                    .ids
+                    .get(&t)
+                    .and_then(|&te| self.ecs.get::<&Pos>(te).ok())
+                    .map(|p| p.layer == Layer::Surface)
+                    .unwrap_or(false);
+                if !valid {
+                    pred.target = None;
+                }
+            }
+            if pred.target.is_none() {
+                let mut best: Option<(f64, u32)> = None;
+                for aid in self.ant_ids() {
+                    let aent = self.ids[&aid];
+                    let Ok(ap) = self.ecs.get::<&Pos>(aent) else {
+                        continue;
+                    };
+                    if ap.layer != Layer::Surface {
+                        continue;
+                    }
+                    let d = (ap.p - pos.p).len();
+                    if d <= SPIDER_AGGRO && best.map(|(bd, _)| d < bd).unwrap_or(true) {
+                        best = Some((d, aid));
+                    }
+                }
+                pred.target = best.map(|(_, id)| id);
+            }
+            let mut new_pos = pos;
+            match pred.target {
+                Some(t) => {
+                    let tent = self.ids[&t];
+                    let tp = match self.ecs.get::<&Pos>(tent) {
+                        Ok(q) => *q,
+                        Err(_) => {
+                            continue;
+                        }
+                    };
+                    let d = tp.p - new_pos.p;
+                    let dist = d.len();
+                    if dist > SPIDER_RANGE {
+                        let step = pred.speed * DT;
+                        if dist > step {
+                            new_pos.p = new_pos.p + d * (step / dist);
+                        } else {
+                            new_pos.p = tp.p;
+                        }
+                    } else {
+                        pred.atk_t -= DT;
+                        if pred.atk_t <= 0.0 {
+                            pred.atk_t = pred.atk_cd;
+                            if let Ok(mut c) = self.ecs.get::<&mut Combat>(tent) {
+                                c.hp -= pred.dmg;
+                            }
+                        }
+                    }
+                }
+                None => {
+                    pred.wander_t -= DT;
+                    let need_dest = pred
+                        .dest
+                        .map(|d| {
+                            (d.0 - new_pos.p.x) * (d.0 - new_pos.p.x)
+                                + (d.1 - new_pos.p.y) * (d.1 - new_pos.p.y)
+                                < 0.05
+                        })
+                        .unwrap_or(true);
+                    if need_dest || pred.wander_t <= 0.0 {
+                        let dx = self.rng.range(-1.0, 1.0);
+                        let dy = self.rng.range(-1.0, 1.0);
+                        let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                        let dist = self.rng.range(0.0, SPIDER_WANDER);
+                        let hx = pred.home.0 as f64 + 0.5 + dx / len * dist;
+                        let hy = pred.home.1 as f64 + 0.5 + dy / len * dist;
+                        pred.dest = Some((
+                            hx.clamp(1.0, self.config.width as f64 - 2.0),
+                            hy.clamp(1.0, self.config.height as f64 - 2.0),
+                        ));
+                        pred.wander_t = self.rng.range(3.0, 6.0);
+                    }
+                    if let Some((dx_, dy_)) = pred.dest {
+                        let d = Vec2::new(dx_, dy_) - new_pos.p;
+                        let dist = d.len();
+                        let step = pred.speed * DT;
+                        if dist > step {
+                            new_pos.p = new_pos.p + d * (step / dist);
+                        } else {
+                            new_pos.p = Vec2::new(dx_, dy_);
+                        }
+                    }
+                }
+            }
+            if let Ok(mut q) = self.ecs.query_one::<(&mut Predator, &mut Pos)>(ent) {
+                if let Some(q) = q.get() {
+                    *q.0 = pred;
+                    q.1.p = new_pos.p;
+                }
+            }
+        }
+    }
+
+    fn cleanup_deaths(&mut self) {
+        let dead_ants: Vec<u32> = self
+            .ant_ids()
+            .into_iter()
+            .filter(|&id| {
+                self.ids
+                    .get(&id)
+                    .and_then(|&e| self.ecs.get::<&Combat>(e).ok())
+                    .map(|c| c.hp <= 0.0)
+                    .unwrap_or(false)
+            })
+            .collect();
+        for id in dead_ants {
+            self.kill(id);
+        }
+        let dead_predators: Vec<u32> = self
+            .ids
+            .iter()
+            .filter_map(|(&id, &ent)| {
+                self.ecs
+                    .get::<&Predator>(ent)
+                    .ok()
+                    .filter(|p| p.hp <= 0.0)
+                    .map(|_| id)
+            })
+            .collect();
+        for pid in dead_predators {
+            let ent = self.ids[&pid];
+            let p = self.ecs.get::<&Pos>(ent).map(|q| q.p).unwrap_or_default();
+            self.kill(pid);
+            self.spawn_food(p, SUPER_PER_SPIDER, FoodKind::Super);
+        }
+    }
+
+    fn caste_counts(&self) -> (u32, u32) {
+        let mut workers = 0;
+        let mut soldiers = 0;
+        for id in self.ant_ids() {
+            let ent = self.ids[&id];
+            if let Ok(q) = self.ecs.get::<&Ant>(ent) {
+                match q.caste {
+                    Caste::Worker => workers += 1,
+                    Caste::Soldier => soldiers += 1,
+                    Caste::Queen => {}
+                }
+            }
+        }
+        (workers, soldiers)
+    }
+
     fn queen_system(&mut self) {
         if self.colony.dead {
             return;
@@ -790,21 +1177,38 @@ impl Sim {
                 return;
             }
         }
-        if self.colony.lay_cooldown <= 0.0
-            && self.colony.food >= EGG_COST
-            && self.colony.ant_count < self.config.max_ants
-        {
-            match self.free_egg_tile() {
-                Some(tile) => {
-                    self.colony.food -= EGG_COST;
-                    self.colony.eggs_laid += 1;
-                    self.colony.lay_cooldown = LAY_COOLDOWN;
-                    self.spawn_egg(tile_center(tile.0, tile.1));
-                }
-                None => {
-                    if self.colony.dig_queue.len() < 3 {
-                        if let Some(t) = self.pick_dig_target() {
-                            self.colony.dig_queue.push(t);
+        if self.colony.lay_cooldown <= 0.0 && self.colony.ant_count < self.config.max_ants {
+            let (workers, soldiers) = self.caste_counts();
+            let want = if self.colony.food >= SOLDIER_COST_GREEN
+                && self.colony.food_super >= SOLDIER_COST_SUPER
+                && soldiers * 2 < workers
+            {
+                Some(Caste::Soldier)
+            } else if self.colony.food >= EGG_COST {
+                Some(Caste::Worker)
+            } else {
+                None
+            };
+            if let Some(caste) = want {
+                match self.free_egg_tile() {
+                    Some(tile) => {
+                        match caste {
+                            Caste::Soldier => {
+                                self.colony.food -= SOLDIER_COST_GREEN;
+                                self.colony.food_super -= SOLDIER_COST_SUPER;
+                            }
+                            Caste::Worker => self.colony.food -= EGG_COST,
+                            Caste::Queen => {}
+                        }
+                        self.colony.eggs_laid += 1;
+                        self.colony.lay_cooldown = LAY_COOLDOWN;
+                        self.spawn_egg(tile_center(tile.0, tile.1), caste);
+                    }
+                    None => {
+                        if self.colony.dig_queue.len() < 3 {
+                            if let Some(t) = self.pick_dig_target() {
+                                self.colony.dig_queue.push(t);
+                            }
                         }
                     }
                 }
@@ -888,15 +1292,15 @@ impl Sim {
                 Some(&e) => e,
                 None => continue,
             };
-            let (hatch, pos) = match self.ecs.query_one::<(&Egg, &Pos)>(ent).unwrap().get() {
-                Some(q) => (q.0.hatch, *q.1),
+            let (hatch, caste, pos) = match self.ecs.query_one::<(&Egg, &Pos)>(ent).unwrap().get() {
+                Some(q) => (q.0.hatch, q.0.caste, *q.1),
                 None => continue,
             };
             let hatch = hatch - DT;
             if hatch <= 0.0 && self.colony.ant_count < self.config.max_ants {
                 let p = pos.p;
                 self.kill(id);
-                self.spawn_ant(Caste::Worker, p, Layer::Underground);
+                self.spawn_ant(caste, p, Layer::Underground);
             } else if let Ok(mut q) = self.ecs.get::<&mut Egg>(ent) {
                 q.hatch = hatch.max(0.0);
             }
@@ -935,22 +1339,27 @@ impl Sim {
             rev.insert(ent, id);
         }
         let mut v = Vec::new();
-        for (ent, (ant, pos, state, carry)) in self
+        for (ent, (ant, pos, state, carry, combat)) in self
             .ecs
-            .query::<(&Ant, &Pos, &AntState, &Carrying)>()
+            .query::<(&Ant, &Pos, &AntState, &Carrying, &Combat)>()
             .iter()
         {
             let Some(&id) = rev.get(&ent) else { continue };
-            let kind = if ant.caste == Caste::Queen { 0 } else { 1 };
+            let kind = match ant.caste {
+                Caste::Queen => 0,
+                Caste::Worker => 1,
+                Caste::Soldier => 5,
+            };
             let state = match state {
                 AntState::Idle => 0u8,
                 AntState::Moving { .. } => 1,
                 AntState::Digging { .. } => 2,
+                AntState::Fighting { .. } => 3,
             };
             let extra = if ant.caste == Caste::Queen {
                 self.colony.starve_t / STARVE_TIME
             } else {
-                carry.food as f64
+                carry.amount as f64
             };
             v.push(EntitySnap {
                 id,
@@ -960,6 +1369,8 @@ impl Sim {
                 y: pos.p.y,
                 state,
                 extra,
+                hp: (combat.hp / combat.max_hp).clamp(0.0, 1.0),
+                aux: carry.kind as u8 as f64,
             });
         }
         for (ent, (food, pos)) in self.ecs.query::<(&Food, &Pos)>().iter() {
@@ -972,6 +1383,8 @@ impl Sim {
                 y: pos.p.y,
                 state: 0,
                 extra: food.amount as f64,
+                hp: 1.0,
+                aux: food.kind as u8 as f64,
             });
         }
         for (ent, (egg, pos)) in self.ecs.query::<(&Egg, &Pos)>().iter() {
@@ -984,6 +1397,26 @@ impl Sim {
                 y: pos.p.y,
                 state: 0,
                 extra: egg.hatch / egg.total,
+                hp: 1.0,
+                aux: if egg.caste == Caste::Soldier {
+                    1.0
+                } else {
+                    0.0
+                },
+            });
+        }
+        for (ent, (pred, pos)) in self.ecs.query::<(&Predator, &Pos)>().iter() {
+            let Some(&id) = rev.get(&ent) else { continue };
+            v.push(EntitySnap {
+                id,
+                kind: 4,
+                layer: pos.layer as u8,
+                x: pos.p.x,
+                y: pos.p.y,
+                state: if pred.target.is_some() { 1 } else { 0 },
+                extra: pred.hp / pred.max_hp,
+                hp: pred.hp / pred.max_hp,
+                aux: 0.0,
             });
         }
         v.sort_by_key(|s| s.id);

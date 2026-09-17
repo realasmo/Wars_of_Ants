@@ -72,7 +72,11 @@ Socket.IO: io("//" + address + ":" + port, { query: { userToken, gameSocketType:
 Binary snapshot synchronization (ArrayBuffer + DataView): timestamp, entity id, x, y, z, rotation — no full JSON per tick.
 
 Ideas / Changes / Improvements over the original
-(to be filled in)
+Phase 3 wave 1 decisions (confirmed):
+- Combat: keep original-style melee (HP/dmg/cooldown/speed, click to lock on).
+- Content wave 1: spiders (surface predators) drop Super Food; Soldier caste costs 2 Super + 3 Green, produced automatically (cap: 1 soldier per 2 workers).
+- Fog of war: in, client-side for singleplayer (10 tiles surface vision / 5 underground); server-authoritative version deferred to multiplayer phase.
+(to be filled in — further notes and decisions go here, then get promoted into README.md once confirmed)
 
 Target architecture
 Frontend: TypeScript + PixiJS (WebGL) + WebSocket + WebAudio + HTML/CSS.

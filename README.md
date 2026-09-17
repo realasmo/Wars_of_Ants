@@ -38,6 +38,13 @@ AntWar.io is a great proof of concept, but it is not perfect and no longer maint
 - All further content is deliberately deferred and decided through Phase 3 playtesting: additional castes (Nanitic, Soldier, Major, Acid Ant, Alate), the fighting system, food types and costs, predators, pheromones.
 - Goal of the test slice: prove the architecture end-to-end, not to ship content.
 
+### Combat & content (confirmed, Phase 3 wave 1)
+- **Combat model:** original-style melee — HP / damage / attack cooldown / speed per unit; click an enemy to lock on and auto-attack in range.
+- **Stats (wave 1):** Worker 100 HP / 8 dmg / 1.0s CD / speed 3.0 · Soldier 130 / 22 / 1.0s / 2.6 · Queen 150 HP · Spider 130 / 15 / 1.2s / 2.2 (aggro 5 tiles, wanders near lair, surface only).
+- **Predators:** spiders (2 per map) wander the surface, attack ants in aggro range.
+- **Super Food (blue):** dropped by killed spiders (8 units); Soldier eggs cost 2 Super + 3 Green; soldiers produced automatically while Super is available, capped at 1 soldier per 2 workers.
+- **Fog of war:** yes — vision radius ~10 tiles on surface, ~5 underground; rendered client-side for now (moves server-side for multiplayer later).
+
 ### Roadmap (confirmed)
 0. ✅ **Repo foundation** — monorepo (`core/`, `server/`, `client/`, `docs/`), toolchains (cargo + wasm-pack + Vite), CI, initial push.
 1. ✅ **Core simulation** (Rust, headless) — deterministic fixed-timestep ticks (20 tps), hecs ECS, seeded PCG RNG, two-layer tilemap + digging, A* pathfinding (dig-aware costs), Queen/Worker economy (gather → feed → eggs → hatch), starvation/queen-death loss condition, command API (`Move`, `Dig`), WASM bindings, headless sim tests (determinism, colony growth, starvation, dig).
@@ -57,11 +64,12 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 
 The following decisions are **not yet made**. `docs/BASED-ON.md` describes the original game as a reference only — nothing there is a commitment.
 
-- [ ] Fighting system design (melee/ranged model, damage reaction, panic, targeting)
-- [ ] Ant castes beyond Queen/Worker (Nanitic, Soldier, Major, Acid Ant, Alate) — which to keep, their stats and costs
-- [ ] Food types and economy details (Green/Meat/Super/Red — keep as-is or change?)
+- [x] Fighting system design — **decided: original-style melee** (see Combat & content)
+- [ ] Ant castes beyond Queen/Worker — Soldier added in wave 1; Nanitic, Major, Acid Ant, Alate still undecided
+- [ ] Food types and economy details — Green + Super in wave 1; Meat and Red Food undecided
 - [ ] Whether to re-enable the pheromone system the original disabled
-- [ ] Fog of war, day/night, weather parameters (radii, cycle lengths)
+- [x] Fog of war — **decided: yes, client-side in wave 1** (radii: 10 surface / 5 underground); day/night and weather parameters still undecided
+- [ ] Day/night cycle and weather parameters
 - [ ] Modes to support beyond singleplayer sandbox and co-op multiplayer (teams, private games, PvP)
 
 > Notes and decisions go into the "Ideas / Changes / Improvements over the original" section of `docs/BASED-ON.md` and, once confirmed, get promoted into this README.

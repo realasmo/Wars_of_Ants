@@ -7,9 +7,20 @@ function el(id: string): HTMLElement {
 export class Hud {
   update(sim: Sim, playerAnt: number | null, layer: number): void {
     const snap = playerAnt !== null ? sim.cur.get(playerAnt) : undefined;
-    const state = snap ? (snap.state === 1 ? 'moving' : snap.state === 2 ? 'digging' : 'idle') : '';
+    const state = snap
+      ? snap.state === 1
+        ? 'moving'
+        : snap.state === 2
+          ? 'digging'
+          : snap.state === 3
+            ? 'fighting'
+            : 'idle'
+      : '';
+    const counts = sim.casteCounts();
     el('stat-food').textContent = String(sim.food);
-    el('stat-ants').textContent = String(sim.antsAlive());
+    el('stat-super').textContent = String(sim.superFood());
+    el('stat-ants').textContent =
+      counts.soldiers > 0 ? `${counts.workers} +${counts.soldiers}S` : String(counts.workers);
     el('stat-eggs').textContent = String(sim.eggCount());
     el('stat-dug').textContent = String(sim.tilesDug());
     const secs = Math.floor(sim.tickCount / 20);

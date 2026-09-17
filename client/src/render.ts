@@ -17,12 +17,15 @@ const UNDER_COLORS: Record<number, number> = {
   4: 0x3a3a42,
 };
 
+const VISION_RADIUS = [10, 5];
 const BASE_PX = 30;
+const FOG_COLOR = 0x060504;
 
 interface EntityGfx {
   g: Graphics;
   kind: number;
   carrying: boolean;
+  hpBucket: number;
 }
 
 export class Renderer {
@@ -33,9 +36,11 @@ export class Renderer {
   private entities = new Container();
   private sprites = new Map<number, EntityGfx>();
   private ring = new Graphics();
+  private fog = new Graphics();
   private sim: Sim;
   cam = { x: 48, y: 8, zoom: 1 };
   activeLayer = 1;
+  private fogKey = '';
 
   private constructor(sim: Sim, app: Application) {
     this.sim = sim;
@@ -53,7 +58,7 @@ export class Renderer {
     const r = new Renderer(sim, app);
     host.appendChild(app.canvas);
     app.stage.addChild(r.world);
-    r.world.addChild(r.layerC[0], r.layerC[1], r.entities, r.ring);
+    r.world.addChild(r.layerC[0], r.layerC[1], r.entities, r.ring, r.fog);
     r.layerC[0].addChild(r.tileG[0]);
     r.layerC[1].addChild(r.tileG[1]);
     window.addEventListener('resize', () => {
@@ -75,6 +80,7 @@ export class Renderer {
     this.layerC[1].visible = layer === 1;
     this.drawTiles(layer);
     this.sim.consumeDirty(layer);
+    this.fogKey = '';
   }
 
   toggleLayer(): void {
@@ -148,6 +154,25 @@ export class Renderer {
     this.world.position.set(screen.width / 2 - this.cam.x * s, screen.height / 2 - this.cam.y * s);
   }
 
+  private colonyAnts(): Snap[] {
+    const out: Snap[] = [];
+    for (const s of this.sim.cur.values()) {
+      if (s.kind === 0 || s.kind === 1 || s.kind === 5) out.push(s);
+    }
+    return out;
+  }
+
+  private visibleAt(x: number, y: number, ants: Snap[], layer: number): boolean {
+    const r = VISION_RADIUS[layer];
+    const r2 = r * r;
+    for (const a of ants) {
+      const dx = a.x - x;
+      const dy = a.y - y;
+      if (dx * dx + dy * dy <= r2) return true;
+    }
+    return false;
+  }
+
   private drawEntity(g: Graphics, s: Snap): void {
     g.clear();
     if (s.kind === 0) {
@@ -156,12 +181,34 @@ export class Renderer {
     } else if (s.kind === 1) {
       g.ellipse(0, 0, 0.34, 0.24).fill(0x9c6b3c);
       g.circle(0, -0.26, 0.14).fill(0x6e4826);
-      if (s.extra > 0.5) g.circle(0.2, 0.05, 0.13).fill(0x3fa34d);
+      if (s.extra > 0.5) {
+        g.circle(0.2, 0.05, 0.13).fill(s.aux > 0.5 ? 0x4a7fd9 : 0x3fa34d);
+      }
+    } else if (s.kind === 5) {
+      g.ellipse(0, 0, 0.4, 0.3).fill(0x3d2b1f);
+      g.circle(0, -0.32, 0.18).fill(0x7a2a2a);
+      if (s.extra > 0.5) {
+        g.circle(0.24, 0.06, 0.14).fill(s.aux > 0.5 ? 0x4a7fd9 : 0x3fa34d);
+      }
     } else if (s.kind === 2) {
       const r = 0.18 + 0.14 * Math.min(1, s.extra / 45);
-      g.circle(0, 0, r).fill(0x3fa34d);
+      g.circle(0, 0, r).fill(s.aux > 0.5 ? 0x4a7fd9 : 0x3fa34d);
     } else if (s.kind === 3) {
-      g.ellipse(0, 0, 0.16, 0.24).fill(0xe8dcc8);
+      const soldier = s.aux > 0.5;
+      g.ellipse(0, 0, soldier ? 0.19 : 0.16, soldier ? 0.28 : 0.24).fill(soldier ? 0xbfd0e8 : 0xe8dcc8);
+    } else if (s.kind === 4) {
+      g.moveTo(-0.35, -0.1).lineTo(-0.85, -0.4).stroke({ width: 0.07, color: 0x23232e });
+      g.moveTo(-0.32, 0.12).lineTo(-0.8, 0.45).stroke({ width: 0.07, color: 0x23232e });
+      g.moveTo(0.35, -0.1).lineTo(0.85, -0.4).stroke({ width: 0.07, color: 0x23232e });
+      g.moveTo(0.32, 0.12).lineTo(0.8, 0.45).stroke({ width: 0.07, color: 0x23232e });
+      g.ellipse(0, 0.08, 0.42, 0.32).fill(0x14141c);
+      g.circle(0, -0.28, 0.22).fill(0x1d1d28);
+      g.circle(-0.08, -0.32, 0.05).fill(0xb03a3a);
+      g.circle(0.08, -0.32, 0.05).fill(0xb03a3a);
+    }
+    if (s.hp < 0.98 && s.kind !== 2 && s.kind !== 3) {
+      g.rect(-0.4, -0.62, 0.8, 0.1).fill(0x30100e);
+      g.rect(-0.4, -0.62, 0.8 * Math.max(0, s.hp), 0.1).fill(0x3fbf4f);
     }
   }
 
@@ -173,23 +220,30 @@ export class Renderer {
         this.sprites.delete(id);
       }
     }
+    const colony = this.colonyAnts();
+    const layer = this.activeLayer;
     for (const s of this.sim.cur.values()) {
       let e = this.sprites.get(s.id);
       if (!e) {
         const g = new Graphics();
-        e = { g, kind: -1, carrying: false };
+        e = { g, kind: -1, carrying: false, hpBucket: -1 };
         this.sprites.set(s.id, e);
         this.entities.addChild(g);
       }
-      if (e.kind !== s.kind || e.carrying !== s.extra > 0.5) {
+      const carrying = s.extra > 0.5;
+      const hpBucket = Math.floor(s.hp * 8);
+      if (e.kind !== s.kind || e.carrying !== carrying || e.hpBucket !== hpBucket) {
         e.kind = s.kind;
-        e.carrying = s.extra > 0.5;
+        e.carrying = carrying;
+        e.hpBucket = hpBucket;
         this.drawEntity(e.g, s);
       }
       const p = this.sim.prev.get(s.id) ?? s;
       const t = Math.min(1, Math.max(0, alpha));
       e.g.position.set(p.x + (s.x - p.x) * t, p.y + (s.y - p.y) * t);
-      e.g.visible = s.layer === this.activeLayer;
+      const own = s.kind === 0 || s.kind === 1 || s.kind === 5;
+      e.g.visible =
+        s.layer === layer && (own || this.visibleAt(s.x, s.y, colony, layer));
       if (s.kind === 1 && s.state === 2) {
         e.g.rotation = Math.sin(s.x * 7 + s.y * 3) * 0.4;
       } else {
@@ -205,6 +259,30 @@ export class Renderer {
         this.ring
           .circle(p.x + (s.x - p.x) * t, p.y + (s.y - p.y) * t, 0.5)
           .stroke({ width: 0.06, color: 0xd9c27a });
+      }
+    }
+    this.updateFog(colony);
+  }
+
+  private updateFog(colony: Snap[]): void {
+    const layer = this.activeLayer;
+    const screen = this.app.renderer.screen;
+    const s = this.scale();
+    const halfW = screen.width / 2 / s;
+    const halfH = screen.height / 2 / s;
+    const x0 = Math.max(0, Math.floor(this.cam.x - halfW) - 1);
+    const x1 = Math.min(this.sim.w - 1, Math.ceil(this.cam.x + halfW) + 1);
+    const y0 = Math.max(0, Math.floor(this.cam.y - halfH) - 1);
+    const y1 = Math.min(this.sim.h - 1, Math.ceil(this.cam.y + halfH) + 1);
+    const key = `${layer}|${x0}|${x1}|${y0}|${y1}|${this.sim.tickCount}|${colony.length}`;
+    if (key === this.fogKey) return;
+    this.fogKey = key;
+    this.fog.clear();
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        if (!this.visibleAt(x + 0.5, y + 0.5, colony, layer)) {
+          this.fog.rect(x, y, 1, 1).fill({ color: FOG_COLOR, alpha: 0.82 });
+        }
       }
     }
   }
@@ -223,5 +301,6 @@ export class Renderer {
     this.cam.y = sim.entrance[1] + 3;
     this.cam.zoom = 1;
     this.applyCamera();
+    this.fogKey = '';
   }
 }

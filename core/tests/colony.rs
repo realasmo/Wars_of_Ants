@@ -72,6 +72,45 @@ fn nest_expands_when_brood_space_runs_out() {
 }
 
 #[test]
+fn spider_dies_to_swarm_and_soldier_is_bred() {
+    let cfg = Config {
+        spiders: 1,
+        start_workers: 8,
+        food_clusters: 4,
+        ..Config::default()
+    };
+    let mut s = Sim::new(23, cfg);
+    let spider = s
+        .snapshot()
+        .iter()
+        .find(|e| e.kind == 4)
+        .expect("spider spawned")
+        .id;
+    let mut soldier_seen = false;
+    for i in 0..12_000 {
+        if i % 50 == 0 {
+            for e in s.snapshot() {
+                if e.kind == 1 {
+                    s.issue(Command::Attack {
+                        ant: e.id,
+                        target: spider,
+                    });
+                }
+            }
+        }
+        s.tick();
+        if s.snapshot().iter().any(|e| e.kind == 5) {
+            soldier_seen = true;
+        }
+    }
+    assert!(
+        !s.snapshot().iter().any(|e| e.id == spider),
+        "spider should be dead"
+    );
+    assert!(soldier_seen, "a soldier should have been bred");
+}
+
+#[test]
 fn dig_command_digs_tile() {
     let mut s = Sim::new(1, Config::default());
     let e = s.world.entrance.0;

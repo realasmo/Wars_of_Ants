@@ -8,6 +8,8 @@ export interface Snap {
   y: number;
   state: number;
   extra: number;
+  hp: number;
+  aux: number;
 }
 
 export const TPS = 20;
@@ -58,6 +60,14 @@ export class Sim {
     return this.sim.cmd_dig(id, tx, ty);
   }
 
+  attack(id: number, target: number): boolean {
+    return this.sim.cmd_attack(id, target);
+  }
+
+  superFood(): number {
+    return this.sim.food_super();
+  }
+
   tileAt(layer: number, x: number, y: number): number {
     if (x < 0 || y < 0 || x >= this.w || y >= this.h) return 4;
     return (this.tilesCache[layer] as Uint8Array)[y * this.w + x];
@@ -75,8 +85,18 @@ export class Sim {
 
   workers(): number[] {
     const out: number[] = [];
-    for (const s of this.cur.values()) if (s.kind === 1) out.push(s.id);
+    for (const s of this.cur.values()) if (s.kind === 1 || s.kind === 5) out.push(s.id);
     return out.sort((a, b) => a - b);
+  }
+
+  casteCounts(): { workers: number; soldiers: number } {
+    let workers = 0;
+    let soldiers = 0;
+    for (const s of this.cur.values()) {
+      if (s.kind === 1) workers++;
+      else if (s.kind === 5) soldiers++;
+    }
+    return { workers, soldiers };
   }
 
   queenId(): number | null {
@@ -124,7 +144,7 @@ export class Sim {
     const cur = new Map<number, Snap>();
     const n = raw[3];
     for (let i = 0; i < n; i++) {
-      const o = 4 + i * 7;
+      const o = 4 + i * 9;
       const s: Snap = {
         id: raw[o],
         kind: raw[o + 1],
@@ -133,6 +153,8 @@ export class Sim {
         y: raw[o + 4],
         state: raw[o + 5],
         extra: raw[o + 6],
+        hp: raw[o + 7],
+        aux: raw[o + 8],
       };
       if (!prev.has(s.id)) prev.set(s.id, s);
       cur.set(s.id, s);

@@ -53,12 +53,20 @@ impl WoaSim {
         self.inner.issue(Command::Dig { ant, tx, ty })
     }
 
+    pub fn cmd_attack(&mut self, ant: u32, target: u32) -> bool {
+        self.inner.issue(Command::Attack { ant, target })
+    }
+
     pub fn colony_dead(&self) -> bool {
         self.inner.colony.dead
     }
 
     pub fn food_store(&self) -> u32 {
         self.inner.colony.food
+    }
+
+    pub fn food_super(&self) -> u32 {
+        self.inner.colony.food_super
     }
 
     pub fn ants_alive(&self) -> u32 {
@@ -88,7 +96,7 @@ impl WoaSim {
 
     pub fn snapshot(&self) -> Vec<f64> {
         let snaps = self.inner.snapshot();
-        let mut v = Vec::with_capacity(4 + snaps.len() * 7);
+        let mut v = Vec::with_capacity(4 + snaps.len() * 9);
         v.push(self.inner.tick as f64);
         v.push(self.inner.colony.dead as u8 as f64);
         v.push(self.inner.colony.food as f64);
@@ -102,6 +110,8 @@ impl WoaSim {
                 s.y,
                 s.state as f64,
                 s.extra,
+                s.hp,
+                s.aux,
             ]);
         }
         v
