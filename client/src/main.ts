@@ -10,6 +10,8 @@ declare global {
       step: (n: number) => void;
       state: () => Record<string, unknown>;
       px: (x: number, y: number) => number[];
+      log: () => Record<string, unknown>;
+      mark: (label: string) => void;
     };
   }
 }
@@ -29,6 +31,8 @@ async function main(): Promise<void> {
     step: (n) => game.debugStep(n),
     state: () => game.debugState(),
     px: (x, y) => game.debugPixel(x, y),
+    log: () => game.debugLog(),
+    mark: (label) => game.debugMark(label),
   };
 }
 

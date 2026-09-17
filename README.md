@@ -66,6 +66,13 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 - Screenshots + JSON state dumps land in `/tmp/opencode/woa-shots` (screenshots are for humans; assertions are state/pixel-based).
 - URL params: `?seed=N` fixed world seed, `?e2e=1` preserve canvas for pixel reads.
 
+### Input recorder (live debugging)
+
+- The client keeps a ring buffer (last 500 events) of everything the player did: raw gestures (`click`, `wheel`, `pan`, `key` — screen + world coords and camera state) and resolved commands (`cmd`: `move`/`dig`/`attack`/`entrance`/`select`/`cycle`), plus `start`/`restart`/`view`/`death`/`mark` markers. Every event is stamped with the sim tick.
+- Dump from the browser console: `__woa.log()`. A hidden DOM mirror (`#inputlog`, updated on every event) can be read where JS eval is sandboxed.
+- `__woa.mark('label')` drops a labeled marker into the log (e.g. "bug here").
+- A dump maps 1:1 onto `__woa.click/key/step` calls, so a recorded play session converts mechanically into an e2e regression scenario.
+
 ## Undecided (vs. the original game)
 
 The following decisions are **not yet made**. `docs/BASED-ON.md` describes the original game as a reference only — nothing there is a commitment.

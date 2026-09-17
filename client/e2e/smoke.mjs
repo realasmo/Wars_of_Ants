@@ -145,6 +145,26 @@ try {
   await shot('s05-underground-late');
   console.log('late:', JSON.stringify({ tick: s.tick, workers: s.workers, soldiers: s.soldiers, dug: s.dug, dead: s.dead }));
 
+  const ilog = await page.evaluate(() => window.__woa.log());
+  writeFileSync(path.join(OUT, 's06-inputlog.json'), JSON.stringify(ilog, null, 2));
+  const types = [...new Set(ilog.events.map((e) => e.type))];
+  const acts = [...new Set(ilog.events.filter((e) => e.type === 'cmd').map((e) => e.act))];
+  console.log('inputlog:', JSON.stringify({ count: ilog.count, dropped: ilog.dropped, types, acts }));
+  if (ilog.count === 0) failures.push('input log recorded no events');
+  else {
+    if (!types.includes('start')) failures.push('input log missing start event');
+    if (!types.includes('view')) failures.push('input log missing view toggle');
+    if (!acts.includes('entrance')) failures.push('input log missing entrance command');
+    if (spider && !acts.includes('attack')) failures.push('input log missing attack command');
+    const ticks = ilog.events.map((e) => e.tick);
+    if (ticks.some((tk, i) => i > 0 && tk < ticks[i - 1])) {
+      failures.push('input log ticks not monotonic');
+    }
+    if (Math.max(...ticks) > s.tick) {
+      failures.push(`input log tick ahead of sim (max ${Math.max(...ticks)} vs state ${s.tick})`);
+    }
+  }
+
   if (pageErrors.length > 0) failures.push(`page errors: ${pageErrors.slice(0, 5).join(' | ')}`);
   await browser.close();
 } finally {

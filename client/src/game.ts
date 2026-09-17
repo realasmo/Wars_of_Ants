@@ -3,12 +3,14 @@ import { Input } from './input';
 import { Hud } from './hud';
 import { Sim, TPS } from './sim';
 import type { Snap } from './sim';
+import { InputLog, r2 } from './inputlog';
 
 export class Game {
   sim: Sim;
   private renderer: Renderer;
   private input: Input;
   private hud = new Hud();
+  private readonly log = new InputLog();
   private playerAnt: number | null = null;
   private seed: number;
   private acc = 0;
@@ -17,21 +19,24 @@ export class Game {
   private hudCounter = 0;
   private deadShown = false;
 
-  private constructor(sim: Sim, renderer: Renderer) {
+  private constructor(sim: Sim, renderer: Renderer, seed: number) {
     this.sim = sim;
     this.renderer = renderer;
-    this.seed = sim.entrance[0];
-    this.input = new Input(renderer);
+    this.seed = seed;
+    this.log.setTickSource(() => this.sim.tickCount);
+    this.log.setSink(document.getElementById('inputlog'));
+    this.input = new Input(renderer, this.log);
     this.input.onCommand = (x, y, b) => this.handleClick(x, y, b);
     this.input.onCycleAnt = () => this.cycleAnt();
-    this.input.onToggleLayer = () => renderer.toggleLayer();
+    this.input.onToggleLayer = () => this.toggleLayer();
     this.playerAnt = sim.workers()[0] ?? null;
+    this.log.push({ type: 'start', seed, workers: sim.workers().length });
   }
 
   static async create(host: HTMLElement, seed: number): Promise<Game> {
     const sim = new Sim(seed);
     const renderer = await Renderer.create(sim, host);
-    return new Game(sim, renderer);
+    return new Game(sim, renderer, seed);
   }
 
   start(): void {
@@ -49,8 +54,23 @@ export class Game {
   }
 
   debugKey(code: string): void {
-    if (code === 'Tab') this.renderer.toggleLayer();
+    if (code === 'Tab') this.toggleLayer();
     else if (code === 'KeyC') this.cycleAnt();
+  }
+
+  debugLog(): Record<string, unknown> {
+    const c = this.renderer.cam;
+    return {
+      seed: this.seed,
+      layer: this.renderer.activeLayer === 0 ? 'surface' : 'underground',
+      cam: { x: r2(c.x), y: r2(c.y), zoom: r2(c.zoom) },
+      timeOrigin: performance.timeOrigin,
+      ...this.log.dump(),
+    };
+  }
+
+  debugMark(label: string): void {
+    this.log.push({ type: 'mark', label });
   }
 
   debugStep(n: number): void {
@@ -92,6 +112,7 @@ export class Game {
   }
 
   restart(): void {
+    this.log.push({ type: 'restart', seed: Date.now() % 0x7fffffff });
     this.seed = Date.now() % 0x7fffffff;
     this.sim = new Sim(this.seed);
     this.playerAnt = this.sim.workers()[0] ?? null;
@@ -100,13 +121,21 @@ export class Game {
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
     this.acc = 0;
     this.deadShown = false;
+    this.log.push({ type: 'start', seed: this.seed, workers: this.sim.workers().length });
+  }
+
+  private toggleLayer(): void {
+    this.renderer.toggleLayer();
+    this.log.push({ type: 'view', layer: this.renderer.activeLayer === 0 ? 'surface' : 'underground' });
   }
 
   private cycleAnt(): void {
     const workers = this.sim.workers();
     if (workers.length === 0) return;
     const i = this.playerAnt === null ? 0 : workers.indexOf(this.playerAnt);
+    const from = this.playerAnt;
     this.playerAnt = workers[(i + 1) % workers.length];
+    this.log.push({ type: 'cmd', act: 'cycle', from, to: this.playerAnt });
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
   }
 
@@ -130,6 +159,7 @@ export class Game {
     const layer = this.renderer.activeLayer;
     const pick = this.pickEntity(x, y);
     if (pick && pick.kind === 4) {
+      this.log.push({ type: 'cmd', act: 'attack', ant: this.playerAnt, target: pick.id });
       this.sim.attack(this.playerAnt, pick.id);
       this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
       return;
@@ -137,7 +167,9 @@ export class Game {
     if (button === 0) {
       if (pick && (pick.kind === 1 || pick.kind === 5)) {
         this.playerAnt = pick.id;
+        this.log.push({ type: 'cmd', act: 'select', ant: pick.id });
       } else {
+        this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: r2(x), y: r2(y) });
         this.sim.move(this.playerAnt, x, y);
       }
     } else if (button === 2) {
@@ -145,6 +177,7 @@ export class Game {
       const tx = Math.floor(x);
       const ty = Math.floor(y);
       if (Math.max(Math.abs(tx - ex), Math.abs(ty - ey)) <= 2) {
+        this.log.push({ type: 'cmd', act: 'entrance', ant: this.playerAnt });
         this.sim.useEntrance(this.playerAnt);
       } else {
         const kind = this.sim.tileAt(layer, tx, ty);
@@ -154,10 +187,14 @@ export class Game {
           me !== undefined &&
           Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
         if (layer === 1 && soft && adjacent) {
-          if (!this.sim.dig(this.playerAnt, tx, ty)) {
+          if (this.sim.dig(this.playerAnt, tx, ty)) {
+            this.log.push({ type: 'cmd', act: 'dig', ant: this.playerAnt, tx, ty });
+          } else {
+            this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: tx + 0.5, y: ty + 0.5, note: 'dig-refused' });
             this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
           }
         } else {
+          this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: tx + 0.5, y: ty + 0.5 });
           this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
         }
       }
@@ -182,6 +219,7 @@ export class Game {
     }
     if (this.sim.dead && !this.deadShown) {
       this.deadShown = true;
+      this.log.push({ type: 'death', tick: this.sim.tickCount, ants: this.sim.workers().length });
       this.hud.showDead(this.sim, () => this.restart());
     }
     this.renderer.panContinuous(dt, this.input.keys);
