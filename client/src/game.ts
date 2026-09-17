@@ -5,7 +5,7 @@ import { Sim, TPS } from './sim';
 import type { Snap } from './sim';
 
 export class Game {
-  private sim: Sim;
+  sim: Sim;
   private renderer: Renderer;
   private input: Input;
   private hud = new Hud();
@@ -38,6 +38,56 @@ export class Game {
     if (this.running) return;
     this.running = true;
     requestAnimationFrame(this.frame);
+  }
+
+  get controlling(): number | null {
+    return this.playerAnt;
+  }
+
+  debugClick(x: number, y: number, button: number): void {
+    this.handleClick(x, y, button);
+  }
+
+  debugKey(code: string): void {
+    if (code === 'Tab') this.renderer.toggleLayer();
+    else if (code === 'KeyC') this.cycleAnt();
+  }
+
+  debugStep(n: number): void {
+    if (this.sim.dead) return;
+    for (let i = 0; i < n; i++) this.sim.tick();
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+  }
+
+  debugPixel(x: number, y: number): number[] {
+    return this.renderer.pixelAt(x, y);
+  }
+
+  debugState(): Record<string, unknown> {
+    const counts = this.sim.casteCounts();
+    const spiders: Record<string, unknown>[] = [];
+    const ants: Record<string, unknown>[] = [];
+    for (const s of this.sim.cur.values()) {
+      if (s.kind === 4) {
+        spiders.push({ id: s.id, x: +s.x.toFixed(2), y: +s.y.toFixed(2), hp: +s.hp.toFixed(2), layer: s.layer });
+      } else if (s.kind === 1 || s.kind === 5) {
+        ants.push({ id: s.id, kind: s.kind === 5 ? 'soldier' : 'worker', x: +s.x.toFixed(2), y: +s.y.toFixed(2), hp: +s.hp.toFixed(2), state: s.state, carrying: s.extra, layer: s.layer === 0 ? 'S' : 'U' });
+      }
+    }
+    return {
+      tick: this.sim.tickCount,
+      dead: this.sim.dead,
+      food: this.sim.food,
+      super: this.sim.superFood(),
+      workers: counts.workers,
+      soldiers: counts.soldiers,
+      eggs: this.sim.eggCount(),
+      dug: this.sim.tilesDug(),
+      layer: this.renderer.activeLayer === 0 ? 'surface' : 'underground',
+      playerAnt: this.playerAnt,
+      spiders,
+      ants,
+    };
   }
 
   restart(): void {

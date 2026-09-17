@@ -60,6 +60,12 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 - Dev: `cd client && npm run dev` → open the printed localhost URL
 - Prod: `cd client && npm run build` → static files in `client/dist/` (deploy to any static host)
 
+### Automated playtesting (e2e)
+- `cd client && npm run e2e` — boots the real client in headless Chromium (system `chromium` package), drives it through a scripted scenario via an in-page debug hook (`window.__woa`, only alongside `?e2e=1`): world-coordinate clicks, key toggles, sim fast-forward, state dumps, canvas pixel probes.
+- Reproducible: `WOA_SEED=42 WOA_PORT=5199 WOA_OUT=/tmp/... npm run e2e`.
+- Screenshots + JSON state dumps land in `/tmp/opencode/woa-shots` (screenshots are for humans; assertions are state/pixel-based).
+- URL params: `?seed=N` fixed world seed, `?e2e=1` preserve canvas for pixel reads.
+
 ## Undecided (vs. the original game)
 
 The following decisions are **not yet made**. `docs/BASED-ON.md` describes the original game as a reference only — nothing there is a commitment.

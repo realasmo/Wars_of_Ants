@@ -49,11 +49,13 @@ export class Renderer {
 
   static async create(sim: Sim, host: HTMLElement): Promise<Renderer> {
     const app = new Application();
+    const params = new URLSearchParams(window.location.search);
     await app.init({
       background: 0x0b0a08,
       antialias: true,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
+      preserveDrawingBuffer: params.get('e2e') === '1',
     });
     const r = new Renderer(sim, app);
     host.appendChild(app.canvas);
@@ -285,6 +287,21 @@ export class Renderer {
         }
       }
     }
+  }
+
+  pixelAt(worldX: number, worldY: number): number[] {
+    const s = this.scale();
+    const res = this.app.renderer.resolution;
+    const sx = Math.round((this.world.position.x + worldX * s) * res);
+    const sy = Math.round((this.world.position.y + worldY * s) * res);
+    const c = document.createElement('canvas');
+    c.width = 1;
+    c.height = 1;
+    const ctx = c.getContext('2d');
+    if (!ctx) return [-1, -1, -1, -1];
+    ctx.drawImage(this.app.canvas, sx, sy, 1, 1, 0, 0, 1, 1);
+    const d = ctx.getImageData(0, 0, 1, 1).data;
+    return [d[0], d[1], d[2], d[3]];
   }
 
   reset(sim: Sim): void {
