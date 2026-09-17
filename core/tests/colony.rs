@@ -52,6 +52,26 @@ fn queen_starves_without_food() {
 }
 
 #[test]
+fn nest_expands_when_brood_space_runs_out() {
+    let cfg = Config {
+        food_clusters: 12,
+        max_ants: 60,
+        start_workers: 4,
+        ..Config::default()
+    };
+    let mut s = Sim::new(11, cfg);
+    for _ in 0..40_000 {
+        s.tick();
+    }
+    assert!(
+        s.colony.eggs_laid > 15,
+        "eggs_laid = {}",
+        s.colony.eggs_laid
+    );
+    assert!(s.tiles_dug() > 0, "tiles_dug = {}", s.tiles_dug());
+}
+
+#[test]
 fn dig_command_digs_tile() {
     let mut s = Sim::new(1, Config::default());
     let e = s.world.entrance.0;

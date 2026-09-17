@@ -16,7 +16,7 @@ pub const DIG_TIME: f64 = 1.2;
 pub const EAT_PERIOD: f64 = 25.0;
 pub const EGG_COST: u32 = 5;
 pub const EGG_TIME: f64 = 45.0;
-pub const LAY_COOLDOWN: f64 = 12.0;
+pub const LAY_COOLDOWN: f64 = 3.0;
 pub const STARVE_TIME: f64 = 90.0;
 pub const START_FOOD: u32 = 5;
 pub const PILE_AMOUNT: u32 = 45;
@@ -69,6 +69,7 @@ pub struct Colony {
     pub starve_t: f64,
     pub eat_t: f64,
     pub lay_cooldown: f64,
+    pub dig_queue: Vec<(u32, u32)>,
 }
 
 pub struct Sim {
@@ -110,8 +111,8 @@ impl Sim {
                 }
             }
         }
-        for y in 1..=4 {
-            for x in e.saturating_sub(2)..=e + 2 {
+        for y in 1..=3 {
+            for x in e.saturating_sub(1)..=e + 1 {
                 underground.set(x, y, EMPTY);
             }
         }
@@ -135,6 +136,7 @@ impl Sim {
                 starve_t: 0.0,
                 eat_t: 0.0,
                 lay_cooldown: LAY_COOLDOWN,
+                dig_queue: Vec::new(),
             },
             config,
             tick: 0,
@@ -221,6 +223,7 @@ impl Sim {
                         tx,
                         ty,
                         progress: 0.0,
+                        resume: None,
                     },
                 );
                 true
@@ -514,10 +517,33 @@ impl Sim {
                 Job::Idle => {
                     if carrying > 0 {
                         self.set_job(id, Job::Deliver);
+                    } else if let Some(t) = self.colony.dig_queue.pop() {
+                        self.set_job(id, Job::DigTile(t.0, t.1));
                     } else if let Some(fid) = self.best_food() {
                         self.set_job(id, Job::Fetch(fid));
                     } else {
                         self.set_retry(id, 50);
+                    }
+                }
+                Job::DigTile(tx, ty) => {
+                    let kind = self.world.underground.get(tx, ty);
+                    if !Grid::is_soft(kind) {
+                        self.set_job(id, Job::Idle);
+                    } else if pos.layer == Layer::Underground
+                        && chebyshev(tile_of(pos.p), (tx, ty)) <= 1
+                    {
+                        self.set_state(
+                            id,
+                            AntState::Digging {
+                                tx,
+                                ty,
+                                progress: 0.0,
+                                resume: None,
+                            },
+                        );
+                    } else if !self.route(id, Layer::Underground, (tx, ty)) {
+                        self.set_job(id, Job::Idle);
+                        self.set_retry(id, 60);
                     }
                 }
                 Job::Fetch(fid) => {
@@ -646,6 +672,7 @@ impl Sim {
                     tx,
                     ty,
                     progress: 0.0,
+                    resume: Some(Box::new((path, next, then_swap))),
                 }
             } else if finished {
                 if then_swap {
@@ -684,22 +711,59 @@ impl Sim {
                 Ok(q) => (*q).clone(),
                 Err(_) => continue,
             };
-            let (tx, ty, mut progress) = match state {
-                AntState::Digging { tx, ty, progress } => (tx, ty, progress),
+            let (tx, ty, mut progress, resume) = match state {
+                AntState::Digging {
+                    tx,
+                    ty,
+                    progress,
+                    resume,
+                } => (tx, ty, progress, resume),
                 _ => continue,
             };
             let kind = self.world.underground.get(tx, ty);
             if !Grid::is_soft(kind) {
-                self.set_state(id, AntState::Idle);
+                match resume {
+                    Some(b) => {
+                        self.set_state(
+                            id,
+                            AntState::Moving {
+                                path: b.0,
+                                next: b.1,
+                                then_swap: b.2,
+                            },
+                        );
+                    }
+                    None => self.set_state(id, AntState::Idle),
+                }
                 continue;
             }
             progress += DT;
             if progress >= DIG_TIME {
                 self.world.underground.set(tx, ty, EMPTY);
                 self.dug_tiles += 1;
-                self.set_state(id, AntState::Idle);
+                match resume {
+                    Some(b) => {
+                        self.set_state(
+                            id,
+                            AntState::Moving {
+                                path: b.0,
+                                next: b.1,
+                                then_swap: b.2,
+                            },
+                        );
+                    }
+                    None => self.set_state(id, AntState::Idle),
+                }
             } else {
-                self.set_state(id, AntState::Digging { tx, ty, progress });
+                self.set_state(
+                    id,
+                    AntState::Digging {
+                        tx,
+                        ty,
+                        progress,
+                        resume,
+                    },
+                );
             }
         }
     }
@@ -730,13 +794,62 @@ impl Sim {
             && self.colony.food >= EGG_COST
             && self.colony.ant_count < self.config.max_ants
         {
-            if let Some(tile) = self.free_egg_tile() {
-                self.colony.food -= EGG_COST;
-                self.colony.eggs_laid += 1;
-                self.colony.lay_cooldown = LAY_COOLDOWN;
-                self.spawn_egg(tile_center(tile.0, tile.1));
+            match self.free_egg_tile() {
+                Some(tile) => {
+                    self.colony.food -= EGG_COST;
+                    self.colony.eggs_laid += 1;
+                    self.colony.lay_cooldown = LAY_COOLDOWN;
+                    self.spawn_egg(tile_center(tile.0, tile.1));
+                }
+                None => {
+                    if self.colony.dig_queue.len() < 3 {
+                        if let Some(t) = self.pick_dig_target() {
+                            self.colony.dig_queue.push(t);
+                        }
+                    }
+                }
             }
         }
+    }
+
+    fn pick_dig_target(&self) -> Option<(u32, u32)> {
+        let (qx, qy) = self.queen_tile();
+        for r in 1u32..=3 {
+            for dy in -(r as i32)..=(r as i32) {
+                for dx in -(r as i32)..=(r as i32) {
+                    if dx.abs() != r as i32 && dy.abs() != r as i32 {
+                        continue;
+                    }
+                    let x = qx as i32 + dx;
+                    let y = qy as i32 + dy;
+                    if x < 1
+                        || y < 1
+                        || x >= self.config.width as i32 - 1
+                        || y >= self.config.height as i32 - 1
+                    {
+                        continue;
+                    }
+                    let (x, y) = (x as u32, y as u32);
+                    if Grid::is_soft(self.world.underground.get(x, y))
+                        && self.has_empty_neighbor(x, y)
+                    {
+                        return Some((x, y));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn has_empty_neighbor(&self, x: u32, y: u32) -> bool {
+        [(1u32, 0u32), (u32::MAX, 0), (0, 1), (0, u32::MAX)]
+            .iter()
+            .any(|&(dx, dy)| {
+                let nx = x.wrapping_add(dx);
+                let ny = y.wrapping_add(dy);
+                self.world.underground.in_bounds(nx, ny)
+                    && self.world.underground.get(nx, ny) == EMPTY
+            })
     }
 
     fn free_egg_tile(&self) -> Option<(u32, u32)> {
@@ -780,12 +893,12 @@ impl Sim {
                 None => continue,
             };
             let hatch = hatch - DT;
-            if hatch <= 0.0 {
+            if hatch <= 0.0 && self.colony.ant_count < self.config.max_ants {
                 let p = pos.p;
                 self.kill(id);
                 self.spawn_ant(Caste::Worker, p, Layer::Underground);
             } else if let Ok(mut q) = self.ecs.get::<&mut Egg>(ent) {
-                q.hatch = hatch;
+                q.hatch = hatch.max(0.0);
             }
         }
     }

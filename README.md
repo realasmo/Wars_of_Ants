@@ -41,12 +41,17 @@ AntWar.io is a great proof of concept, but it is not perfect and no longer maint
 ### Roadmap (confirmed)
 0. ✅ **Repo foundation** — monorepo (`core/`, `server/`, `client/`, `docs/`), toolchains (cargo + wasm-pack + Vite), CI, initial push.
 1. ✅ **Core simulation** (Rust, headless) — deterministic fixed-timestep ticks (20 tps), hecs ECS, seeded PCG RNG, two-layer tilemap + digging, A* pathfinding (dig-aware costs), Queen/Worker economy (gather → feed → eggs → hatch), starvation/queen-death loss condition, command API (`Move`, `Dig`), WASM bindings, headless sim tests (determinism, colony growth, starvation, dig).
-2. **First playable** — PixiJS client with placeholder/procedural art, `LocalTransport` → WASM core, HUD, basic audio. *Milestone 1: dig, gather, grow the colony, queen death = game over.* Includes AI nest expansion (workers dig new chambers when brood space runs out).
+2. ✅ **First playable** — PixiJS client with placeholder/procedural art, WASM core in-browser (`LocalTransport`), HTML/CSS HUD, camera (drag/WASD/zoom), layer toggle (Tab), click-to-command (LMB move/select, RMB dig), ant takeover/cycling (C), queen-death game over + restart. *Milestone 1 reached: dig, gather, grow the colony, queen death = game over.* Includes AI nest expansion (workers dig new chambers when brood space runs out).
 3. **Combat + ecosystem + AI** — predators, day/night, weather, fog of war; remaining content decisions are made and playtested here.
 4. **Server + multiplayer** — `NetworkTransport`, authoritative Axum server, binary snapshots, rooms/lobby, co-op.
 5. **Meta + release** — matchmaker, DB persistence, metrics, deployment, real art pass, balance.
 
 Build order: singleplayer first. Art: placeholder/procedural until the gameplay is fun.
+
+### Running it
+- Prereq: build the WASM core once — `cd client && npm run wasm`
+- Dev: `cd client && npm run dev` → open the printed localhost URL
+- Prod: `cd client && npm run build` → static files in `client/dist/` (deploy to any static host)
 
 ## Undecided (vs. the original game)
 

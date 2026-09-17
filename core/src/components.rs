@@ -33,6 +33,8 @@ pub struct Pos {
     pub layer: Layer,
 }
 
+pub type MovePlan = (Vec<(u32, u32)>, usize, bool);
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum AntState {
     Idle,
@@ -45,6 +47,7 @@ pub enum AntState {
         tx: u32,
         ty: u32,
         progress: f64,
+        resume: Option<Box<MovePlan>>,
     },
 }
 
@@ -54,6 +57,7 @@ pub enum Job {
     Idle,
     Fetch(u32),
     Deliver,
+    DigTile(u32, u32),
 }
 
 #[derive(Clone, Debug)]
