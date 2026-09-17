@@ -111,6 +111,81 @@ fn spider_dies_to_swarm_and_soldier_is_bred() {
 }
 
 #[test]
+fn player_loop_entrance_pickup_deposit() {
+    let mut s = Sim::new(31, Config::default());
+    let w = s.snapshot().iter().find(|e| e.kind == 1).unwrap().id;
+    assert!(s.issue(Command::UseEntrance { ant: w }));
+    let mut surfaced = false;
+    for _ in 0..2000 {
+        s.tick();
+        if s.snapshot().iter().any(|e| e.id == w && e.layer == 0) {
+            surfaced = true;
+            break;
+        }
+    }
+    assert!(surfaced, "worker should reach the surface via entrance");
+
+    let food_snap = s
+        .snapshot()
+        .into_iter()
+        .find(|e| e.kind == 2 && e.extra > 0.0)
+        .unwrap();
+    let (fx, fy) = (food_snap.x, food_snap.y);
+    assert!(s.issue(Command::Move {
+        ant: w,
+        x: fx,
+        y: fy,
+    }));
+    let mut carrying = false;
+    for _ in 0..3000 {
+        s.tick();
+        if let Some(e) = s.snapshot().iter().find(|e| e.id == w) {
+            if e.extra > 0.5 {
+                carrying = true;
+                break;
+            }
+        }
+    }
+    assert!(carrying, "manual worker should auto-pick food it stands on");
+
+    assert!(s.issue(Command::UseEntrance { ant: w }));
+    let mut home = false;
+    for _ in 0..3000 {
+        s.tick();
+        if s.snapshot().iter().any(|e| e.id == w && e.layer == 1) {
+            home = true;
+            break;
+        }
+    }
+    assert!(home, "worker should return underground");
+
+    let q = s.colony.queen_id;
+    let delivered_before = s.colony.delivered;
+    let q_snap = s.snapshot();
+    let (qx, qy) = q_snap
+        .iter()
+        .find(|e| e.id == q)
+        .map(|e| (e.x, e.y))
+        .unwrap();
+    assert!(s.issue(Command::Move {
+        ant: w,
+        x: qx,
+        y: qy,
+    }));
+    let mut deposited = false;
+    for _ in 0..2000 {
+        s.tick();
+        if s.colony.delivered > delivered_before
+            && s.snapshot().iter().any(|e| e.id == w && e.extra < 0.5)
+        {
+            deposited = true;
+            break;
+        }
+    }
+    assert!(deposited, "manual worker should deposit food at the queen");
+}
+
+#[test]
 fn dig_command_digs_tile() {
     let mut s = Sim::new(1, Config::default());
     let e = s.world.entrance.0;

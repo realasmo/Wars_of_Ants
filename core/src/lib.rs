@@ -57,6 +57,10 @@ impl WoaSim {
         self.inner.issue(Command::Attack { ant, target })
     }
 
+    pub fn cmd_entrance(&mut self, ant: u32) -> bool {
+        self.inner.issue(Command::UseEntrance { ant })
+    }
+
     pub fn colony_dead(&self) -> bool {
         self.inner.colony.dead
     }

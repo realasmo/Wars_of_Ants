@@ -85,6 +85,7 @@ export class Game {
       dug: this.sim.tilesDug(),
       layer: this.renderer.activeLayer === 0 ? 'surface' : 'underground',
       playerAnt: this.playerAnt,
+      entrance: this.sim.entrance,
       spiders,
       ants,
     };
@@ -140,20 +141,25 @@ export class Game {
         this.sim.move(this.playerAnt, x, y);
       }
     } else if (button === 2) {
+      const [ex, ey] = this.sim.entrance;
       const tx = Math.floor(x);
       const ty = Math.floor(y);
-      const kind = this.sim.tileAt(layer, tx, ty);
-      const soft = kind >= 1 && kind <= 3;
-      const me = this.sim.cur.get(this.playerAnt);
-      const adjacent =
-        me !== undefined &&
-        Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
-      if (layer === 1 && soft && adjacent) {
-        if (!this.sim.dig(this.playerAnt, tx, ty)) {
+      if (Math.max(Math.abs(tx - ex), Math.abs(ty - ey)) <= 2) {
+        this.sim.useEntrance(this.playerAnt);
+      } else {
+        const kind = this.sim.tileAt(layer, tx, ty);
+        const soft = kind >= 1 && kind <= 3;
+        const me = this.sim.cur.get(this.playerAnt);
+        const adjacent =
+          me !== undefined &&
+          Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
+        if (layer === 1 && soft && adjacent) {
+          if (!this.sim.dig(this.playerAnt, tx, ty)) {
+            this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
+          }
+        } else {
           this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
         }
-      } else {
-        this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
       }
     }
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);

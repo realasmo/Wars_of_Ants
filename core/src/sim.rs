@@ -69,6 +69,7 @@ pub enum Command {
     Move { ant: u32, x: f64, y: f64 },
     Dig { ant: u32, tx: u32, ty: u32 },
     Attack { ant: u32, target: u32 },
+    UseEntrance { ant: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -283,6 +284,14 @@ impl Sim {
                 self.set_job(ant, Job::Manual);
                 self.set_attack_after(ant, Some(target));
                 true
+            }
+            Command::UseEntrance { ant } => {
+                if !self.is_ant(ant) {
+                    return false;
+                }
+                let layer = self.ant_layer(ant);
+                self.set_job(ant, Job::Manual);
+                self.route(ant, layer.other(), self.world.entrance)
             }
         }
     }
@@ -562,6 +571,19 @@ impl Sim {
         false
     }
 
+    fn food_on_tile(&self, tile: (u32, u32)) -> Option<u32> {
+        for &fid in &self.food_ids() {
+            let ent = self.ids[&fid];
+            let Ok(fp) = self.ecs.get::<&Pos>(ent) else {
+                continue;
+            };
+            if tile_of(fp.p) == tile {
+                return Some(fid);
+            }
+        }
+        None
+    }
+
     fn food_info(&self, fid: u32) -> Option<((u32, u32), u32)> {
         let ent = *self.ids.get(&fid)?;
         let mut qo = self.ecs.query_one::<(&Food, &Pos)>(ent).ok()?;
@@ -645,7 +667,43 @@ impl Sim {
                 continue;
             }
             match job {
-                Job::Manual => {}
+                Job::Manual => {
+                    if pos.layer == Layer::Surface && carrying.amount == 0 {
+                        if let Some(fid) = self.food_on_tile(tile_of(pos.p)) {
+                            let mut picked: Option<FoodKind> = None;
+                            if let Some(&fent) = self.ids.get(&fid) {
+                                if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
+                                    if q.amount > 0 {
+                                        q.amount -= 1;
+                                        picked = Some(q.kind);
+                                    }
+                                }
+                            }
+                            if let Some(kind) = picked {
+                                if let Some(&aent) = self.ids.get(&id) {
+                                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
+                                        q.amount = 1;
+                                        q.kind = kind;
+                                    }
+                                }
+                            }
+                        }
+                    } else if pos.layer == Layer::Underground && carrying.amount > 0 {
+                        let qtile = self.queen_tile();
+                        if chebyshev(tile_of(pos.p), qtile) <= 1 {
+                            match carrying.kind {
+                                FoodKind::Green => self.colony.food += 1,
+                                FoodKind::Super => self.colony.food_super += 1,
+                            }
+                            self.colony.delivered += 1;
+                            if let Some(&aent) = self.ids.get(&id) {
+                                if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
+                                    q.amount = 0;
+                                }
+                            }
+                        }
+                    }
+                }
                 Job::Idle => {
                     if carrying.amount > 0 {
                         self.set_job(id, Job::Deliver);

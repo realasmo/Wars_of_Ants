@@ -102,31 +102,25 @@ try {
   s = await dump('s03-surface');
   console.log('surface:', JSON.stringify({ layer: s.layer, spiders: s.spiders.length }));
 
-  const surfaceAnts = s.ants.filter((a) => a.layer === 'S');
-  const anchor = surfaceAnts[0] ?? s.ants[0];
-  if (anchor) {
-    const pxAnt = await px(anchor.x, anchor.y);
-    if (pxAnt[3] === 0) failures.push('ant pixel fully transparent (render broken?)');
-    let fogSample = null;
-    for (let k = 1; k <= 6 && !fogSample; k++) {
-      const fx = anchor.x + 12 * k;
-      const fy = anchor.y + 8 * k;
-      if (fx > 92 || fy > 92) break;
-      const minDist = Math.min(
-        ...s.ants.map((a) => Math.hypot(a.x - fx, a.y - fy)),
-      );
-      const visibleHere = s.ants.some((a) => Math.hypot(a.x - fx, a.y - fy) <= 10.5);
-      if (minDist > 11.5 && !visibleHere) {
-        const got = await px(fx, fy);
-        if (!(got[3] === 0 && got[0] === 0 && got[1] === 0)) fogSample = { fx, fy, got, minDist: +minDist.toFixed(1) };
-      }
-    }
-    if (!fogSample) {
-      console.log('fog: no unlit on-screen tile found to sample (ants cover view) — skipped');
-    } else if (!(fogSample.got[0] < 60 && fogSample.got[1] < 60 && fogSample.got[2] < 60)) {
-      failures.push(`fog not darkening distant tiles: ${JSON.stringify(fogSample)}`);
-    }
-    console.log('pixels:', JSON.stringify({ dirt: pxDirt, ant: pxAnt, fog: fogSample?.got ?? null }));
+  const ent = s.entrance;
+  const before = s.ants.find((a) => a.id === s.playerAnt);
+  await page.evaluate(
+    (p) => window.__woa.click(p.x, p.y, 2),
+    { x: ent[0] + 0.5, y: ent[1] + 0.5 },
+  );
+  await page.evaluate(() => window.__woa.step(600));
+  s = await dump('s03b-entrance');
+  const after = s.ants.find((a) => a.id === s.playerAnt);
+  console.log(
+    'entrance:',
+    JSON.stringify({
+      before: before ? before.layer : '?',
+      after: after ? after.layer : 'gone',
+    }),
+  );
+  if (!after) failures.push('player ant vanished after entrance command');
+  else if (before && before.layer === after.layer) {
+    failures.push(`entrance right-click did not move ant between layers (${before.layer})`);
   }
 
   const spider = s.spiders[0];

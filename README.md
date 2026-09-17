@@ -43,7 +43,7 @@ AntWar.io is a great proof of concept, but it is not perfect and no longer maint
 - **Stats (wave 1):** Worker 100 HP / 8 dmg / 1.0s CD / speed 3.0 · Soldier 130 / 22 / 1.0s / 2.6 · Queen 150 HP · Spider 130 / 15 / 1.2s / 2.2 (aggro 5 tiles, wanders near lair, surface only).
 - **Predators:** spiders (2 per map) wander the surface, attack ants in aggro range.
 - **Super Food (blue):** dropped by killed spiders (8 units); Soldier eggs cost 2 Super + 3 Green; soldiers produced automatically while Super is available, capped at 1 soldier per 2 workers.
-- **Fog of war:** yes — vision radius ~10 tiles on surface, ~5 underground; rendered client-side for now (moves server-side for multiplayer later).
+- **Fog of war:** removed for now (was implemented in wave 1) — may return later, likely server-authoritative for multiplayer.
 
 ### Roadmap (confirmed)
 0. ✅ **Repo foundation** — monorepo (`core/`, `server/`, `client/`, `docs/`), toolchains (cargo + wasm-pack + Vite), CI, initial push.
@@ -74,7 +74,7 @@ The following decisions are **not yet made**. `docs/BASED-ON.md` describes the o
 - [ ] Ant castes beyond Queen/Worker — Soldier added in wave 1; Nanitic, Major, Acid Ant, Alate still undecided
 - [ ] Food types and economy details — Green + Super in wave 1; Meat and Red Food undecided
 - [ ] Whether to re-enable the pheromone system the original disabled
-- [x] Fog of war — **decided: yes, client-side in wave 1** (radii: 10 surface / 5 underground); day/night and weather parameters still undecided
+- [x] Fog of war — was in wave 1, **removed for now** (may return, server-authoritative, with multiplayer); day/night and weather parameters still undecided
 - [ ] Day/night cycle and weather parameters
 - [ ] Modes to support beyond singleplayer sandbox and co-op multiplayer (teams, private games, PvP)
 

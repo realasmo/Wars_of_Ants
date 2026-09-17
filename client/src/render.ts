@@ -1,4 +1,4 @@
-import { Application, Container, Graphics } from 'pixi.js';
+import { Application, Container, Graphics, Text } from 'pixi.js';
 import type { Sim, Snap } from './sim';
 
 const SURFACE_COLORS: Record<number, number> = {
@@ -17,15 +17,50 @@ const UNDER_COLORS: Record<number, number> = {
   4: 0x3a3a42,
 };
 
-const VISION_RADIUS = [10, 5];
 const BASE_PX = 30;
-const FOG_COLOR = 0x060504;
 
 interface EntityGfx {
+  c: Container;
   g: Graphics;
+  t: Text;
   kind: number;
   carrying: boolean;
   hpBucket: number;
+  label: string;
+}
+
+function labelText(s: Snap): string {
+  switch (s.kind) {
+    case 0:
+      return 'QUEEN';
+    case 1:
+      return 'worker';
+    case 5:
+      return 'soldier';
+    case 4:
+      return 'SPIDER';
+    case 3:
+      return s.aux > 0.5 ? 'egg(S)' : 'egg';
+    case 2:
+      return s.aux > 0.5 ? 'SUPER' : 'food';
+    default:
+      return '?';
+  }
+}
+
+function makeLabel(text: string): Text {
+  const t = new Text({
+    text,
+    style: {
+      fontFamily: 'monospace',
+      fontSize: 32,
+      fill: 0xf0e8da,
+      stroke: { color: 0x000000, width: 5 },
+    },
+  });
+  t.scale.set(0.011);
+  t.anchor.set(0.5);
+  return t;
 }
 
 export class Renderer {
@@ -36,11 +71,9 @@ export class Renderer {
   private entities = new Container();
   private sprites = new Map<number, EntityGfx>();
   private ring = new Graphics();
-  private fog = new Graphics();
   private sim: Sim;
   cam = { x: 48, y: 8, zoom: 1 };
   activeLayer = 1;
-  private fogKey = '';
 
   private constructor(sim: Sim, app: Application) {
     this.sim = sim;
@@ -60,7 +93,7 @@ export class Renderer {
     const r = new Renderer(sim, app);
     host.appendChild(app.canvas);
     app.stage.addChild(r.world);
-    r.world.addChild(r.layerC[0], r.layerC[1], r.entities, r.ring, r.fog);
+    r.world.addChild(r.layerC[0], r.layerC[1], r.entities, r.ring);
     r.layerC[0].addChild(r.tileG[0]);
     r.layerC[1].addChild(r.tileG[1]);
     window.addEventListener('resize', () => {
@@ -69,11 +102,22 @@ export class Renderer {
     app.renderer.resize(window.innerWidth, window.innerHeight);
     r.drawTiles(0);
     r.drawTiles(1);
+    r.addEntranceMarkers();
     r.setActiveLayer(1);
     r.cam.x = sim.entrance[0];
     r.cam.y = sim.entrance[1] + 3;
     r.applyCamera();
     return r;
+  }
+
+  private addEntranceMarkers(): void {
+    const [ex, ey] = this.sim.entrance;
+    const under = makeLabel('EXIT ▲');
+    under.position.set(ex + 0.5, ey + 1.8);
+    this.layerC[1].addChild(under);
+    const surface = makeLabel('NEST ▼');
+    surface.position.set(ex + 0.5, ey + 2.2);
+    this.layerC[0].addChild(surface);
   }
 
   setActiveLayer(layer: number): void {
@@ -82,7 +126,6 @@ export class Renderer {
     this.layerC[1].visible = layer === 1;
     this.drawTiles(layer);
     this.sim.consumeDirty(layer);
-    this.fogKey = '';
   }
 
   toggleLayer(): void {
@@ -100,7 +143,9 @@ export class Renderer {
       }
     }
     const [ex, ey] = this.sim.entrance;
-    g.circle(ex + 0.5, ey + 0.5, 0.42).stroke({ width: 0.07, color: 0xd9c27a });
+    g.circle(ex + 0.5, ey + 0.5, 1.6).fill({ color: 0xd9c27a, alpha: 0.22 });
+    g.circle(ex + 0.5, ey + 0.5, 1.6).stroke({ width: 0.1, color: 0xd9c27a, alpha: 0.9 });
+    g.circle(ex + 0.5, ey + 0.5, 0.45).stroke({ width: 0.08, color: 0xf0e0a0 });
   }
 
   private scale(): number {
@@ -156,25 +201,6 @@ export class Renderer {
     this.world.position.set(screen.width / 2 - this.cam.x * s, screen.height / 2 - this.cam.y * s);
   }
 
-  private colonyAnts(): Snap[] {
-    const out: Snap[] = [];
-    for (const s of this.sim.cur.values()) {
-      if (s.kind === 0 || s.kind === 1 || s.kind === 5) out.push(s);
-    }
-    return out;
-  }
-
-  private visibleAt(x: number, y: number, ants: Snap[], layer: number): boolean {
-    const r = VISION_RADIUS[layer];
-    const r2 = r * r;
-    for (const a of ants) {
-      const dx = a.x - x;
-      const dy = a.y - y;
-      if (dx * dx + dy * dy <= r2) return true;
-    }
-    return false;
-  }
-
   private drawEntity(g: Graphics, s: Snap): void {
     g.clear();
     if (s.kind === 0) {
@@ -217,35 +243,41 @@ export class Renderer {
   renderEntities(alpha: number, playerAnt: number | null): void {
     for (const [id, e] of this.sprites) {
       if (!this.sim.cur.has(id)) {
-        this.entities.removeChild(e.g);
-        e.g.destroy();
+        this.entities.removeChild(e.c);
+        e.c.destroy({ children: true });
         this.sprites.delete(id);
       }
     }
-    const colony = this.colonyAnts();
     const layer = this.activeLayer;
     for (const s of this.sim.cur.values()) {
       let e = this.sprites.get(s.id);
       if (!e) {
+        const c = new Container();
         const g = new Graphics();
-        e = { g, kind: -1, carrying: false, hpBucket: -1 };
+        const t = makeLabel(labelText(s));
+        t.position.set(0, -0.85);
+        c.addChild(g, t);
+        e = { c, g, t, kind: -1, carrying: false, hpBucket: -1, label: '' };
         this.sprites.set(s.id, e);
-        this.entities.addChild(g);
+        this.entities.addChild(c);
       }
       const carrying = s.extra > 0.5;
       const hpBucket = Math.floor(s.hp * 8);
+      const label = labelText(s);
       if (e.kind !== s.kind || e.carrying !== carrying || e.hpBucket !== hpBucket) {
         e.kind = s.kind;
         e.carrying = carrying;
         e.hpBucket = hpBucket;
         this.drawEntity(e.g, s);
       }
+      if (e.label !== label) {
+        e.label = label;
+        e.t.text = label;
+      }
       const p = this.sim.prev.get(s.id) ?? s;
       const t = Math.min(1, Math.max(0, alpha));
-      e.g.position.set(p.x + (s.x - p.x) * t, p.y + (s.y - p.y) * t);
-      const own = s.kind === 0 || s.kind === 1 || s.kind === 5;
-      e.g.visible =
-        s.layer === layer && (own || this.visibleAt(s.x, s.y, colony, layer));
+      e.c.position.set(p.x + (s.x - p.x) * t, p.y + (s.y - p.y) * t);
+      e.c.visible = s.layer === layer;
       if (s.kind === 1 && s.state === 2) {
         e.g.rotation = Math.sin(s.x * 7 + s.y * 3) * 0.4;
       } else {
@@ -261,30 +293,6 @@ export class Renderer {
         this.ring
           .circle(p.x + (s.x - p.x) * t, p.y + (s.y - p.y) * t, 0.5)
           .stroke({ width: 0.06, color: 0xd9c27a });
-      }
-    }
-    this.updateFog(colony);
-  }
-
-  private updateFog(colony: Snap[]): void {
-    const layer = this.activeLayer;
-    const screen = this.app.renderer.screen;
-    const s = this.scale();
-    const halfW = screen.width / 2 / s;
-    const halfH = screen.height / 2 / s;
-    const x0 = Math.max(0, Math.floor(this.cam.x - halfW) - 1);
-    const x1 = Math.min(this.sim.w - 1, Math.ceil(this.cam.x + halfW) + 1);
-    const y0 = Math.max(0, Math.floor(this.cam.y - halfH) - 1);
-    const y1 = Math.min(this.sim.h - 1, Math.ceil(this.cam.y + halfH) + 1);
-    const key = `${layer}|${x0}|${x1}|${y0}|${y1}|${this.sim.tickCount}|${colony.length}`;
-    if (key === this.fogKey) return;
-    this.fogKey = key;
-    this.fog.clear();
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) {
-        if (!this.visibleAt(x + 0.5, y + 0.5, colony, layer)) {
-          this.fog.rect(x, y, 1, 1).fill({ color: FOG_COLOR, alpha: 0.82 });
-        }
       }
     }
   }
@@ -307,8 +315,8 @@ export class Renderer {
   reset(sim: Sim): void {
     this.sim = sim;
     for (const [, e] of this.sprites) {
-      this.entities.removeChild(e.g);
-      e.g.destroy();
+      this.entities.removeChild(e.c);
+      e.c.destroy({ children: true });
     }
     this.sprites.clear();
     this.drawTiles(0);
@@ -318,6 +326,5 @@ export class Renderer {
     this.cam.y = sim.entrance[1] + 3;
     this.cam.zoom = 1;
     this.applyCamera();
-    this.fogKey = '';
   }
 }

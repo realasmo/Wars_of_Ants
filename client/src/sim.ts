@@ -64,6 +64,10 @@ export class Sim {
     return this.sim.cmd_attack(id, target);
   }
 
+  useEntrance(id: number): boolean {
+    return this.sim.cmd_entrance(id);
+  }
+
   superFood(): number {
     return this.sim.food_super();
   }
