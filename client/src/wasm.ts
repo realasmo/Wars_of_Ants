@@ -1,4 +1,4 @@
-import init, { WoaSim } from '../../core/pkg/woa_core.js';
+import init, { WoaSim, core_version } from '../../core/pkg/woa_core.js';
 
 let ready = false;
 
@@ -10,3 +10,7 @@ export async function initCore(): Promise<void> {
 }
 
 export { WoaSim };
+
+export function coreVersion(): string {
+  return core_version();
+}

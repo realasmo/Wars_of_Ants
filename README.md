@@ -47,7 +47,7 @@ AntWar.io is a great proof of concept, but it is not perfect and no longer maint
 
 ### Roadmap (confirmed)
 0. ✅ **Repo foundation** — monorepo (`core/`, `server/`, `client/`, `docs/`), toolchains (cargo + wasm-pack + Vite), CI, initial push.
-1. ✅ **Core simulation** (Rust, headless) — deterministic fixed-timestep ticks (20 tps), hecs ECS, seeded PCG RNG, two-layer tilemap + digging, A* pathfinding (dig-aware costs), Queen/Worker economy (gather → feed → eggs → hatch), starvation/queen-death loss condition, command API (`Move`, `Dig`), WASM bindings, headless sim tests (determinism, colony growth, starvation, dig).
+1. ✅ **Core simulation** (Rust, headless) — deterministic fixed-timestep ticks (20 tps), hecs ECS, seeded PCG RNG, two-layer tilemap + digging, A* pathfinding (dig-aware costs, 8-directional with no corner cutting), Queen/Worker economy (gather → feed → eggs → hatch), starvation/queen-death loss condition, command API (`Move`, `Dig`), WASM bindings, headless sim tests (determinism, colony growth, starvation, dig).
 2. ✅ **First playable** — PixiJS client with placeholder/procedural art, WASM core in-browser (`LocalTransport`), HTML/CSS HUD, camera (drag/WASD/zoom), layer toggle (Tab), click-to-command (LMB move/select, RMB dig), ant takeover/cycling (C), queen-death game over + restart. *Milestone 1 reached: dig, gather, grow the colony, queen death = game over.* Includes AI nest expansion (workers dig new chambers when brood space runs out).
 3. **Combat + ecosystem + AI** — predators, day/night, weather, fog of war; remaining content decisions are made and playtested here.
 4. **Server + multiplayer** — `NetworkTransport`, authoritative Axum server, binary snapshots, rooms/lobby, co-op.
@@ -76,7 +76,7 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 ### Replays
 
 - A replay is `{version, seed, cmds}` — the seed plus sim commands stamped with the tick they fire (a command applies after the first tick that reaches its `t`). Determinism makes this a complete record: same seed + same commands = same game.
-- Export a live session from the console: `__woa.replay()` (built from the input recorder's command log).
+- Export a live session from the console: `__woa.replay()` (built from the input recorder's command log). Exports are stamped with the core build (`core`); loading a replay recorded on a different core warns in the console — sim changes (e.g. the 8-directional movement change) mean old replays no longer reproduce their original game.
 - Watch one: put `name.json` in `client/public/replays/` and open `?replay=name` — the game runs it at normal speed with a REPLAY badge. Replays are watch-only: camera pan/zoom, layer toggle and ant selection stay live, but sim commands (move/dig/attack/entrance) are blocked while the badge is up.
 - `client/public/replays/determinism.json` is the fixture for the determinism test (below).
 

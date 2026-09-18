@@ -4,6 +4,7 @@ import { Hud } from './hud';
 import { Sim, TPS } from './sim';
 import type { Snap } from './sim';
 import { InputLog, r2 } from './inputlog';
+import { coreVersion } from './wasm';
 import type { Replay } from './replay';
 
 export class Game {
@@ -108,6 +109,7 @@ export class Game {
       version: 1,
       seed: this.seed,
       name: `session-${new Date().toISOString().slice(0, 19)}`,
+      core: coreVersion(),
       ticks: this.sim.tickCount,
       cmds,
     };

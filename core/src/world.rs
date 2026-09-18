@@ -38,9 +38,11 @@ impl Grid {
     }
 
     pub fn pass_cost(kind: u8, soft_passable: bool) -> Option<u32> {
+        // Scale: straight step on empty terrain = 1000; diagonals are
+        // cost * 1414 / 1000 in find_path (integer-exact for these values).
         match kind {
-            EMPTY => Some(1),
-            DIRT | MOIST | DRY if soft_passable => Some(10),
+            EMPTY => Some(1000),
+            DIRT | MOIST | DRY if soft_passable => Some(10000),
             _ => None,
         }
     }
