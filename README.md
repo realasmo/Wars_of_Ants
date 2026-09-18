@@ -94,6 +94,13 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 
 - All tunable gameplay numbers (unit HP/damage/cooldown/speed/range per caste and predator, economy constants) live in `core/src/balance.rs` — data only, no logic. Sim code reads them via `stats_for(caste)`; changing a number there is a balance change, not a code change.
 
+### Dev tools (F2)
+
+- **F2 opens the dev panel**: pick an entity (worker / soldier / egg / spider / food / super food), then click the map to place it. Quick actions: food = 50, super = 5, kill spiders, pause, +10s fast-forward. Esc cancels placement. Ants and eggs spawn underground; spiders and food on the surface.
+- **Console API** (devtools, with the game open): `__woa.spawn('spider', x, y)` (omit x/y for the nest entrance), `__woa.setfood(n)`, `__woa.setsuper(n)`, `__woa.kill(id)`, `__woa.killspiders()`, `__woa.pause()`.
+- Dev operations live in the Rust core (`Sim::dev_spawn/dev_set_food/dev_set_super/dev_kill`) — so they are deterministic, recorded in the input log (act `dev-*`), and replayable like any command. Dev actions are blocked while a replay is running. Killing the queen via dev tools flags the colony dead (the sim dereferences the queen id every tick).
+- `__woa.state()` includes `foods` (food pile count) and `paused` for test assertions.
+
 ## Undecided (vs. the original game)
 
 The following decisions are **not yet made**. `docs/BASED-ON.md` describes the original game as a reference only — nothing there is a commitment.

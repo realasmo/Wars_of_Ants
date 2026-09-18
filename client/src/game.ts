@@ -5,6 +5,7 @@ import { Sim, TPS } from './sim';
 import type { Snap } from './sim';
 import { InputLog, r2 } from './inputlog';
 import { coreVersion } from './wasm';
+import { DevPanel } from './devpanel';
 import type { Replay } from './replay';
 
 export class Game {
@@ -12,6 +13,8 @@ export class Game {
   private renderer: Renderer;
   private input: Input;
   private hud = new Hud();
+  private dev: DevPanel;
+  private paused = false;
   private readonly log = new InputLog();
   private playerAnt: number | null = null;
   private seed: number;
@@ -32,6 +35,16 @@ export class Game {
     this.input.onCommand = (x, y, b) => this.handleClick(x, y, b);
     this.input.onCycleAnt = () => this.cycleAnt();
     this.input.onToggleLayer = () => this.toggleLayer();
+    this.input.onToggleDev = () => this.dev.toggle();
+    this.input.onEscape = () => this.dev.setPlacement(null);
+    this.dev = new DevPanel({
+      onFood: () => this.debugSetFood(50),
+      onSuper: () => this.debugSetSuper(5),
+      onKillSpiders: () => this.debugKillSpiders(),
+      onPause: () => this.togglePause(),
+      onFF: () => this.debugStep(200),
+      onPauseState: () => this.paused,
+    });
     this.playerAnt = sim.workers()[0] ?? null;
     this.log.push({ type: 'start', seed, workers: sim.workers().length });
     if (replay) {
@@ -103,6 +116,8 @@ export class Game {
         if (e.tx !== undefined) c.tx = e.tx;
         if (e.ty !== undefined) c.ty = e.ty;
         if (e.target !== undefined) c.target = e.target;
+        if (e.kind !== undefined) c.kind = e.kind;
+        if (e.n !== undefined) c.n = e.n;
         return c;
       });
     return {
@@ -117,6 +132,50 @@ export class Game {
 
   debugCanon(): string {
     return this.sim.canonical();
+  }
+
+  debugSpawn(kind: string, x: number, y: number): boolean {
+    if (this.sim.dead || this.replay !== null) return false;
+    const id = this.sim.devSpawn(kind, x, y);
+    if (id === 4294967295) return false;
+    this.log.push({ type: 'cmd', act: 'dev-spawn', kind, x: r2(x), y: r2(y) });
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+    return true;
+  }
+
+  debugSetFood(n: number): void {
+    if (this.sim.dead || this.replay !== null) return;
+    this.sim.devSetFood(n);
+    this.log.push({ type: 'cmd', act: 'dev-food', n });
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+  }
+
+  debugSetSuper(n: number): void {
+    if (this.sim.dead || this.replay !== null) return;
+    this.sim.devSetSuper(n);
+    this.log.push({ type: 'cmd', act: 'dev-super', n });
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+  }
+
+  debugKillSpiders(): void {
+    if (this.sim.dead || this.replay !== null) return;
+    let count = 0;
+    for (const s of [...this.sim.cur.values()]) {
+      if (s.kind === 4 && this.sim.devKill(s.id)) count++;
+    }
+    this.log.push({ type: 'cmd', act: 'dev-kill-spiders', count });
+  }
+
+  debugKill(id: number): boolean {
+    if (this.sim.dead || this.replay !== null) return false;
+    const ok = this.sim.devKill(id);
+    if (ok) this.log.push({ type: 'cmd', act: 'dev-kill', target: id });
+    return ok;
+  }
+
+  togglePause(): void {
+    this.paused = !this.paused;
+    this.log.push({ type: 'mark', label: this.paused ? 'paused' : 'resumed' });
   }
 
   debugPixel(x: number, y: number): number[] {
@@ -134,6 +193,8 @@ export class Game {
         ants.push({ id: s.id, kind: s.kind === 5 ? 'soldier' : 'worker', x: +s.x.toFixed(2), y: +s.y.toFixed(2), hp: +s.hp.toFixed(2), state: s.state, carrying: s.extra, layer: s.layer === 0 ? 'S' : 'U' });
       }
     }
+    let foods = 0;
+    for (const s of this.sim.cur.values()) if (s.kind === 2) foods++;
     return {
       tick: this.sim.tickCount,
       dead: this.sim.dead,
@@ -146,8 +207,10 @@ export class Game {
       layer: this.renderer.activeLayer === 0 ? 'surface' : 'underground',
       playerAnt: this.playerAnt,
       entrance: this.sim.entrance,
+      paused: this.paused,
       spiders,
       ants,
+      foods,
     };
   }
 
@@ -200,7 +263,14 @@ export class Game {
   }
 
   private handleClick(x: number, y: number, button: number): void {
-    if (this.sim.dead || this.playerAnt === null) return;
+    if (this.sim.dead) return;
+    const placing = this.dev.placement();
+    if (placing !== null) {
+      this.dev.setPlacement(null);
+      this.debugSpawn(placing, x, y);
+      return;
+    }
+    if (this.playerAnt === null) return;
     if (this.replay !== null) return; // replay is watch-only: camera/view stay live, sim commands don't
     const layer = this.renderer.activeLayer;
     const pick = this.pickEntity(x, y);
@@ -251,7 +321,7 @@ export class Game {
   private frame = (now: number): void => {
     const dt = Math.min(0.25, (now - this.last) / 1000);
     this.last = now;
-    if (!this.sim.dead) {
+    if (!this.sim.dead && !this.paused) {
       this.acc += dt;
       const step = 1 / TPS;
       while (this.acc >= step) {
@@ -287,7 +357,7 @@ export class Game {
         type: 'cmd',
         src: 'replay',
         act: c.act,
-        ant: c.ant,
+        ant: c.ant ?? 0,
       };
       if (c.x !== undefined) ev.x = c.x;
       if (c.y !== undefined) ev.y = c.y;
@@ -295,10 +365,16 @@ export class Game {
       if (c.ty !== undefined) ev.ty = c.ty;
       if (c.target !== undefined) ev.target = c.target;
       this.log.push(ev);
-      if (c.act === 'move') this.sim.move(c.ant, c.x ?? 0, c.y ?? 0);
-      else if (c.act === 'dig') this.sim.dig(c.ant, c.tx ?? 0, c.ty ?? 0);
-      else if (c.act === 'attack') this.sim.attack(c.ant, c.target ?? 0);
-      else if (c.act === 'entrance') this.sim.useEntrance(c.ant);
+      if (c.act === 'move') this.sim.move(c.ant ?? 0, c.x ?? 0, c.y ?? 0);
+      else if (c.act === 'dig') this.sim.dig(c.ant ?? 0, c.tx ?? 0, c.ty ?? 0);
+      else if (c.act === 'attack') this.sim.attack(c.ant ?? 0, c.target ?? 0);
+      else if (c.act === 'entrance') this.sim.useEntrance(c.ant ?? 0);
+      else if (c.act === 'dev-spawn') this.sim.devSpawn(String(c.kind), c.x ?? 0, c.y ?? 0);
+      else if (c.act === 'dev-food') this.sim.devSetFood(Number(c.n ?? 0));
+      else if (c.act === 'dev-super') this.sim.devSetSuper(Number(c.n ?? 0));
+      else if (c.act === 'dev-kill-spiders') {
+        for (const s of [...this.sim.cur.values()]) if (s.kind === 4) this.sim.devKill(s.id);
+      } else if (c.act === 'dev-kill') this.sim.devKill(Number(c.target ?? 0));
       applied = true;
     }
     if (applied && rp.i >= rp.cmds.length) {

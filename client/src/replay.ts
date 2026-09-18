@@ -7,13 +7,15 @@ import { coreVersion } from './wasm';
 
 export interface ReplayCmd {
   t: number;
-  act: 'move' | 'dig' | 'attack' | 'entrance';
-  ant: number;
+  act: 'move' | 'dig' | 'attack' | 'entrance' | 'dev-spawn' | 'dev-food' | 'dev-super' | 'dev-kill' | 'dev-kill-spiders';
+  ant?: number;
   x?: number;
   y?: number;
   tx?: number;
   ty?: number;
   target?: number;
+  kind?: string;
+  n?: number;
 }
 
 export interface Replay {

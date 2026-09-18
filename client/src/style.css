@@ -143,3 +143,61 @@ body {
 #replay-badge.hidden {
   display: none;
 }
+
+#devpanel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 15;
+  pointer-events: auto;
+  background: rgba(15, 13, 10, 0.92);
+  border: 1px solid #4d3f5c;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  max-width: 260px;
+}
+
+#devpanel.hidden {
+  display: none;
+}
+
+#devpanel .dev-title {
+  color: #b09ee0;
+  letter-spacing: 2px;
+  margin-bottom: 6px;
+}
+
+#devpanel .dev-hint {
+  color: #8f8371;
+  font-size: 11px;
+  margin: 4px 0 8px;
+}
+
+#devpanel .dev-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+#devpanel button {
+  background: #2a2233;
+  color: #cfc4e8;
+  border: 1px solid #4d3f5c;
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+#devpanel button:hover {
+  background: #382d45;
+}
+
+#devpanel button.active {
+  background: #5c4a7a;
+  border-color: #8d77b8;
+  color: #f0eaff;
+}

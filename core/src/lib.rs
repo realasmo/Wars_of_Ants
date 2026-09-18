@@ -8,7 +8,7 @@ mod world;
 
 pub use balance::UnitStats;
 pub use components::{AntState, Caste, Layer};
-pub use sim::{Colony, Command, Config, EntitySnap, Sim, DT, TPS};
+pub use sim::{Colony, Command, Config, DevSpawn, EntitySnap, Sim, DT, TPS};
 pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK};
 
 use wasm_bindgen::prelude::*;
@@ -61,6 +61,26 @@ impl WoaSim {
 
     pub fn cmd_entrance(&mut self, ant: u32) -> bool {
         self.inner.issue(Command::UseEntrance { ant })
+    }
+
+    /// Returns the new entity id, or u32::MAX for an unknown kind.
+    pub fn dev_spawn(&mut self, kind: String, x: f64, y: f64) -> u32 {
+        match DevSpawn::parse(&kind) {
+            Some(what) => self.inner.dev_spawn(what, x, y),
+            None => u32::MAX,
+        }
+    }
+
+    pub fn dev_set_food(&mut self, n: u32) {
+        self.inner.dev_set_food(n);
+    }
+
+    pub fn dev_set_super(&mut self, n: u32) {
+        self.inner.dev_set_super(n);
+    }
+
+    pub fn dev_kill(&mut self, id: u32) -> bool {
+        self.inner.dev_kill(id)
     }
 
     pub fn colony_dead(&self) -> bool {

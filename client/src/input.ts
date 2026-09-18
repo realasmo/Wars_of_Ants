@@ -7,6 +7,8 @@ export class Input {
   onCommand: (x: number, y: number, button: number) => void = () => {};
   onCycleAnt: () => void = () => {};
   onToggleLayer: () => void = () => {};
+  onToggleDev: () => void = () => {};
+  onEscape: () => void = () => {};
   private renderer: Renderer;
   private log?: InputLog;
   private down = false;
@@ -90,6 +92,11 @@ export class Input {
         this.onToggleLayer();
       } else if (e.code === 'KeyC') {
         this.onCycleAnt();
+      } else if (e.code === 'F2') {
+        e.preventDefault();
+        this.onToggleDev();
+      } else if (e.code === 'Escape') {
+        this.onEscape();
       }
     });
 

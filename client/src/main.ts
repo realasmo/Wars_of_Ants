@@ -17,6 +17,12 @@ declare global {
       mark: (label: string) => void;
       replay: () => Record<string, unknown>;
       canon: () => string;
+      spawn: (kind: string, x?: number, y?: number) => boolean;
+      setfood: (n: number) => void;
+      setsuper: (n: number) => void;
+      kill: (id: number) => boolean;
+      killspiders: () => void;
+      pause: () => void;
     };
   }
 }
@@ -44,6 +50,12 @@ async function main(): Promise<void> {
     mark: (label) => game.debugMark(label),
     replay: () => game.debugReplay(),
     canon: () => game.debugCanon(),
+    spawn: (kind, x, y) => game.debugSpawn(kind, x ?? game.sim.entrance[0] + 0.5, y ?? game.sim.entrance[1] + 0.5),
+    setfood: (n) => game.debugSetFood(n),
+    setsuper: (n) => game.debugSetSuper(n),
+    kill: (id) => game.debugKill(id),
+    killspiders: () => game.debugKillSpiders(),
+    pause: () => game.togglePause(),
   };
 }
 

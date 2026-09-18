@@ -165,6 +165,30 @@ try {
     }
   }
 
+  // --- dev tools: console API + F2 panel (main page, before replay navigation) ---
+  await page.evaluate(() => window.__woa.setfood(999));
+  await page.evaluate(() => window.__woa.spawn('spider', 50.5, 3.5));
+  await page.evaluate(() => window.__woa.step(3)); // force a snapshot pull
+  s = await dump('s05b-dev');
+  if (s.food < 500) failures.push(`dev setfood failed: ${s.food}`);
+  if (s.spiders.length !== 3) failures.push(`dev spawn spider failed: ${s.spiders.length}`);
+  const foodsBefore = s.foods;
+
+  await page.mouse.click(640, 400); // focus canvas for key events
+  await page.keyboard.press('F2');
+  const panelVisible = await page.evaluate(() => !document.getElementById('devpanel').classList.contains('hidden'));
+  if (!panelVisible) failures.push('F2 did not open the dev panel');
+  await page.click('button[data-spawn="food"]');
+  await page.mouse.click(640, 420);
+  await page.evaluate(() => window.__woa.step(3));
+  s = await state();
+  if (s.foods !== foodsBefore + 1) failures.push(`panel food placement failed: ${s.foods} vs ${foodsBefore + 1}`);
+  const devLog = await page.evaluate(() => window.__woa.log());
+  if (!devLog.events.some((e) => e.type === 'cmd' && e.act === 'dev-spawn')) {
+    failures.push('dev spawn not recorded in input log');
+  }
+  await page.keyboard.press('F2'); // close panel
+
   // --- cross-platform determinism: same replay on native and WASM ---
   const replayRel = 'client/public/replays/determinism.json';
   const nativeDump = await new Promise((resolve, reject) => {
@@ -191,8 +215,12 @@ try {
     failures.push(`sim command issued during replay: ${JSON.stringify(userCmdsDuringReplay[0])}`);
   }
 
-  await page.evaluate(() => window.__woa.stepTo(3000));
-  const wasmCanon = await page.evaluate(() => window.__woa.canon());
+  // step and read canon in ONE JS task — a separate round-trip lets the
+  // realtime rAF loop tick once in between and skew the comparison
+  const wasmCanon = await page.evaluate(() => {
+    window.__woa.stepTo(3000);
+    return window.__woa.canon();
+  });
   writeFileSync(path.join(OUT, 's07-wasm-canon.txt'), wasmCanon);
   writeFileSync(path.join(OUT, 's07-native-canon.txt'), nativeDump);
   const detOk = wasmCanon === nativeDump;

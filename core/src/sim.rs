@@ -43,6 +43,34 @@ pub enum Command {
     UseEntrance { ant: u32 },
 }
 
+/// Spawnable entities for dev tools. Natural layers: spiders/food on the
+/// surface, ants/eggs underground (matching real game behavior).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DevSpawn {
+    Worker,
+    Soldier,
+    EggWorker,
+    EggSoldier,
+    Spider,
+    Food,
+    SuperFood,
+}
+
+impl DevSpawn {
+    pub fn parse(s: &str) -> Option<DevSpawn> {
+        Some(match s {
+            "worker" => DevSpawn::Worker,
+            "soldier" => DevSpawn::Soldier,
+            "egg" => DevSpawn::EggWorker,
+            "egg-soldier" => DevSpawn::EggSoldier,
+            "spider" => DevSpawn::Spider,
+            "food" => DevSpawn::Food,
+            "super" => DevSpawn::SuperFood,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct EntitySnap {
     pub id: u32,
@@ -179,6 +207,43 @@ impl Sim {
 
     pub fn issue(&mut self, cmd: Command) -> bool {
         self.apply_command(cmd)
+    }
+
+    /// Dev/test operations. They mutate the sim directly (no command gating)
+    /// and are recorded with ticks by the client, so a dev action stream is
+    /// as replayable as any other command stream.
+    pub fn dev_spawn(&mut self, what: DevSpawn, x: f64, y: f64) -> u32 {
+        let p = Vec2::new(x, y);
+        match what {
+            DevSpawn::Worker => self.spawn_ant(Caste::Worker, p, Layer::Underground),
+            DevSpawn::Soldier => self.spawn_ant(Caste::Soldier, p, Layer::Underground),
+            DevSpawn::EggWorker => self.spawn_egg(p, Caste::Worker),
+            DevSpawn::EggSoldier => self.spawn_egg(p, Caste::Soldier),
+            DevSpawn::Spider => self.spawn_spider(p),
+            DevSpawn::Food => self.spawn_food(p, PILE_AMOUNT, FoodKind::Green),
+            DevSpawn::SuperFood => self.spawn_food(p, SUPER_PER_SPIDER, FoodKind::Super),
+        }
+    }
+
+    pub fn dev_set_food(&mut self, n: u32) {
+        self.colony.food = n;
+    }
+
+    pub fn dev_set_super(&mut self, n: u32) {
+        self.colony.food_super = n;
+    }
+
+    pub fn dev_kill(&mut self, id: u32) -> bool {
+        if !self.ids.contains_key(&id) {
+            return false;
+        }
+        if id == self.colony.queen_id {
+            // the colony system dereferences queen_id every tick — killing
+            // the queen outside starvation must flag the colony dead too
+            self.colony.dead = true;
+        }
+        self.kill(id);
+        true
     }
 
     pub fn tick(&mut self) {

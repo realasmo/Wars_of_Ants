@@ -68,6 +68,22 @@ export class Sim {
     return this.sim.cmd_entrance(id);
   }
 
+  devSpawn(kind: string, x: number, y: number): number {
+    return this.sim.dev_spawn(kind, x, y);
+  }
+
+  devSetFood(n: number): void {
+    this.sim.dev_set_food(n);
+  }
+
+  devSetSuper(n: number): void {
+    this.sim.dev_set_super(n);
+  }
+
+  devKill(id: number): boolean {
+    return this.sim.dev_kill(id);
+  }
+
   superFood(): number {
     return this.sim.food_super();
   }

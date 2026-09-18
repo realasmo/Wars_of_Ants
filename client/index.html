@@ -38,6 +38,28 @@
     </div>
     <pre id="inputlog" hidden></pre>
     <div id="replay-badge" class="hidden">REPLAY</div>
+    <div id="devpanel" class="hidden">
+      <div class="dev-title">DEV (F2)</div>
+      <div class="dev-hint">pick an entity, then click the map</div>
+      <div class="dev-row">
+        <button data-spawn="worker">worker</button>
+        <button data-spawn="soldier">soldier</button>
+        <button data-spawn="egg">egg</button>
+        <button data-spawn="spider">spider</button>
+        <button data-spawn="food">food</button>
+        <button data-spawn="super">super</button>
+      </div>
+      <div class="dev-row">
+        <button id="dev-food">food = 50</button>
+        <button id="dev-super">super = 5</button>
+        <button id="dev-kill-spiders">kill spiders</button>
+      </div>
+      <div class="dev-row">
+        <button id="dev-pause">pause</button>
+        <button id="dev-ff">+10s</button>
+      </div>
+      <div class="dev-hint">ants/eggs spawn underground · spiders/food on surface · dev actions are recorded (replayable)</div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
