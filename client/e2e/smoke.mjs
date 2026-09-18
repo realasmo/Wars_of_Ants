@@ -182,7 +182,16 @@ try {
 
   await page.goto(`${baseUrl}?replay=determinism`);
   await page.waitForFunction(() => window.__woa !== undefined, null, { timeout: 30000 });
-  await page.evaluate(() => window.__woa.step(3000));
+
+  // replay is watch-only: clicking during replay must not issue a sim command
+  await page.evaluate(() => window.__woa.click(48.5, 5.5, 0));
+  const replayLog = await page.evaluate(() => window.__woa.log());
+  const userCmdsDuringReplay = replayLog.events.filter((e) => e.type === 'cmd' && e.src !== 'replay');
+  if (userCmdsDuringReplay.length > 0) {
+    failures.push(`sim command issued during replay: ${JSON.stringify(userCmdsDuringReplay[0])}`);
+  }
+
+  await page.evaluate(() => window.__woa.stepTo(3000));
   const wasmCanon = await page.evaluate(() => window.__woa.canon());
   writeFileSync(path.join(OUT, 's07-wasm-canon.txt'), wasmCanon);
   writeFileSync(path.join(OUT, 's07-native-canon.txt'), nativeDump);

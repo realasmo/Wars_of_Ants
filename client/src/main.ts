@@ -10,6 +10,7 @@ declare global {
       click: (x: number, y: number, button: number) => void;
       key: (code: string) => void;
       step: (n: number) => void;
+      stepTo: (target: number) => void;
       state: () => Record<string, unknown>;
       px: (x: number, y: number) => number[];
       log: () => Record<string, unknown>;
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
     click: (x, y, button) => game.debugClick(x, y, button),
     key: (code) => game.debugKey(code),
     step: (n) => game.debugStep(n),
+    stepTo: (target) => game.debugStepTo(target),
     state: () => game.debugState(),
     px: (x, y) => game.debugPixel(x, y),
     log: () => game.debugLog(),

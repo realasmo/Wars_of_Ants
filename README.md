@@ -77,7 +77,7 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 
 - A replay is `{version, seed, cmds}` — the seed plus sim commands stamped with the tick they fire (a command applies after the first tick that reaches its `t`). Determinism makes this a complete record: same seed + same commands = same game.
 - Export a live session from the console: `__woa.replay()` (built from the input recorder's command log).
-- Watch one: put `name.json` in `client/public/replays/` and open `?replay=name` — the game runs it at normal speed with a REPLAY badge; input stays live for camera control.
+- Watch one: put `name.json` in `client/public/replays/` and open `?replay=name` — the game runs it at normal speed with a REPLAY badge. Replays are watch-only: camera pan/zoom, layer toggle and ant selection stay live, but sim commands (move/dig/attack/entrance) are blocked while the badge is up.
 - `client/public/replays/determinism.json` is the fixture for the determinism test (below).
 
 ### Cross-platform determinism test

@@ -86,6 +86,12 @@ export class Game {
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
   }
 
+  debugStepTo(target: number): void {
+    if (this.sim.dead) return;
+    while (this.sim.tickCount < target) this.tickWithReplay();
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+  }
+
   debugReplay(): Record<string, unknown> {
     const cmds = this.log.dump()
       .events.filter((e) => e.type === 'cmd' && e.src !== 'replay')
@@ -144,6 +150,11 @@ export class Game {
   }
 
   restart(): void {
+    if (this.replay !== null) {
+      this.replay = null;
+      this.hud.setReplay(false);
+      this.log.push({ type: 'mark', label: 'replay-aborted-by-restart' });
+    }
     this.log.push({ type: 'restart', seed: Date.now() % 0x7fffffff });
     this.seed = Date.now() % 0x7fffffff;
     this.sim = new Sim(this.seed);
@@ -188,6 +199,7 @@ export class Game {
 
   private handleClick(x: number, y: number, button: number): void {
     if (this.sim.dead || this.playerAnt === null) return;
+    if (this.replay !== null) return; // replay is watch-only: camera/view stay live, sim commands don't
     const layer = this.renderer.activeLayer;
     const pick = this.pickEntity(x, y);
     if (pick && pick.kind === 4) {
