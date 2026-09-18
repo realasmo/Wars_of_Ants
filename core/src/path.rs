@@ -1,4 +1,4 @@
-use crate::world::Grid;
+use crate::world::{tile_center, Grid};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -139,6 +139,145 @@ pub fn tile_of(p: crate::math::Vec2) -> (u32, u32) {
     (p.x.floor() as u32, p.y.floor() as u32)
 }
 
+/// Supercover line-of-sight: every tile the segment from `a` to `b` passes
+/// through must be EMPTY. Exact corner grazes require all tiles around the
+/// corner. When `allow_soft_end` is set the final tile may be non-empty
+/// (the ant digs into its goal tile). Pure f64 arithmetic — deterministic
+/// across platforms (guarded by the cross-platform determinism test).
+pub fn line_clear(g: &Grid, ax: f64, ay: f64, bx: f64, by: f64, allow_soft_end: bool) -> bool {
+    let clear = |x: i64, y: i64| -> bool {
+        if x < 0 || y < 0 || x >= g.w as i64 || y >= g.h as i64 {
+            return false;
+        }
+        g.get(x as u32, y as u32) == crate::world::EMPTY
+    };
+    let end_clear = |x: i64, y: i64| -> bool {
+        if x < 0 || y < 0 || x >= g.w as i64 || y >= g.h as i64 {
+            return false;
+        }
+        if allow_soft_end && x == bx.floor() as i64 && y == by.floor() as i64 {
+            return true;
+        }
+        clear(x, y)
+    };
+    let (mut tx, mut ty) = (ax.floor() as i64, ay.floor() as i64);
+    let (tex, tey) = (bx.floor() as i64, by.floor() as i64);
+    if !clear(tx, ty) || !end_clear(tex, tey) {
+        return false;
+    }
+    let (dx, dy) = (bx - ax, by - ay);
+    let stepx = if dx > 0.0 {
+        1
+    } else if dx < 0.0 {
+        -1
+    } else {
+        0
+    };
+    let stepy = if dy > 0.0 {
+        1
+    } else if dy < 0.0 {
+        -1
+    } else {
+        0
+    };
+    let mut tmaxx = if stepx == 0 {
+        f64::INFINITY
+    } else {
+        let boundary = if stepx > 0 {
+            tx as f64 + 1.0
+        } else {
+            tx as f64
+        };
+        (boundary - ax) / dx
+    };
+    let mut tmaxy = if stepy == 0 {
+        f64::INFINITY
+    } else {
+        let boundary = if stepy > 0 {
+            ty as f64 + 1.0
+        } else {
+            ty as f64
+        };
+        (boundary - ay) / dy
+    };
+    let tdeltax = if stepx == 0 {
+        f64::INFINITY
+    } else {
+        1.0 / dx.abs()
+    };
+    let tdeltay = if stepy == 0 {
+        f64::INFINITY
+    } else {
+        1.0 / dy.abs()
+    };
+    let mut guard = 0i32;
+    while (tx, ty) != (tex, tey) {
+        guard += 1;
+        if guard > 100_000 {
+            return false;
+        }
+        // end_clear == clear everywhere except the goal tile, where a soft
+        // tile is tolerated when allow_soft_end is set (dig-into-goal)
+        if tmaxx < tmaxy {
+            tx += stepx;
+            tmaxx += tdeltax;
+            if !end_clear(tx, ty) {
+                return false;
+            }
+        } else if tmaxy < tmaxx {
+            ty += stepy;
+            tmaxy += tdeltay;
+            if !end_clear(tx, ty) {
+                return false;
+            }
+        } else {
+            // exact corner crossing: all tiles meeting at the corner must be clear
+            tx += stepx;
+            ty += stepy;
+            tmaxx += tdeltax;
+            tmaxy += tdeltay;
+            if !end_clear(tx, ty) || !clear(tx - stepx, ty) || !clear(tx, ty - stepy) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// String-pull smoothing: from the ant's exact position, greedily skip to the
+/// furthest tile center in line of sight. Intermediate tiles must be EMPTY,
+/// so soft (diggable) tiles always remain waypoints — movement stops there
+/// and digs, exactly like unsmoothed paths. Returns `[start, ...waypoints]`.
+pub fn smooth_path(
+    g: &Grid,
+    start: crate::math::Vec2,
+    path: &[(u32, u32)],
+) -> Vec<crate::math::Vec2> {
+    let mut out = vec![start];
+    if path.is_empty() {
+        return out;
+    }
+    let mut i = 0usize;
+    loop {
+        let a = *out.last().unwrap();
+        let mut j = path.len() - 1;
+        let last = path.len() - 1;
+        while j > i {
+            let b = tile_center(path[j].0, path[j].1);
+            if line_clear(g, a.x, a.y, b.x, b.y, j == last) {
+                break;
+            }
+            j -= 1;
+        }
+        out.push(tile_center(path[j].0, path[j].1));
+        if j == last {
+            break;
+        }
+        i = j + 1;
+    }
+    out
+}
+
 pub fn chebyshev(a: (u32, u32), b: (u32, u32)) -> u32 {
     (a.0 as i32 - b.0 as i32)
         .abs()
@@ -213,5 +352,48 @@ mod tests {
             p.iter().all(|&t| g.get(t.0, t.1) == EMPTY),
             "path crosses soft tiles: {p:?}"
         );
+    }
+
+    #[test]
+    fn line_clear_basics() {
+        let mut g = Grid::filled(10, 10, EMPTY);
+        assert!(line_clear(&g, 2.5, 2.5, 6.5, 6.5, false)); // exact diagonal
+        assert!(line_clear(&g, 2.5, 1.5, 6.5, 3.5, false)); // shallow slope
+        g.set(4, 2, ROCK);
+        assert!(!line_clear(&g, 2.5, 1.5, 6.5, 3.5, false)); // segment crosses (4,2)
+        assert!(line_clear(&g, 2.5, 1.5, 3.5, 1.5, false)); // short of the rock
+        assert!(line_clear(&g, 2.5, 1.5, 4.5, 1.5, true)); // soft end allowed at goal
+    }
+
+    #[test]
+    fn smooth_collapses_open_straight_lines() {
+        let g = Grid::filled(10, 10, EMPTY);
+        let path = vec![(2u32, 2u32), (3, 3), (4, 4), (5, 5)];
+        let s = smooth_path(&g, crate::math::Vec2::new(2.5, 2.5), &path);
+        assert_eq!(s.len(), 2, "should collapse to [start, goal]: {s:?}");
+        assert_eq!(s[1], crate::math::Vec2::new(5.5, 5.5));
+    }
+
+    #[test]
+    fn smooth_keeps_dig_stops() {
+        // Tunnel with one dirt tile mid-path: the dirt tile survives as a
+        // waypoint (movement pauses there and digs before walking on — the
+        // segment beyond it is only clear once dug, so exact waypoints here
+        // are the route-time truth).
+        let mut g = Grid::filled(10, 10, ROCK);
+        for x in 1..=7 {
+            g.set(x, 2, EMPTY);
+        }
+        g.set(4, 2, DIRT);
+        let path = vec![(2u32, 2u32), (3, 2), (4, 2), (5, 2), (6, 2)];
+        let s = smooth_path(&g, crate::math::Vec2::new(2.5, 2.5), &path);
+        let want = vec![
+            crate::math::Vec2::new(2.5, 2.5), // start
+            crate::math::Vec2::new(3.5, 2.5), // walk to dirt boundary
+            crate::math::Vec2::new(4.5, 2.5), // dig stop (dirt tile)
+            crate::math::Vec2::new(5.5, 2.5), // forced hop (start tile still dirt)
+            crate::math::Vec2::new(6.5, 2.5), // goal
+        ];
+        assert_eq!(s, want);
     }
 }

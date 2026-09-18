@@ -49,13 +49,15 @@ pub struct Combat {
     pub atk_t: f64,
 }
 
-pub type MovePlan = (Vec<(u32, u32)>, usize, bool);
+pub type MovePlan = (Vec<Vec2>, usize, bool);
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AntState {
     Idle,
     Moving {
-        path: Vec<(u32, u32)>,
+        /// String-pulled world-space waypoints; path[0] is the ant's position
+        /// at route time, the last is the goal (tile center).
+        path: Vec<Vec2>,
         next: usize,
         then_swap: bool,
     },

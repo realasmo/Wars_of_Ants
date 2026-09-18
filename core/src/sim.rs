@@ -5,7 +5,7 @@ use hecs::Entity;
 use crate::balance::*;
 use crate::components::*;
 use crate::math::Vec2;
-use crate::path::{chebyshev, find_path, manhattan, tile_of};
+use crate::path::{chebyshev, find_path, manhattan, smooth_path, tile_of};
 use crate::rng::Rng;
 use crate::world::{tile_center, Grid, World, DIRT, EMPTY, ROCK};
 
@@ -312,19 +312,21 @@ impl Sim {
             Some(&e) => e,
             None => return false,
         };
-        let (is_worker, start_layer, start_tile) =
+        let (is_worker, start_layer, start_p) =
             match self.ecs.query_one::<(&Ant, &Pos)>(ent).unwrap().get() {
-                Some(q) => (q.0.caste == Caste::Worker, q.1.layer, tile_of(q.1.p)),
+                Some(q) => (q.0.caste == Caste::Worker, q.1.layer, q.1.p),
                 None => return false,
             };
+        let start_tile = tile_of(start_p);
         if start_layer == dest_layer {
             let grid = self.grid_of(start_layer);
             match find_path(grid, start_tile, dest, is_worker) {
                 Some(path) => {
+                    let smooth = smooth_path(grid, start_p, &path);
                     self.set_state(
                         id,
                         AntState::Moving {
-                            path,
+                            path: smooth,
                             next: 0,
                             then_swap: false,
                         },
@@ -339,10 +341,11 @@ impl Sim {
             let grid = self.grid_of(start_layer);
             match find_path(grid, start_tile, entrance, is_worker) {
                 Some(path) => {
+                    let smooth = smooth_path(grid, start_p, &path);
                     self.set_state(
                         id,
                         AntState::Moving {
-                            path,
+                            path: smooth,
                             next: 0,
                             then_swap: true,
                         },
@@ -810,7 +813,8 @@ impl Sim {
                     finished = true;
                     break;
                 }
-                let (tx, ty) = path[next];
+                let target = path[next];
+                let (tx, ty) = tile_of(target);
                 if pos.layer == Layer::Underground {
                     let kind = self.world.underground.get(tx, ty);
                     if Grid::is_soft(kind) {
@@ -818,7 +822,6 @@ impl Sim {
                         break;
                     }
                 }
-                let target = tile_center(tx, ty);
                 let d = target - p;
                 let dist = d.len();
                 if dist <= budget {
