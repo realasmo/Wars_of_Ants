@@ -96,7 +96,9 @@ try {
   await shot('s02-underground-30s');
   console.log('after 30s:', JSON.stringify({ tick: s.tick, dug: s.dug, food: s.food, eggs: s.eggs }));
 
-  await page.evaluate(() => window.__woa.key('Tab'));
+  // go to surface (Tab is a toggle — the ant's autonomous crossings may have
+  // already flipped the view via camera-follow, so make it conditional)
+  if (s.layer !== 'surface') await page.evaluate(() => window.__woa.key('Tab'));
   await page.waitForTimeout(400);
   await shot('s03-surface');
   s = await dump('s03-surface');
@@ -104,6 +106,10 @@ try {
 
   const ent = s.entrance;
   const before = s.ants.find((a) => a.id === s.playerAnt);
+  // exercise camera-follow: view on the ant's layer, then it crosses
+  if (before && before.layer === 'S' && s.layer !== 'surface') {
+    await page.evaluate(() => window.__woa.key('Tab'));
+  }
   await page.evaluate(
     (p) => window.__woa.click(p.x, p.y, 2),
     { x: ent[0] + 0.5, y: ent[1] + 0.5 },
@@ -116,16 +122,25 @@ try {
     JSON.stringify({
       before: before ? before.layer : '?',
       after: after ? after.layer : 'gone',
+      viewAfter: s.layer,
     }),
   );
   if (!after) failures.push('player ant vanished after entrance command');
   else if (before && before.layer === after.layer) {
     failures.push(`entrance right-click did not move ant between layers (${before.layer})`);
   }
+  if (after && after.layer === 'U' && s.layer !== 'underground') {
+    failures.push(`camera did not follow the ant into the nest (view: ${s.layer})`);
+  }
+  // back to surface for the fight; pause freezes the moving spider so the
+  // coordinate click can't miss the 0.6-tile pick radius
+  if (s.layer !== 'surface') await page.evaluate(() => window.__woa.key('Tab'));
+  await page.evaluate(() => window.__woa.pause());
 
   const spider = s.spiders[0];
   if (spider) {
     await page.evaluate((p) => window.__woa.click(p.x, p.y, 0), { x: spider.x, y: spider.y });
+    await page.evaluate(() => window.__woa.pause()); // resume
     await page.evaluate(() => window.__woa.step(1500));
     await page.waitForTimeout(400);
     s = await dump('s04-fight');
@@ -136,6 +151,7 @@ try {
     if (s.ants.length === 0) failures.push('all ants died');
   } else {
     console.log('no spider visible on surface state — skipping fight');
+    await page.evaluate(() => window.__woa.pause()); // resume
   }
 
   await page.evaluate(() => window.__woa.key('Tab'));

@@ -177,6 +177,13 @@ export class Renderer {
     this.applyCamera();
   }
 
+  /** Center the camera on a world position (used when following an ant). */
+  centerOn(wx: number, wy: number): void {
+    this.cam.x = wx;
+    this.cam.y = wy;
+    this.applyCamera();
+  }
+
   panContinuous(dt: number, keys: Set<string>): void {
     let dx = 0;
     let dy = 0;

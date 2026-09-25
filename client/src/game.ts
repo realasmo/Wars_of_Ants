@@ -24,6 +24,7 @@ export class Game {
   private hudCounter = 0;
   private deadShown = false;
   private replay: { cmds: Replay['cmds']; i: number } | null = null;
+  private lastPlayerLayer: number | null = null;
 
   private constructor(sim: Sim, renderer: Renderer, seed: number, replay: Replay | null) {
     this.sim = sim;
@@ -97,12 +98,14 @@ export class Game {
   debugStep(n: number): void {
     if (this.sim.dead) return;
     for (let i = 0; i < n; i++) this.tickWithReplay();
+    this.followPlayerLayer();
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
   }
 
   debugStepTo(target: number): void {
     if (this.sim.dead) return;
     while (this.sim.tickCount < target) this.tickWithReplay();
+    this.followPlayerLayer();
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
   }
 
@@ -224,6 +227,7 @@ export class Game {
     this.seed = Date.now() % 0x7fffffff;
     this.sim = new Sim(this.seed);
     this.playerAnt = this.sim.workers()[0] ?? null;
+    this.lastPlayerLayer = null;
     this.renderer.reset(this.sim);
     this.hud.hideDead();
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
@@ -243,8 +247,34 @@ export class Game {
     const i = this.playerAnt === null ? 0 : workers.indexOf(this.playerAnt);
     const from = this.playerAnt;
     this.playerAnt = workers[(i + 1) % workers.length];
+    this.lastPlayerLayer = null; // re-baseline the follow camera on the new ant
     this.log.push({ type: 'cmd', act: 'cycle', from, to: this.playerAnt });
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+  }
+
+  /**
+   * When the controlled ant crosses the nest entrance, switch the view to
+   * its new layer and center the camera on it. Called from both the render
+   * loop and debugStep so live play and e2e stepping behave identically.
+   */
+  private followPlayerLayer(): void {
+    if (this.playerAnt === null) {
+      this.lastPlayerLayer = null;
+      return;
+    }
+    const me = this.sim.cur.get(this.playerAnt);
+    if (me === undefined) {
+      this.lastPlayerLayer = null;
+      return;
+    }
+    if (me.layer === this.lastPlayerLayer) return;
+    const crossed = this.lastPlayerLayer !== null;
+    this.lastPlayerLayer = me.layer;
+    if (crossed && me.layer !== this.renderer.activeLayer) {
+      this.renderer.setActiveLayer(me.layer);
+      this.renderer.centerOn(me.x, me.y);
+      this.log.push({ type: 'view', layer: me.layer === 0 ? 'surface' : 'underground', src: 'follow' });
+    }
   }
 
   private pickEntity(x: number, y: number): Snap | null {
@@ -283,6 +313,7 @@ export class Game {
     if (button === 0) {
       if (pick && (pick.kind === 1 || pick.kind === 5)) {
         this.playerAnt = pick.id;
+        this.lastPlayerLayer = null; // re-baseline the follow camera on the new ant
         this.log.push({ type: 'cmd', act: 'select', ant: pick.id });
       } else {
         this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: r2(x), y: r2(y) });
@@ -328,6 +359,7 @@ export class Game {
         this.tickWithReplay();
         this.acc -= step;
       }
+      this.followPlayerLayer();
       if (++this.hudCounter >= 5) {
         this.hudCounter = 0;
         this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
