@@ -25,6 +25,8 @@ export class Game {
   private deadShown = false;
   private replay: { cmds: Replay['cmds']; i: number } | null = null;
   private lastPlayerLayer: number | null = null;
+  private steerTarget: { x: number; y: number } | null = null;
+  private lastSteerTick = -1;
 
   private constructor(sim: Sim, renderer: Renderer, seed: number, replay: Replay | null) {
     this.sim = sim;
@@ -33,7 +35,13 @@ export class Game {
     this.log.setTickSource(() => this.sim.tickCount);
     this.log.setSink(document.getElementById('inputlog'));
     this.input = new Input(renderer, this.log);
+    this.input.onInteract = (x, y) => this.interactAt(x, y);
+    this.input.onSteer = (x, y, phase) => this.steer(x, y, phase);
     this.input.onCommand = (x, y, b) => this.handleClick(x, y, b);
+    this.input.onZoom = (factor, sx, sy) => {
+      if (this.playerAnt !== null && this.sim.cur.has(this.playerAnt)) this.renderer.zoomAtCenter(factor);
+      else this.renderer.zoomAt(sx, sy, factor);
+    };
     this.input.onCycleAnt = () => this.cycleAnt();
     this.input.onToggleLayer = () => this.toggleLayer();
     this.input.onToggleDev = () => this.dev.toggle();
@@ -237,8 +245,46 @@ export class Game {
   }
 
   private toggleLayer(): void {
+    if (this.playerAnt !== null) return; // camera is locked to the controlled ant; Tab is spectator-only
     this.renderer.toggleLayer();
     this.log.push({ type: 'view', layer: this.renderer.activeLayer === 0 ? 'surface' : 'underground' });
+  }
+
+  /** LMB press on something interactive. True when consumed (no steering). */
+  private interactAt(x: number, y: number): boolean {
+    if (this.sim.dead) return false;
+    const placing = this.dev.placement();
+    if (placing !== null) {
+      this.dev.setPlacement(null);
+      this.debugSpawn(placing, x, y);
+      return true;
+    }
+    if (this.replay !== null) return false;
+    if (this.playerAnt === null) return false;
+    const pick = this.pickEntity(x, y);
+    if (pick && pick.kind === 4) {
+      this.log.push({ type: 'cmd', act: 'attack', ant: this.playerAnt, target: pick.id });
+      this.sim.attack(this.playerAnt, pick.id);
+      this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+      return true;
+    }
+    if (pick && (pick.kind === 1 || pick.kind === 5)) {
+      this.playerAnt = pick.id;
+      this.lastPlayerLayer = null;
+      this.log.push({ type: 'cmd', act: 'select', ant: pick.id });
+      this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+      return true;
+    }
+    return false;
+  }
+
+  private steer(x: number, y: number, phase: 'start' | 'move' | 'end'): void {
+    if (phase === 'end') {
+      this.steerTarget = null;
+      return;
+    }
+    if (this.sim.dead || this.replay !== null || this.playerAnt === null) return;
+    this.steerTarget = { x, y };
   }
 
   private cycleAnt(): void {
@@ -253,27 +299,30 @@ export class Game {
   }
 
   /**
-   * When the controlled ant crosses the nest entrance, switch the view to
-   * its new layer and center the camera on it. Called from both the render
-   * loop and debugStep so live play and e2e stepping behave identically.
+   * Camera lock: while an ant is controlled, the view always shows its
+   * layer (crossings logged as follow events) and free panning is off.
+   * Spectating (no controlled ant) restores free pan/zoom/Tab.
    */
   private followPlayerLayer(): void {
     if (this.playerAnt === null) {
       this.lastPlayerLayer = null;
+      this.input.panEnabled = true;
       return;
     }
     const me = this.sim.cur.get(this.playerAnt);
     if (me === undefined) {
       this.lastPlayerLayer = null;
+      this.input.panEnabled = true;
       return;
     }
-    if (me.layer === this.lastPlayerLayer) return;
-    const crossed = this.lastPlayerLayer !== null;
+    this.input.panEnabled = false;
+    const changed = this.lastPlayerLayer !== null && me.layer !== this.lastPlayerLayer;
     this.lastPlayerLayer = me.layer;
-    if (crossed && me.layer !== this.renderer.activeLayer) {
+    if (me.layer !== this.renderer.activeLayer) {
       this.renderer.setActiveLayer(me.layer);
-      this.renderer.centerOn(me.x, me.y);
-      this.log.push({ type: 'view', layer: me.layer === 0 ? 'surface' : 'underground', src: 'follow' });
+      if (changed) {
+        this.log.push({ type: 'view', layer: me.layer === 0 ? 'surface' : 'underground', src: 'follow' });
+      }
     }
   }
 
@@ -360,6 +409,17 @@ export class Game {
         this.acc -= step;
       }
       this.followPlayerLayer();
+      const ant = this.playerAnt;
+      const me = ant !== null ? this.sim.cur.get(ant) : undefined;
+      if (me !== undefined && ant !== null) {
+        // hold-to-steer: re-issue the move at most every 4 ticks
+        if (this.steerTarget !== null && this.sim.tickCount - this.lastSteerTick >= 4) {
+          this.lastSteerTick = this.sim.tickCount;
+          this.log.push({ type: 'cmd', act: 'move', ant, x: r2(this.steerTarget.x), y: r2(this.steerTarget.y), note: 'steer' });
+          this.sim.move(ant, this.steerTarget.x, this.steerTarget.y);
+        }
+        this.renderer.centerOn(me.x, me.y);
+      }
       if (++this.hudCounter >= 5) {
         this.hudCounter = 0;
         this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
@@ -370,7 +430,7 @@ export class Game {
       this.log.push({ type: 'death', tick: this.sim.tickCount, ants: this.sim.workers().length });
       this.hud.showDead(this.sim, () => this.restart());
     }
-    this.renderer.panContinuous(dt, this.input.keys);
+    this.renderer.panContinuous(dt, this.playerAnt === null ? this.input.keys : Input.NO_KEYS);
     if (this.sim.consumeDirty(this.renderer.activeLayer)) {
       this.renderer.drawTiles(this.renderer.activeLayer);
     }

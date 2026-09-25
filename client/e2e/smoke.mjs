@@ -96,6 +96,25 @@ try {
   await shot('s02-underground-30s');
   console.log('after 30s:', JSON.stringify({ tick: s.tick, dug: s.dug, food: s.food, eggs: s.eggs }));
 
+  // --- hold-to-steer: ant walks toward the held cursor (+x screen direction).
+  // Camera locks the ant at screen center, so press away from the center to
+  // avoid picking the ant itself instead of steering.
+  {
+    const before = s.ants.find((a) => a.id === s.playerAnt);
+    await page.mouse.move(840, 300);
+    await page.mouse.down();
+    await page.mouse.move(940, 300, { steps: 10 });
+    await page.evaluate(() => window.__woa.step(80));
+    await page.mouse.up();
+    const s2 = await state();
+    const after = s2.ants.find((a) => a.id === s2.playerAnt);
+    console.log('steer:', JSON.stringify({ before: before && +before.x.toFixed(2), after: after && +after.x.toFixed(2) }));
+    if (before && after && after.x - before.x < 0.5) {
+      failures.push(`steering did not move the ant toward the cursor (${before.x} -> ${after.x})`);
+    }
+    if (!before) failures.push('no controlled ant alive for the steering test');
+  }
+
   // go to surface (Tab is a toggle — the ant's autonomous crossings may have
   // already flipped the view via camera-follow, so make it conditional)
   if (s.layer !== 'surface') await page.evaluate(() => window.__woa.key('Tab'));
@@ -132,9 +151,17 @@ try {
   if (after && after.layer === 'U' && s.layer !== 'underground') {
     failures.push(`camera did not follow the ant into the nest (view: ${s.layer})`);
   }
-  // back to surface for the fight; pause freezes the moving spider so the
-  // coordinate click can't miss the 0.6-tile pick radius
-  if (s.layer !== 'surface') await page.evaluate(() => window.__woa.key('Tab'));
+  // the view follows the ant's layer, so bring the ant back up for the fight
+  await page.evaluate(
+    (p) => window.__woa.click(p.x, p.y, 2),
+    { x: ent[0] + 0.5, y: ent[1] + 0.5 },
+  );
+  await page.evaluate(() => window.__woa.step(600));
+  s = await dump('s03c-return');
+  const back = s.ants.find((a) => a.id === s.playerAnt);
+  if (!back || back.layer !== 'S') failures.push('ant did not return to the surface for the fight');
+  // pause freezes the moving spider so the coordinate click can't miss the
+  // 0.6-tile pick radius
   await page.evaluate(() => window.__woa.pause());
 
   const spider = s.spiders[0];

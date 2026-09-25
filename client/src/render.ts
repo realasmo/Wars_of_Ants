@@ -170,6 +170,12 @@ export class Renderer {
     this.applyCamera();
   }
 
+  /** Zoom that keeps the followed ant (screen center) fixed. */
+  zoomAtCenter(factor: number): void {
+    const screen = this.app.renderer.screen;
+    this.zoomAt(screen.width / 2, screen.height / 2, factor);
+  }
+
   pan(dxPx: number, dyPx: number): void {
     const s = this.scale();
     this.cam.x -= dxPx / s;
