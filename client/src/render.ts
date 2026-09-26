@@ -36,6 +36,7 @@ interface EntityGfx {
   label: string;
   flying: boolean;
   dirt: boolean;
+  egg: boolean;
   team: number;
 }
 
@@ -153,8 +154,8 @@ export class Renderer {
     }
     under.visible = true;
     surface.visible = true;
-    under.position.set(ent[0] + 0.5, ent[1] + 1.8);
-    surface.position.set(ent[0] + 0.5, ent[1] + 2.2);
+    under.position.set(ent[0] + 1, ent[1] + 3.0);
+    surface.position.set(ent[0] + 1, ent[1] - 0.4);
   }
 
   setActiveLayer(layer: number): void {
@@ -176,13 +177,24 @@ export class Renderer {
     const pal = layer === 0 ? SURFACE_COLORS : UNDER_COLORS;
     for (let y = 0; y < this.sim.h; y++) {
       for (let x = 0; x < this.sim.w; x++) {
-        g.rect(x, y, 1, 1).fill(pal[t[y * this.sim.w + x]]);
+        const kind = t[y * this.sim.w + x];
+        g.rect(x, y, 1, 1).fill(pal[kind]);
+        // soil tint: surface dust patches anywhere; underground soil only on
+        // dug-out cells (hidden under the dirt until excavated)
+        const soil = this.sim.soilAt(layer, x, y);
+        if (soil > 0 && (layer === 0 || kind === 0)) {
+          const color = soil === 1 ? 0xc07830 : 0xb8bcc4;
+          const alpha = layer === 0 ? 0.16 : 0.34;
+          g.rect(x, y, 1, 1).fill({ color, alpha });
+        }
       }
     }
     const [ex, ey] = this.sim.entrance ?? [-10, -10];
-    g.circle(ex + 0.5, ey + 0.5, 1.6).fill({ color: 0xd9c27a, alpha: 0.22 });
-    g.circle(ex + 0.5, ey + 0.5, 1.6).stroke({ width: 0.1, color: 0xd9c27a, alpha: 0.9 });
-    g.circle(ex + 0.5, ey + 0.5, 0.45).stroke({ width: 0.08, color: 0xf0e0a0 });
+    const cx = ex + 1;
+    const cy = ey + 1;
+    g.circle(cx, cy, 2.1).fill({ color: 0xd9c27a, alpha: 0.22 });
+    g.circle(cx, cy, 2.1).stroke({ width: 0.1, color: 0xd9c27a, alpha: 0.9 });
+    g.circle(cx, cy, 0.7).stroke({ width: 0.08, color: 0xf0e0a0 });
   }
 
   private scale(): number {
@@ -294,6 +306,10 @@ export class Renderer {
       g.circle(-0.08, -0.32, 0.05).fill(0xb03a3a);
       g.circle(0.08, -0.32, 0.05).fill(0xb03a3a);
     }
+    if (s.aux >= 2.5) {
+      // carried egg rides along
+      g.circle(0.3, 0.14, 0.12).fill(0xe8dcc8);
+    }
     if (s.hp < 0.98 && s.kind !== 2 && s.kind !== 3) {
       g.rect(-0.4, -0.62, 0.8, 0.1).fill(0x30100e);
       g.rect(-0.4, -0.62, 0.8 * Math.max(0, s.hp), 0.1).fill(0x3fbf4f);
@@ -317,15 +333,21 @@ export class Renderer {
         const t = makeLabel(labelText(s));
         t.position.set(0, -0.85);
         c.addChild(g, t);
-        e = { c, g, t, kind: -1, carrying: false, hpBucket: -1, label: '', flying: false, dirt: false, team: -1 };
+        e = { c, g, t, kind: -1, carrying: false, hpBucket: -1, label: '', flying: false, dirt: false, egg: false, team: -1 };
         this.sprites.set(s.id, e);
         this.entities.addChild(c);
+      }
+      // carried eggs ride their carrier — draw the dot there instead
+      if (s.kind === 3 && s.state === 1) {
+        e.c.visible = false;
+        continue;
       }
       const carrying = s.extra > 0.5;
       const hpBucket = Math.floor(s.hp * 8);
       const label = labelText(s);
       const flying = s.state === 4;
-      const dirt = s.aux > 1.5;
+      const dirt = s.aux > 1.5 && s.aux < 2.5;
+      const egg = s.aux >= 2.5;
       const team = this.sim.team();
       if (
         e.kind !== s.kind ||
@@ -333,6 +355,7 @@ export class Renderer {
         e.hpBucket !== hpBucket ||
         e.flying !== flying ||
         e.dirt !== dirt ||
+        e.egg !== egg ||
         e.team !== team
       ) {
         e.kind = s.kind;
@@ -340,6 +363,7 @@ export class Renderer {
         e.hpBucket = hpBucket;
         e.flying = flying;
         e.dirt = dirt;
+        e.egg = egg;
         e.team = team;
         this.drawEntity(e.g, s, team);
       }

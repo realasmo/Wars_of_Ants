@@ -6,6 +6,19 @@ pub const MOIST: u8 = 2;
 pub const DRY: u8 = 3;
 pub const ROCK: u8 = 4;
 
+/// Cell soil quality, orthogonal to tile kind: orange soil is the only place
+/// eggs transform into ants; silver soil is the only place food never spoils.
+/// Hidden while covered by dirt — digging reveals it.
+pub const SOIL_NONE: u8 = 0;
+pub const SOIL_ORANGE: u8 = 1;
+pub const SOIL_SILVER: u8 = 2;
+
+/// Origin of the aligned 2×2 dig block containing tile (x, y). Digging,
+/// dirt-filling and soil seeding all work on these blocks.
+pub fn block_of(x: u32, y: u32) -> (u32, u32) {
+    (x & !1, y & !1)
+}
+
 pub struct Grid {
     pub w: u32,
     pub h: u32,
@@ -55,7 +68,13 @@ pub fn tile_center(x: u32, y: u32) -> Vec2 {
 pub struct World {
     pub surface: Grid,
     pub underground: Grid,
-    /// Nest hole position (same tile on both layers). None until the founding
-    /// queen creates the nest; cross-layer routing refuses while unset.
+    /// Nest hole (2×2 block origin, same tiles on both layers). None until
+    /// the founding queen creates the nest; cross-layer routing refuses
+    /// while unset.
     pub entrance: Option<(u32, u32)>,
+    /// Per-tile soil quality, parallel to each grid. Surface soil comes from
+    /// the dust patches (indicator + founding bonus); underground soil is
+    /// seeded per block and revealed by digging.
+    pub soil_surface: Vec<u8>,
+    pub soil_underground: Vec<u8>,
 }

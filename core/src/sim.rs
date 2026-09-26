@@ -7,7 +7,9 @@ use crate::components::*;
 use crate::math::Vec2;
 use crate::path::{chebyshev, find_path, manhattan, smooth_path, tile_of};
 use crate::rng::Rng;
-use crate::world::{tile_center, Grid, World, DIRT, EMPTY, ROCK};
+use crate::world::{
+    block_of, tile_center, Grid, World, DIRT, EMPTY, ROCK, SOIL_NONE, SOIL_ORANGE, SOIL_SILVER,
+};
 
 pub const TPS: u32 = 20;
 pub const DT: f64 = 1.0 / TPS as f64;
@@ -57,9 +59,21 @@ pub enum Phase {
     Colony = 4,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Patch {
+    pub x0: u32,
+    pub y0: u32,
+    pub x1: u32,
+    pub y1: u32,
+    /// SOIL_ORANGE or SOIL_SILVER — founding inside grants that soil nearby.
+    pub soil: u8,
+}
+
 #[derive(Clone, Debug)]
 pub enum Command {
     Move { ant: u32, x: f64, y: f64 },
+    /// Dig the aligned 2×2 block containing (tx, ty). If the ant is not
+    /// adjacent yet it walks there first and digs on arrival.
     Dig { ant: u32, tx: u32, ty: u32 },
     Attack { ant: u32, target: u32 },
     UseEntrance { ant: u32 },
@@ -67,9 +81,13 @@ pub enum Command {
     Land { ant: u32 },
     /// Grounded queen creates the nest at the tile she stands on.
     FoundNest { ant: u32 },
-    /// Drop carried dirt: fill the target empty cell underground, or let the
-    /// dirt vanish by dropping it on the surface.
-    DumpDirt { ant: u32, tx: u32, ty: u32 },
+    /// Drop the carried item at (tx, ty): dirt fills the adjacent fully-empty
+    /// 2×2 block (or vanishes on the surface), an egg is placed on the
+    /// adjacent empty cell, food is dropped as one unit (≤ cap per cell).
+    Drop { ant: u32, tx: u32, ty: u32 },
+    /// Pick up an adjacent egg (keeps its hatch state; carried eggs ride the
+    /// carrier and cannot hatch).
+    PickEgg { ant: u32, egg: u32 },
 }
 
 /// Spawnable entities for dev tools. Natural layers: spiders/food on the
@@ -142,6 +160,9 @@ pub struct Sim {
     pub colony: Colony,
     pub config: Config,
     pub tick: u64,
+    /// Surface dust patches (founding mode): founding inside one grants its
+    /// soil color near the nest.
+    pub patches: Vec<Patch>,
     ids: BTreeMap<u32, Entity>,
     next_id: u32,
     dug_tiles: u32,
@@ -197,11 +218,69 @@ impl Sim {
             Some((e, 0))
         };
 
+        // soil quality: founding mode seeds orange/silver 2×2 blocks hidden
+        // in the underground dirt, plus surface dust patches
+        let mut soil_surface = vec![SOIL_NONE as u8; (w * h) as usize];
+        let mut soil_underground = vec![SOIL_NONE as u8; (w * h) as usize];
+        let mut patches: Vec<Patch> = Vec::new();
+        if founding {
+            for by in (1..h - 2).step_by(2) {
+                for bx in (1..w - 2).step_by(2) {
+                    let r = rng.f64();
+                    let soil = if r < ORANGE_SOIL_CHANCE {
+                        SOIL_ORANGE
+                    } else if r < ORANGE_SOIL_CHANCE + SILVER_SOIL_CHANCE {
+                        SOIL_SILVER
+                    } else {
+                        SOIL_NONE
+                    };
+                    if soil != SOIL_NONE {
+                        for dy in 0..2 {
+                            for dx in 0..2 {
+                                soil_underground[((by + dy) * w + bx + dx) as usize] = soil;
+                            }
+                        }
+                    }
+                }
+            }
+            for soil in [SOIL_ORANGE, SOIL_SILVER] {
+                for _ in 0..PATCHES_PER_COLOR {
+                    for _ in 0..40 {
+                        let pw = PATCH_W + rng.irange(0, PATCH_WOBBLE * 2) - PATCH_WOBBLE;
+                        let ph = PATCH_H + rng.irange(0, PATCH_WOBBLE * 2) - PATCH_WOBBLE;
+                        if pw < 4 || ph < 4 || pw > w - 8 || ph > h - 8 {
+                            continue;
+                        }
+                        let x0 = rng.irange(4, w - pw - 4);
+                        let y0 = rng.irange(4, h - ph - 4);
+                        let (x1, y1) = (x0 + pw, y0 + ph);
+                        let far = patches.iter().all(|p| {
+                            let cx = ((x0 + x1) as i32 - (p.x0 + p.x1) as i32).abs() / 2;
+                            let cy = ((y0 + y1) as i32 - (p.y0 + p.y1) as i32).abs() / 2;
+                            cx.max(cy) >= 20
+                        });
+                        if !far {
+                            continue;
+                        }
+                        for y in y0..y1 {
+                            for x in x0..x1 {
+                                soil_surface[(y * w + x) as usize] = soil;
+                            }
+                        }
+                        patches.push(Patch { x0, y0, x1, y1, soil });
+                        break;
+                    }
+                }
+            }
+        }
+
         let mut sim = Sim {
             world: World {
                 surface,
                 underground,
                 entrance,
+                soil_surface,
+                soil_underground,
             },
             ecs: hecs::World::new(),
             rng,
@@ -224,6 +303,7 @@ impl Sim {
             },
             config,
             tick: 0,
+            patches,
             ids: BTreeMap::new(),
             next_id: 0,
             dug_tiles: 0,
@@ -304,6 +384,25 @@ impl Sim {
         self.colony.food_super = n;
     }
 
+    /// Paint a 2×2 soil block (dev/test op, deterministic + replayable).
+    /// `soil`: 0 none, 1 orange, 2 silver.
+    pub fn dev_set_soil(&mut self, layer_num: u32, x: u32, y: u32, soil: u32) {
+        let layer = if layer_num == 0 {
+            Layer::Surface
+        } else {
+            Layer::Underground
+        };
+        let (bx, by) = block_of(x, y);
+        if bx + 1 < self.config.width && by + 1 < self.config.height {
+            let soil = match soil {
+                1 => SOIL_ORANGE,
+                2 => SOIL_SILVER,
+                _ => SOIL_NONE,
+            };
+            self.set_soil_block(layer, bx, by, soil);
+        }
+    }
+
     pub fn dev_kill(&mut self, id: u32) -> bool {
         if !self.ids.contains_key(&id) {
             return false;
@@ -369,23 +468,30 @@ impl Sim {
                 {
                     return false;
                 }
-                let kind = self.world.underground.get(tx, ty);
-                if !Grid::is_soft(kind) {
-                    return false;
-                }
-                if chebyshev(self.ant_tile(ant), (tx, ty)) > 1 {
+                let (bx, by) = block_of(tx, ty);
+                if !self.block_in_bounds(bx, by) || !self.block_soft(bx, by) {
                     return false;
                 }
                 self.set_job(ant, Job::Manual);
-                self.set_state(
-                    ant,
-                    AntState::Digging {
-                        tx,
-                        ty,
-                        progress: 0.0,
-                        resume: None,
-                    },
-                );
+                if self.block_adjacent(ant, bx, by) {
+                    self.set_dig_after(ant, None);
+                    self.set_state(
+                        ant,
+                        AntState::Digging {
+                            tx: bx,
+                            ty: by,
+                            progress: 0.0,
+                            resume: None,
+                        },
+                    );
+                } else {
+                    // walk to the block first, dig on arrival
+                    self.set_dig_after(ant, Some((bx, by)));
+                    if !self.route_to_block(ant, bx, by) {
+                        self.set_dig_after(ant, None);
+                        return false;
+                    }
+                }
                 true
             }
             Command::Attack { ant, target } => {
@@ -430,15 +536,24 @@ impl Sim {
                     return false;
                 }
                 let (x, y) = self.ant_tile(ant);
-                // the starter chamber (x±1, y+1..=y+3) must fit inside the
-                // rock border ring
-                if x < 2 || y < 2 || x > self.config.width - 3 || y + 3 > self.config.height - 2 {
+                // the 2×2 entrance hole plus a 4×4 starter chamber below it
+                // must fit inside the rock border ring
+                let (bx, by) = block_of(x, y);
+                if bx < 2 || by < 2 || bx + 3 > self.config.width - 3 || by + 5 > self.config.height - 3
+                {
                     return false;
                 }
-                let mut carved = 1;
-                self.world.underground.set(x, y, EMPTY);
-                for cy in y + 1..=y + 3 {
-                    for cx in x.saturating_sub(1)..=x + 1 {
+                let mut carved = 0u32;
+                for dy in 0..2u32 {
+                    for dx in 0..2u32 {
+                        if self.world.underground.get(bx + dx, by + dy) != EMPTY {
+                            carved += 1;
+                        }
+                        self.world.underground.set(bx + dx, by + dy, EMPTY);
+                    }
+                }
+                for cy in by + 2..=by + 5 {
+                    for cx in bx..=bx + 3 {
                         if self.world.underground.get(cx, cy) != EMPTY {
                             carved += 1;
                         }
@@ -446,7 +561,7 @@ impl Sim {
                     }
                 }
                 self.dug_tiles += carved;
-                self.world.entrance = Some((x, y));
+                self.world.entrance = Some((bx, by));
                 let qent = self.ids[&ant];
                 if let Some(q) = self
                     .ecs
@@ -455,15 +570,47 @@ impl Sim {
                     .get()
                 {
                     q.0.layer = Layer::Underground;
-                    q.0.p = tile_center(x, y + 2);
+                    q.0.p = Vec2::new(bx as f64 + 2.0, by as f64 + 4.0);
                     *q.1 = AntState::Idle;
                 }
                 self.set_job(ant, Job::Manual);
+                // founding inside a dust patch grants hidden soil blocks of
+                // that color near the nest — dig them out
+                let patch_soil = self
+                    .patches
+                    .iter()
+                    .find(|p| x >= p.x0 && x < p.x1 && y >= p.y0 && y < p.y1)
+                    .map(|p| p.soil);
+                if let Some(soil) = patch_soil {
+                    let grants = self.rng.irange(PATCH_GRANT_MIN, PATCH_GRANT_MAX);
+                    let mut placed = 0u32;
+                    for _ in 0..80 {
+                        if placed >= grants {
+                            break;
+                        }
+                        let dx = self.rng.irange(0, 16) as i32 - 8;
+                        let dy = self.rng.irange(0, 16) as i32 - 8;
+                        let gx = (bx as i32 + dx) & !1;
+                        let gy = (by as i32 + dy) & !1;
+                        if gx < 2 || gy < 2 || gx + 1 >= self.config.width as i32 - 2 || gy + 1 >= self.config.height as i32 - 2 {
+                            continue;
+                        }
+                        let (gx, gy) = (gx as u32, gy as u32);
+                        if !self.block_soft(gx, gy) {
+                            continue;
+                        }
+                        if self.soil_at(Layer::Underground, gx, gy) != SOIL_NONE {
+                            continue;
+                        }
+                        self.set_soil_block(Layer::Underground, gx, gy, soil);
+                        placed += 1;
+                    }
+                }
                 self.colony.phase = Phase::Founding;
                 self.colony.phase_t = FOUNDING_TIME;
                 true
             }
-            Command::DumpDirt { ant, tx, ty } => {
+            Command::Drop { ant, tx, ty } => {
                 let ent = match self.ids.get(&ant) {
                     Some(&e) => e,
                     None => return false,
@@ -475,32 +622,126 @@ impl Sim {
                     Some(q) => (*q.0, q.1.layer),
                     None => return false,
                 };
-                if carrying.amount == 0 || carrying.kind != FoodKind::Dirt {
+                if carrying.amount == 0 {
                     return false;
                 }
-                match layer {
-                    Layer::Surface => {
-                        // dumped above ground: the dirt disappears
-                        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                            q.amount = 0;
+                match carrying.kind {
+                    FoodKind::Dirt => match layer {
+                        Layer::Surface => {
+                            // dumped above ground: the dirt disappears
+                            if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+                                q.amount = 0;
+                            }
+                            true
                         }
-                        true
+                        Layer::Underground => {
+                            // dumped below: the dirt refills the fully-empty block
+                            let (bx, by) = block_of(tx, ty);
+                            if !self.block_in_bounds(bx, by)
+                                || !self.block_empty(bx, by)
+                                || !self.block_adjacent(ant, bx, by)
+                            {
+                                return false;
+                            }
+                            for dy in 0..2 {
+                                for dx in 0..2 {
+                                    self.world.underground.set(bx + dx, by + dy, DIRT);
+                                }
+                            }
+                            if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+                                q.amount = 0;
+                            }
+                            true
+                        }
+                    },
+                    FoodKind::Egg => {
+                        // place the carried egg on the adjacent empty cell
+                        let grid_kind = self.grid_of(layer).get(tx, ty);
+                        if grid_kind != EMPTY || chebyshev(self.ant_tile(ant), (tx, ty)) > 1 {
+                            return false;
+                        }
+                        let mut placed = false;
+                        for eid in self.egg_ids() {
+                            let eent = self.ids[&eid];
+                            let mine = self
+                                .ecs
+                                .get::<&Egg>(eent)
+                                .map(|q| q.carried_by == Some(ant))
+                                .unwrap_or(false);
+                            if !mine {
+                                continue;
+                            }
+                            if let Some(q) = self
+                                .ecs
+                                .query_one::<(&mut Egg, &mut Pos)>(eent)
+                                .unwrap()
+                                .get()
+                            {
+                                q.0.carried_by = None;
+                                q.1.p = tile_center(tx, ty);
+                                q.1.layer = layer;
+                            }
+                            placed = true;
+                            break;
+                        }
+                        if placed {
+                            if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+                                q.amount = 0;
+                            }
+                        }
+                        placed
                     }
-                    Layer::Underground => {
-                        // dumped below: the dirt refills the target empty cell
-                        if !self.world.underground.in_bounds(tx, ty)
-                            || self.world.underground.get(tx, ty) != EMPTY
-                            || chebyshev(self.ant_tile(ant), (tx, ty)) > 1
+                    FoodKind::Green | FoodKind::Super => {
+                        // drop one unit as loose (spoiling) food
+                        let tile = (tx, ty);
+                        if !self.grid_of(layer).in_bounds(tx, ty)
+                            || chebyshev(self.ant_tile(ant), tile) > 1
+                            || self.cell_food(layer, tile) >= FOOD_CELL_CAP
                         {
                             return false;
                         }
-                        self.world.underground.set(tx, ty, DIRT);
+                        self.spawn_unit_food(layer, tile, carrying.kind, Some(SPOIL_TIME));
                         if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
                             q.amount = 0;
                         }
                         true
                     }
                 }
+            }
+            Command::PickEgg { ant, egg } => {
+                if !self.is_ant(ant) {
+                    return false;
+                }
+                let Some(&eent) = self.ids.get(&egg) else {
+                    return false;
+                };
+                let (egg_carried, etile) = match self
+                    .ecs
+                    .query_one::<(&Egg, &Pos)>(eent)
+                    .unwrap()
+                    .get()
+                {
+                    Some(q) => (q.0.carried_by, tile_of(q.1.p)),
+                    None => return false,
+                };
+                let aent = self.ids[&ant];
+                let hands_free = self
+                    .ecs
+                    .get::<&Carrying>(aent)
+                    .map(|c| c.amount == 0)
+                    .unwrap_or(false);
+                if egg_carried.is_some() || !hands_free || chebyshev(self.ant_tile(ant), etile) > 1 {
+                    return false;
+                }
+                if let Ok(mut q) = self.ecs.get::<&mut Egg>(eent) {
+                    q.carried_by = Some(ant);
+                }
+                if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
+                    q.amount = 1;
+                    q.kind = FoodKind::Egg;
+                }
+                self.set_job(ant, Job::Manual);
+                true
             }
         }
     }
@@ -545,6 +786,35 @@ impl Sim {
         }
     }
 
+    /// A copy of the underground grid for worker pathing: soft tiles inside a
+    /// not-fully-soft block count as rock — blocks are dug all-or-nothing.
+    fn worker_grid(&self) -> Grid {
+        let g = &self.world.underground;
+        let mut tiles = g.tiles.clone();
+        for by in (0..g.h - 1).step_by(2) {
+            for bx in (0..g.w - 1).step_by(2) {
+                let full = (0..2u32).all(|dy| {
+                    (0..2u32).all(|dx| Grid::is_soft(g.get(bx + dx, by + dy)))
+                });
+                if !full {
+                    for dy in 0..2u32 {
+                        for dx in 0..2u32 {
+                            let i = ((by + dy) * g.w + bx + dx) as usize;
+                            if Grid::is_soft(tiles[i]) {
+                                tiles[i] = ROCK;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Grid {
+            w: g.w,
+            h: g.h,
+            tiles,
+        }
+    }
+
     fn route(&mut self, id: u32, dest_layer: Layer, dest: (u32, u32)) -> bool {
         let ent = match self.ids.get(&id) {
             Some(&e) => e,
@@ -557,7 +827,13 @@ impl Sim {
             };
         let start_tile = tile_of(start_p);
         if start_layer == dest_layer {
-            let grid = self.grid_of(start_layer);
+            let owned;
+            let grid = if is_worker && start_layer == Layer::Underground {
+                owned = self.worker_grid();
+                &owned
+            } else {
+                self.grid_of(start_layer)
+            };
             match find_path(grid, start_tile, dest, is_worker) {
                 Some(path) => {
                     let smooth = smooth_path(grid, start_p, &path);
@@ -628,6 +904,134 @@ impl Sim {
             .unwrap_or((0, 0))
     }
 
+    fn set_dig_after(&mut self, id: u32, target: Option<(u32, u32)>) {
+        if let Some(&ent) = self.ids.get(&id) {
+            if let Ok(mut q) = self.ecs.get::<&mut WorkerAi>(ent) {
+                q.dig_after = target;
+            }
+        }
+    }
+
+    fn block_in_bounds(&self, bx: u32, by: u32) -> bool {
+        bx + 1 < self.config.width && by + 1 < self.config.height
+    }
+
+    fn block_soft(&self, bx: u32, by: u32) -> bool {
+        self.block_in_bounds(bx, by)
+            && (0..2u32).all(|dy| {
+                (0..2u32).all(|dx| Grid::is_soft(self.world.underground.get(bx + dx, by + dy)))
+            })
+    }
+
+    fn block_empty(&self, bx: u32, by: u32) -> bool {
+        self.block_in_bounds(bx, by)
+            && (0..2u32).all(|dy| {
+                (0..2u32).all(|dx| self.world.underground.get(bx + dx, by + dy) == EMPTY)
+            })
+    }
+
+    /// Chebyshev distance from the ant's tile to the 2×2 block, tile-granular.
+    fn block_adjacent(&self, ant: u32, bx: u32, by: u32) -> bool {
+        let (tx, ty) = self.ant_tile(ant);
+        let dx = if tx < bx {
+            (bx - tx) as i32
+        } else if tx > bx + 1 {
+            (tx - bx - 1) as i32
+        } else {
+            0
+        };
+        let dy = if ty < by {
+            (by - ty) as i32
+        } else if ty > by + 1 {
+            (ty - by - 1) as i32
+        } else {
+            0
+        };
+        dx.max(dy) <= 1
+    }
+
+    fn soil_at(&self, layer: Layer, x: u32, y: u32) -> u8 {
+        let v = match layer {
+            Layer::Surface => &self.world.soil_surface,
+            Layer::Underground => &self.world.soil_underground,
+        };
+        v[(y * self.config.width + x) as usize]
+    }
+
+    fn set_soil_block(&mut self, layer: Layer, bx: u32, by: u32, soil: u8) {
+        let w = self.config.width;
+        let v = match layer {
+            Layer::Surface => &mut self.world.soil_surface,
+            Layer::Underground => &mut self.world.soil_underground,
+        };
+        for dy in 0..2 {
+            for dx in 0..2 {
+                v[((by + dy) * w + bx + dx) as usize] = soil;
+            }
+        }
+    }
+
+    /// Route the ant to a stand tile next to the block. Queens only cross
+    /// empty cells; workers accept soft tiles (they dig through).
+    fn route_to_block(&mut self, ant: u32, bx: u32, by: u32) -> bool {
+        let is_worker = self
+            .ids
+            .get(&ant)
+            .map(|&e| {
+                self.ecs
+                    .get::<&Ant>(e)
+                    .map(|a| a.caste == Caste::Worker)
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        let at = self.ant_tile(ant);
+        let mut cands: Vec<((u32, u32), u32)> = Vec::new();
+        for dy in -1i32..=2 {
+            for dx in -1i32..=2 {
+                if dx >= 0 && dx <= 1 && dy >= 0 && dy <= 1 {
+                    continue; // inside the block
+                }
+                let x = bx as i32 + dx;
+                let y = by as i32 + dy;
+                if x < 1 || y < 1 || x >= self.config.width as i32 - 1 || y >= self.config.height as i32 - 1 {
+                    continue;
+                }
+                let (x, y) = (x as u32, y as u32);
+                let kind = self.world.underground.get(x, y);
+                if kind == ROCK {
+                    continue;
+                }
+                if !is_worker && kind != EMPTY {
+                    continue;
+                }
+                let d = (x.max(at.0) - x.min(at.0)) + (y.max(at.1) - y.min(at.1));
+                cands.push(((x, y), d));
+            }
+        }
+        cands.sort_by_key(|(_, d)| *d);
+        for ((x, y), _) in cands {
+            if self.route(ant, Layer::Underground, (x, y)) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Total loose+stored food units on a cell (any kind).
+    fn cell_food(&self, layer: Layer, tile: (u32, u32)) -> u32 {
+        let mut total = 0;
+        for &fid in &self.food_ids() {
+            let ent = self.ids[&fid];
+            let Ok(fp) = self.ecs.get::<&Pos>(ent) else {
+                continue;
+            };
+            if fp.layer == layer && tile_of(fp.p) == tile {
+                total += self.ecs.get::<&Food>(ent).map(|f| f.amount).unwrap_or(0);
+            }
+        }
+        total
+    }
+
     fn ant_ids(&self) -> Vec<u32> {
         self.ids
             .iter()
@@ -685,6 +1089,7 @@ impl Sim {
                 retry: 0,
                 pending: None,
                 attack_after: None,
+                dig_after: None,
             },
         ));
         self.ids.insert(id, ent);
@@ -692,17 +1097,166 @@ impl Sim {
         id
     }
 
-    fn spawn_food(&mut self, p: Vec2, amount: u32, kind: FoodKind) -> u32 {
+    fn ring_tiles(&self, c: (u32, u32), r: u32) -> Vec<(u32, u32)> {
+        if r == 0 {
+            return vec![c];
+        }
+        let mut v = Vec::new();
+        for dy in -(r as i32)..=(r as i32) {
+            for dx in -(r as i32)..=(r as i32) {
+                if dx.abs() != r as i32 && dy.abs() != r as i32 {
+                    continue;
+                }
+                let x = c.0 as i32 + dx;
+                let y = c.1 as i32 + dy;
+                if x < 1 || y < 1 || x >= self.config.width as i32 - 1 || y >= self.config.height as i32 - 1 {
+                    continue;
+                }
+                v.push((x as u32, y as u32));
+            }
+        }
+        v
+    }
+
+    fn spawn_food_entity(&mut self, layer: Layer, tile: (u32, u32), amount: u32, kind: FoodKind, stored: bool, spoil: Option<f64>) -> u32 {
         let id = self.fresh_id();
         let ent = self.ecs.spawn((
-            Food { amount, kind },
+            Food {
+                amount,
+                kind,
+                stored,
+                spoil,
+            },
             Pos {
-                p,
-                layer: Layer::Surface,
+                p: tile_center(tile.0, tile.1),
+                layer,
             },
         ));
         self.ids.insert(id, ent);
         id
+    }
+
+    /// Loose food pile (forage target, never spoils), split across cells to
+    /// respect the per-cell cap.
+    fn spawn_food(&mut self, p: Vec2, amount: u32, kind: FoodKind) -> u32 {
+        let mut first = u32::MAX;
+        let mut left = amount;
+        let start = tile_of(p);
+        let mut r = 0u32;
+        while left > 0 && r < 8 {
+            for tile in self.ring_tiles(start, r) {
+                if left == 0 {
+                    break;
+                }
+                if self.grid_of(Layer::Surface).get(tile.0, tile.1) != EMPTY {
+                    continue;
+                }
+                let room = FOOD_CELL_CAP.saturating_sub(self.cell_food(Layer::Surface, tile));
+                if room == 0 {
+                    continue;
+                }
+                let put = room.min(left);
+                let id = self.spawn_food_entity(Layer::Surface, tile, put, kind, false, None);
+                if first == u32::MAX {
+                    first = id;
+                }
+                left -= put;
+            }
+            r += 1;
+        }
+        first
+    }
+
+    /// One unit of loose (spoiling) dropped food on a cell with room.
+    fn spawn_unit_food(&mut self, layer: Layer, tile: (u32, u32), kind: FoodKind, spoil: Option<f64>) {
+        for fid in self.food_ids() {
+            let ent = self.ids[&fid];
+            let Ok(fp) = self.ecs.get::<&Pos>(ent) else {
+                continue;
+            };
+            if fp.layer != layer || tile_of(fp.p) != tile {
+                continue;
+            }
+            let room = self
+                .ecs
+                .get::<&Food>(ent)
+                .map(|f| f.kind == kind && f.amount < FOOD_CELL_CAP)
+                .unwrap_or(false);
+            if room {
+                if let Ok(mut q) = self.ecs.get::<&mut Food>(ent) {
+                    q.amount += 1;
+                    if q.stored {
+                        // pantry piles stay safe; a dropped unit joining one
+                        // is stored too
+                        q.stored = true;
+                        q.spoil = None;
+                    } else if q.spoil.is_none() {
+                        q.spoil = spoil;
+                    }
+                }
+                return;
+            }
+        }
+        self.spawn_food_entity(layer, tile, 1, kind, false, spoil);
+    }
+
+    /// Where carriers place collected food: the nearest silver cell to the
+    /// entrance with room, else the first free cell (both visible + safe).
+    fn pantry_tile(&self) -> Option<(u32, u32)> {
+        let (ex, ey) = self.world.entrance?;
+        let mut fallback: Option<(u32, u32)> = None;
+        for r in 0..=14u32 {
+            for tile in self.ring_tiles((ex, ey), r) {
+                if self.world.underground.get(tile.0, tile.1) != EMPTY {
+                    continue;
+                }
+                if self.cell_food(Layer::Underground, tile) >= FOOD_CELL_CAP {
+                    continue;
+                }
+                if self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER {
+                    return Some(tile);
+                }
+                if fallback.is_none() {
+                    fallback = Some(tile);
+                }
+            }
+        }
+        fallback
+    }
+
+    /// Bank carried food at a cell: credits the store, leaves a visible pile.
+    fn store_food(&mut self, ant: u32, tile: (u32, u32)) {
+        let ent = self.ids[&ant];
+        let kind = self
+            .ecs
+            .get::<&Carrying>(ent)
+            .map(|c| c.kind)
+            .unwrap_or(FoodKind::Green);
+        match kind {
+            FoodKind::Green => self.colony.food += 1,
+            FoodKind::Super => self.colony.food_super += 1,
+            _ => {}
+        }
+        self.colony.delivered += 1;
+        self.spawn_unit_food(Layer::Underground, tile, kind, None);
+        // pantry piles never spoil and are not forage targets
+        for fid in self.food_ids() {
+            let fent = self.ids[&fid];
+            let on_tile = self
+                .ecs
+                .get::<&Pos>(fent)
+                .map(|p| p.layer == Layer::Underground && tile_of(p.p) == tile)
+                .unwrap_or(false);
+            if on_tile {
+                if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
+                    q.stored = true;
+                    q.spoil = None;
+                }
+            }
+        }
+        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+            q.amount = 0;
+        }
     }
 
     fn spawn_egg(&mut self, p: Vec2, caste: Caste, total: f64) -> u32 {
@@ -712,6 +1266,7 @@ impl Sim {
                 hatch: total,
                 total,
                 caste,
+                carried_by: None,
             },
             Pos {
                 p,
@@ -770,6 +1325,9 @@ impl Sim {
             let (Ok(fp), Ok(ff)) = (self.ecs.get::<&Pos>(ent), self.ecs.get::<&Food>(ent)) else {
                 continue;
             };
+            if ff.stored {
+                continue; // pantry piles are not forage targets
+            }
             let tile = tile_of(fp.p);
             let super_first = if ff.kind == FoodKind::Super { 0 } else { 1 };
             let key = (super_first, manhattan(tile, entrance), fid);
@@ -778,6 +1336,22 @@ impl Sim {
             }
         }
         best.map(|(_, _, fid)| fid)
+    }
+
+    /// The egg this ant is carrying, if any.
+    fn egg_carried_by(&self, ant: u32) -> Option<u32> {
+        for eid in self.egg_ids() {
+            let ent = self.ids[&eid];
+            if self
+                .ecs
+                .get::<&Egg>(ent)
+                .map(|e| e.carried_by == Some(ant))
+                .unwrap_or(false)
+            {
+                return Some(eid);
+            }
+        }
+        None
     }
 
     fn tile_occupied(&self, tile: (u32, u32), layer: Layer) -> bool {
@@ -823,7 +1397,7 @@ impl Sim {
                 Some(&e) => e,
                 None => continue,
             };
-            let (caste, pos, state, carrying, job, pending, retry, attack_after) = {
+            let (caste, pos, state, carrying, job, pending, retry, attack_after, dig_after) = {
                 let mut qo = match self
                     .ecs
                     .query_one::<(&Ant, &Pos, &AntState, &Carrying, &WorkerAi)>(ent)
@@ -844,12 +1418,34 @@ impl Sim {
                     q.4.pending,
                     q.4.retry,
                     q.4.attack_after,
+                    q.4.dig_after,
                 )
             };
             // The queen is player-driven: she never takes forage/dig jobs and
-            // never auto-picks-up food — only an Attack order moves her.
+            // never auto-picks-up food — only Attack orders and walk-to-dig
+            // intents move her.
             if caste == Caste::Queen {
                 if !matches!(state, AntState::Idle) || retry > 0 {
+                    continue;
+                }
+                if let Some((bx, by)) = dig_after {
+                    if !self.block_soft(bx, by) {
+                        self.set_dig_after(id, None);
+                    } else if self.block_adjacent(id, bx, by) {
+                        self.set_dig_after(id, None);
+                        self.set_state(
+                            id,
+                            AntState::Digging {
+                                tx: bx,
+                                ty: by,
+                                progress: 0.0,
+                                resume: None,
+                            },
+                        );
+                    } else if !self.route_to_block(id, bx, by) {
+                        self.set_dig_after(id, None);
+                        self.set_retry(id, 60);
+                    }
                     continue;
                 }
                 if let Some(tid) = attack_after {
@@ -918,9 +1514,33 @@ impl Sim {
                 }
                 continue;
             }
+            // walk-to-dig intents: dig the remembered block on arrival
+            if let Some((bx, by)) = dig_after {
+                if !self.block_soft(bx, by) {
+                    self.set_dig_after(id, None);
+                } else if self.block_adjacent(id, bx, by) {
+                    self.set_dig_after(id, None);
+                    self.set_state(
+                        id,
+                        AntState::Digging {
+                            tx: bx,
+                            ty: by,
+                            progress: 0.0,
+                            resume: None,
+                        },
+                    );
+                } else if !self.route_to_block(id, bx, by) {
+                    self.set_dig_after(id, None);
+                    self.set_retry(id, 60);
+                }
+                continue;
+            }
             match job {
                 Job::Manual => {
-                    if pos.layer == Layer::Surface && carrying.amount == 0 {
+                    if pos.layer == Layer::Surface
+                        && carrying.amount == 0
+                        && self.egg_carried_by(id).is_none()
+                    {
                         if let Some(fid) = self.food_on_tile(tile_of(pos.p)) {
                             let mut picked: Option<FoodKind> = None;
                             if let Some(&fent) = self.ids.get(&fid) {
@@ -940,26 +1560,35 @@ impl Sim {
                                 }
                             }
                         }
-                    } else if pos.layer == Layer::Underground && carrying.amount > 0 {
-                        let qtile = self.queen_tile();
-                        if chebyshev(tile_of(pos.p), qtile) <= 1 {
-                            match carrying.kind {
-                                FoodKind::Green => self.colony.food += 1,
-                                FoodKind::Super => self.colony.food_super += 1,
-                                FoodKind::Dirt => {}
-                            }
-                            self.colony.delivered += 1;
-                            if let Some(&aent) = self.ids.get(&id) {
-                                if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
-                                    q.amount = 0;
-                                }
-                            }
+                    } else if pos.layer == Layer::Underground
+                        && carrying.amount > 0
+                        && matches!(carrying.kind, FoodKind::Green | FoodKind::Super)
+                    {
+                        // bank carried food: on silver cells, or beside the
+                        // queen when no pantry cell is handy
+                        let tile = tile_of(pos.p);
+                        let on_silver =
+                            self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER;
+                        let near_queen = chebyshev(tile, self.queen_tile()) <= 1;
+                        if (on_silver || near_queen)
+                            && self.cell_food(Layer::Underground, tile) < FOOD_CELL_CAP
+                        {
+                            self.store_food(id, tile);
                         }
                     }
                 }
                 Job::Idle => {
                     if carrying.amount > 0 {
-                        self.set_job(id, Job::Deliver);
+                        match self.pantry_tile() {
+                            Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
+                            None => {
+                                // pantry full: dig out more nest, then deliver
+                                match self.pick_dig_target() {
+                                    Some(t) => self.set_job(id, Job::DigTile(t.0, t.1)),
+                                    None => self.set_retry(id, 100),
+                                }
+                            }
+                        }
                     } else if let Some(t) = self.colony.dig_queue.pop() {
                         self.set_job(id, Job::DigTile(t.0, t.1));
                     } else if let Some(fid) = self.best_food() {
@@ -969,22 +1598,20 @@ impl Sim {
                     }
                 }
                 Job::DigTile(tx, ty) => {
-                    let kind = self.world.underground.get(tx, ty);
-                    if !Grid::is_soft(kind) {
+                    let (bx, by) = block_of(tx, ty);
+                    if !self.block_soft(bx, by) {
                         self.set_job(id, Job::Idle);
-                    } else if pos.layer == Layer::Underground
-                        && chebyshev(tile_of(pos.p), (tx, ty)) <= 1
-                    {
+                    } else if pos.layer == Layer::Underground && self.block_adjacent(id, bx, by) {
                         self.set_state(
                             id,
                             AntState::Digging {
-                                tx,
-                                ty,
+                                tx: bx,
+                                ty: by,
                                 progress: 0.0,
                                 resume: None,
                             },
                         );
-                    } else if !self.route(id, Layer::Underground, (tx, ty)) {
+                    } else if !self.route_to_block(id, bx, by) {
                         self.set_job(id, Job::Idle);
                         self.set_retry(id, 60);
                     }
@@ -1015,7 +1642,16 @@ impl Sim {
                                         q.kind = kind;
                                     }
                                 }
-                                self.set_job(id, Job::Deliver);
+                                match self.pantry_tile() {
+                                    Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
+                                    None => {
+                                        // pantry full: dig out more nest first
+                                        match self.pick_dig_target() {
+                                            Some(t) => self.set_job(id, Job::DigTile(t.0, t.1)),
+                                            None => self.set_retry(id, 100),
+                                        }
+                                    }
+                                }
                             } else {
                                 self.set_job(id, Job::Idle);
                             }
@@ -1027,30 +1663,26 @@ impl Sim {
                         self.set_retry(id, 60);
                     }
                 }
-                Job::Deliver => {
+                Job::Deliver(tx, ty) => {
                     if carrying.amount == 0 {
                         self.set_job(id, Job::Idle);
                         continue;
                     }
-                    let qtile = self.queen_tile();
                     if pos.layer == Layer::Underground {
-                        if chebyshev(tile_of(pos.p), qtile) <= 1 {
-                            match carrying.kind {
-                                FoodKind::Green => self.colony.food += 1,
-                                FoodKind::Super => self.colony.food_super += 1,
-                                FoodKind::Dirt => {}
+                        let tile = tile_of(pos.p);
+                        if tile == (tx, ty) {
+                            if self.cell_food(Layer::Underground, tile) < FOOD_CELL_CAP {
+                                self.store_food(id, tile);
+                                self.set_job(id, Job::Idle);
+                            } else {
+                                // pantry cell filled up on the way — re-pick
+                                self.set_job(id, Job::Idle);
                             }
-                            self.colony.delivered += 1;
-                            if let Some(&aent) = self.ids.get(&id) {
-                                if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
-                                    q.amount = 0;
-                                }
-                            }
-                            self.set_job(id, Job::Idle);
-                        } else if !self.route(id, Layer::Underground, qtile) {
+                        } else if !self.route(id, Layer::Underground, (tx, ty)) {
                             self.set_retry(id, 60);
+                            self.set_job(id, Job::Idle);
                         }
-                    } else if !self.route(id, Layer::Underground, qtile) {
+                    } else if !self.route(id, Layer::Underground, (tx, ty)) {
                         self.set_retry(id, 60);
                     }
                 }
@@ -1102,7 +1734,14 @@ impl Sim {
                 if pos.layer == Layer::Underground {
                     let kind = self.world.underground.get(tx, ty);
                     if Grid::is_soft(kind) {
-                        dig_target = Some((tx, ty));
+                        // workers auto-dig whole blocks; a partially-solid
+                        // block is a stale path — just stop and re-plan
+                        let (bx, by) = block_of(tx, ty);
+                        if self.block_soft(bx, by) {
+                            dig_target = Some((bx, by));
+                        } else {
+                            finished = true;
+                        }
                         break;
                     }
                 }
@@ -1131,7 +1770,8 @@ impl Sim {
                 if then_swap {
                     pos.layer = pos.layer.other();
                     if let Some((ex, ey)) = self.world.entrance {
-                        p = tile_center(ex, ey);
+                        // the entrance hole is a 2×2 block — land on its center
+                        p = Vec2::new(ex as f64 + 1.0, ey as f64 + 1.0);
                     }
                 }
                 AntState::Idle
@@ -1175,8 +1815,8 @@ impl Sim {
                 } => (tx, ty, progress, resume),
                 _ => continue,
             };
-            let kind = self.world.underground.get(tx, ty);
-            if !Grid::is_soft(kind) {
+            // tx, ty are the 2×2 block origin
+            if !self.block_soft(tx, ty) {
                 match resume {
                     Some(b) => {
                         self.set_state(
@@ -1204,8 +1844,12 @@ impl Sim {
             };
             progress += DT;
             if progress >= dig_time {
-                self.world.underground.set(tx, ty, EMPTY);
-                self.dug_tiles += 1;
+                for dy in 0..2u32 {
+                    for dx in 0..2u32 {
+                        self.world.underground.set(tx + dx, ty + dy, EMPTY);
+                    }
+                }
+                self.dug_tiles += 4;
                 // the founding queen carries excavated dirt out; workers'
                 // spoil handling is a later wave
                 if caste == Caste::Queen {
@@ -1598,9 +2242,11 @@ impl Sim {
                         continue;
                     }
                     let (x, y) = (x as u32, y as u32);
-                    if Grid::is_soft(self.world.underground.get(x, y))
-                        && self.has_empty_neighbor(x, y)
-                    {
+                    let (bx, by) = block_of(x, y);
+                    if !self.block_soft(bx, by) {
+                        continue;
+                    }
+                    if self.has_empty_neighbor(x, y) {
                         return Some((x, y));
                     }
                 }
@@ -1651,17 +2297,71 @@ impl Sim {
 
     fn eggs(&mut self) {
         let ids = self.egg_ids();
+        // carried eggs ride their carrier; a dead carrier drops them in place
+        for &eid in &ids {
+            let Some(&eent) = self.ids.get(&eid) else {
+                continue;
+            };
+            let carried_by = self
+                .ecs
+                .get::<&Egg>(eent)
+                .ok()
+                .and_then(|e| e.carried_by);
+            let Some(carrier) = carried_by else {
+                continue;
+            };
+            let cpos = self.ids.get(&carrier).and_then(|&ce| {
+                self.ecs.get::<&Pos>(ce).ok().map(|p| (p.p, p.layer))
+            });
+            match cpos {
+                Some((p, layer)) => {
+                    if let Some(q) = self
+                        .ecs
+                        .query_one::<(&mut Pos,)>(eent)
+                        .unwrap()
+                        .get()
+                    {
+                        q.0.p = p;
+                        q.0.layer = layer;
+                    }
+                }
+                None => {
+                    if let Ok(mut q) = self.ecs.get::<&mut Egg>(eent) {
+                        q.carried_by = None;
+                    }
+                }
+            }
+        }
         for id in ids {
             let ent = match self.ids.get(&id) {
                 Some(&e) => e,
                 None => continue,
             };
-            let (hatch, caste, pos) = match self.ecs.query_one::<(&Egg, &Pos)>(ent).unwrap().get() {
-                Some(q) => (q.0.hatch, q.0.caste, *q.1),
+            let (hatch, caste, carried, pos) = match self
+                .ecs
+                .query_one::<(&Egg, &Pos)>(ent)
+                .unwrap()
+                .get()
+            {
+                Some(q) => (q.0.hatch, q.0.caste, q.0.carried_by, *q.1),
                 None => continue,
             };
             let hatch = hatch - DT;
-            if hatch <= 0.0 && self.colony.ant_count < self.config.max_ants {
+            // transformation happens only on an empty orange cell — ready
+            // eggs wait wherever they are until moved to one. (The legacy
+            // founded start has no soil system: any empty cell hatches.)
+            let on_orange = pos.layer == Layer::Underground
+                && (!self.colony.founding
+                    || self.soil_at(
+                        Layer::Underground,
+                        pos.p.x.floor() as u32,
+                        pos.p.y.floor() as u32,
+                    ) == SOIL_ORANGE);
+            if hatch <= 0.0
+                && carried.is_none()
+                && on_orange
+                && self.colony.ant_count < self.config.max_ants
+            {
                 let p = pos.p;
                 self.kill(id);
                 self.spawn_ant(caste, p, Layer::Underground);
@@ -1679,9 +2379,35 @@ impl Sim {
         let ids = self.food_ids();
         for id in ids {
             let ent = self.ids[&id];
-            let amount = self.ecs.get::<&Food>(ent).map(|q| q.amount).unwrap_or(0);
+            let (amount, spoil, pos) = match self
+                .ecs
+                .query_one::<(&Food, &Pos)>(ent)
+                .unwrap()
+                .get()
+            {
+                Some(q) => (q.0.amount, q.0.spoil, *q.1),
+                None => continue,
+            };
             if amount == 0 {
                 self.kill(id);
+                continue;
+            }
+            // dropped food spoils on non-silver cells; silver freezes the timer
+            if let Some(mut t) = spoil {
+                let tile = (pos.p.x.floor() as u32, pos.p.y.floor() as u32);
+                let silver = self.soil_at(pos.layer, tile.0, tile.1) == SOIL_SILVER;
+                if silver {
+                    if let Ok(mut q) = self.ecs.get::<&mut Food>(ent) {
+                        q.spoil = Some(t);
+                    }
+                    continue;
+                }
+                t -= DT;
+                if t <= 0.0 {
+                    self.kill(id);
+                } else if let Ok(mut q) = self.ecs.get::<&mut Food>(ent) {
+                    q.spoil = Some(t);
+                }
             }
         }
     }
@@ -1791,9 +2517,12 @@ impl Sim {
                 layer: pos.layer as u8,
                 x: pos.p.x,
                 y: pos.p.y,
-                state: 0,
+                state: if food.stored { 1 } else { 0 },
                 extra: food.amount as f64,
-                hp: 1.0,
+                hp: food
+                    .spoil
+                    .map(|t| (t / SPOIL_TIME).clamp(0.0, 1.0))
+                    .unwrap_or(1.0),
                 aux: food.kind as u8 as f64,
             });
         }
@@ -1805,7 +2534,7 @@ impl Sim {
                 layer: pos.layer as u8,
                 x: pos.p.x,
                 y: pos.p.y,
-                state: 0,
+                state: if egg.carried_by.is_some() { 1 } else { 0 },
                 extra: egg.hatch / egg.total,
                 hp: 1.0,
                 aux: if egg.caste == Caste::Soldier {

@@ -47,6 +47,14 @@ AntWar.io is a great proof of concept, but it is not perfect and no longer maint
 - **Founding grace:** starvation is suspended while the colony has no workers; the queen is still on her own against spiders once grounded (her death by any means ends the colony).
 - All founding numbers live in `core/src/balance.rs` (`QUEEN_FLY_SPEED`, `QUEEN.speed`, `QUEEN_DIG_TIME`, `FOUNDING_TIME`, `FOUNDING_EGGS`, `FOUNDING_EGG_HATCH`).
 
+### Nest soil & food logistics (confirmed)
+- **Digging is 2×2:** one dig action removes an aligned 2×2 block (all four cells must be dirt); one carried dirt block refills one fully-empty block — or vanishes dropped above ground. Right-clicking distant dirt **walks the ant there and digs on arrival** (the reported bug — fixed).
+- **Soil quality, hidden under the dirt:** each underground 2×2 block has a chance (~3.5% each) of being **orange** or **silver**, revealed by digging. The surface shows 2 orange + 2 silver **dust patches** (~10×12): founding the nest inside one grants 3–6 hidden soil blocks of that color near the nest.
+- **Orange = nursery.** Eggs transform into ants **only on empty orange cells** — ready eggs wait indefinitely until carried there. Any ant can pick up an adjacent egg (right-click) and place it (right-click); the hatch state is preserved.
+- **Silver = pantry.** Food that ants pick up and drop spoils after 5 minutes on a non-silver cell (the timer freezes while on silver); worldgen piles never spoil. Per-cell cap: **6 food units** (any mix) — bigger piles spread across neighboring cells.
+- **Physical pantry:** workers place collected food on the **nearest silver cell** to the entrance (first free cell if none exists yet) as a visible, safe pile; placement credits the food store, and when the pantry fills up the carriers dig out more nest space. The queen still eats from the abstract store (physical eating is undecided).
+- All knobs in `core/src/balance.rs` (`ORANGE/SILVER_SOIL_CHANCE`, `PATCH_*`, `FOOD_CELL_CAP`, `SPOIL_TIME`, ...). Dev: `__woa.setsoil(layer, x, y, 0|1|2)` paints a block (replayable `dev-soil` act).
+
 ### Combat & content (confirmed, Phase 3 wave 1)
 - **Combat model:** original-style melee — HP / damage / attack cooldown / speed per unit; click an enemy to lock on and auto-attack in range.
 - **Stats (wave 1):** Worker 100 HP / 8 dmg / 1.0s CD / speed 3.0 · Soldier 130 / 22 / 1.0s / 2.6 · Queen 150 HP · Spider 130 / 15 / 1.2s / 2.2 (aggro 5 tiles, wanders near lair, surface only). Values live in `core/src/balance.rs` — see "Balance table".
@@ -120,6 +128,8 @@ The following decisions are **not yet made**. `docs/BASED-ON.md` describes the o
 - [ ] Ant castes beyond Queen/Worker — Soldier added in wave 1; Nanitic, Major, Acid Ant, Alate still undecided
 - [ ] Ongoing brood production after founding (the founding script lays exactly 4 eggs; production design — costs, castes, menu — is a later decision)
 - [ ] Dirt hauling for workers (the founding queen hauls dirt; worker digging is still instant-spoil)
+- [ ] Does the queen eventually eat the physical pantry food (vs the abstract store)?
+- [ ] Should worker AI also seek orange cells for eggs / silver for placement proactively?
 - [ ] Food types and economy details — Green + Super in wave 1; Meat and Red Food undecided
 - [ ] Whether to re-enable the pheromone system the original disabled
 - [x] Fog of war — was in wave 1, **removed for now** (may return, server-authoritative, with multiplayer); day/night and weather parameters still undecided

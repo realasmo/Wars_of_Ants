@@ -51,6 +51,8 @@ export class Sim {
   food = 0;
   private tilesCache: (Uint8Array | null)[] = [null, null];
   private tilesDirtyFlag = [true, true];
+  /** Per-tile soil quality (0 none, 1 orange, 2 silver) per layer. */
+  soil: Uint8Array[] = [new Uint8Array(0), new Uint8Array(0)];
 
   constructor(seed: number, workers = 3, clusters = 6, opts: SimOptions = {}) {
     this.foundingMode = opts.founding ?? false;
@@ -64,6 +66,19 @@ export class Sim {
     this.entrance = e.length === 2 ? [e[0], e[1]] : null;
     this.pull();
     this.pollTiles();
+    this.refreshSoil();
+  }
+
+  /** Refetch soil grids (they change only at worldgen, founding grants and
+   * dev soil ops). */
+  refreshSoil(): void {
+    this.soil[0] = new Uint8Array(this.sim.soil_surface());
+    this.soil[1] = new Uint8Array(this.sim.soil_underground());
+  }
+
+  soilAt(layer: number, x: number, y: number): number {
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return 0;
+    return this.soil[layer][y * this.w + x];
   }
 
   tick(): void {
@@ -104,8 +119,17 @@ export class Sim {
     return this.sim.cmd_found(id);
   }
 
-  dump(id: number, tx: number, ty: number): boolean {
-    return this.sim.cmd_dump(id, tx, ty);
+  drop(id: number, tx: number, ty: number): boolean {
+    return this.sim.cmd_drop(id, tx, ty);
+  }
+
+  pickEgg(id: number, egg: number): boolean {
+    return this.sim.cmd_pick_egg(id, egg);
+  }
+
+  devSetSoil(layer: number, x: number, y: number, soil: number): void {
+    this.sim.dev_set_soil(layer, x, y, soil);
+    this.refreshSoil();
   }
 
   /** Colony start phase: 0 flight, 1 grounded, 2 founding, 3 brood, 4 colony. */

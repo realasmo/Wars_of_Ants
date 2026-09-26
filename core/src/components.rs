@@ -27,8 +27,10 @@ pub enum FoodKind {
     Green = 0,
     Super = 1,
     /// Excavated dirt carried by the founding queen — not food; dropped dirt
-    /// refills an empty underground cell or vanishes on the surface.
+    /// refills an empty 2×2 block or vanishes on the surface.
     Dirt = 2,
+    /// Flag while carrying an egg (the egg entity itself keeps the state).
+    Egg = 3,
 }
 
 #[derive(Clone, Debug)]
@@ -80,7 +82,8 @@ pub enum Job {
     Manual,
     Idle,
     Fetch(u32),
-    Deliver,
+    /// Carry food to the pantry cell (x, y).
+    Deliver(u32, u32),
     DigTile(u32, u32),
 }
 
@@ -90,6 +93,9 @@ pub struct WorkerAi {
     pub retry: u32,
     pub pending: Option<(Layer, (u32, u32))>,
     pub attack_after: Option<u32>,
+    /// Walk-to-dig intent (2×2 block origin): route to the block, dig on
+    /// arrival — right-clicking distant dirt must send the ant there.
+    pub dig_after: Option<(u32, u32)>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -102,6 +108,12 @@ pub struct Carrying {
 pub struct Food {
     pub amount: u32,
     pub kind: FoodKind,
+    /// True for food placed in the nest pantry by ants: visible and safe, but
+    /// not a forage target.
+    pub stored: bool,
+    /// Remaining spoil seconds — None = never spoils (worldgen piles, pantry
+    /// food); Some(t) ticks down while the food sits on a non-silver cell.
+    pub spoil: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -109,6 +121,9 @@ pub struct Egg {
     pub hatch: f64,
     pub total: f64,
     pub caste: Caste,
+    /// Carrying ant, if any: position follows the carrier and hatching is
+    /// suspended until placed on an orange cell.
+    pub carried_by: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug)]

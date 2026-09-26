@@ -191,9 +191,11 @@ fn dig_command_digs_tile() {
     let e = s.world.entrance.unwrap().0;
     assert_eq!(s.tile_at(Layer::Underground, e + 3, 2), DIRT);
     let w = first_worker(&s);
+    // stand inside the chamber (a block dig target must not overlap the walk
+    // path, or the worker auto-digs it on the way there)
     assert!(s.issue(Command::Move {
         ant: w,
-        x: (e + 2) as f64 + 0.5,
+        x: (e + 1) as f64 + 0.5,
         y: 2.5,
     }));
     for _ in 0..600 {
@@ -207,5 +209,9 @@ fn dig_command_digs_tile() {
     for _ in 0..100 {
         s.tick();
     }
+    // digging removes the whole aligned 2x2 block
+    assert_eq!(s.tile_at(Layer::Underground, e + 2, 2), EMPTY);
     assert_eq!(s.tile_at(Layer::Underground, e + 3, 2), EMPTY);
+    assert_eq!(s.tile_at(Layer::Underground, e + 2, 3), EMPTY);
+    assert_eq!(s.tile_at(Layer::Underground, e + 3, 3), EMPTY);
 }

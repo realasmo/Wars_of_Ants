@@ -156,6 +156,8 @@ export class Game {
         if (e.target !== undefined) c.target = e.target;
         if (e.kind !== undefined) c.kind = e.kind;
         if (e.n !== undefined) c.n = e.n;
+        if (e.layer !== undefined) c.layer = e.layer;
+        if (e.soil !== undefined) c.soil = e.soil;
         return c;
       });
     return {
@@ -227,6 +229,16 @@ export class Game {
 
   debugTile(layer: number, x: number, y: number): number {
     return this.sim.tileAt(layer, x, y);
+  }
+
+  debugSoil(layer: number, x: number, y: number): number {
+    return this.sim.soilAt(layer, x, y);
+  }
+
+  debugSetSoil(layer: number, x: number, y: number, soil: number): void {
+    if (this.sim.dead || this.replay !== null) return;
+    this.sim.devSetSoil(layer, x, y, soil);
+    this.log.push({ type: 'cmd', act: 'dev-soil', layer, x, y, soil });
   }
 
   debugState(): Record<string, unknown> {
@@ -436,8 +448,7 @@ export class Game {
       const me = this.sim.cur.get(this.playerAnt);
       const tx = Math.floor(x);
       const ty = Math.floor(y);
-      // founding queen context actions (flight → land, grounded → found nest,
-      // hauling dirt → fill a cell / discard above ground)
+      // founding queen context actions (flight → land, grounded → found nest)
       if (me !== undefined && me.kind === 0) {
         const phase = this.sim.phase();
         if (phase === 0) {
@@ -462,42 +473,108 @@ export class Game {
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }
-        if (me.aux > 1.5) {
-          if (me.layer === 0) {
-            // above ground the dirt simply disappears
-            this.log.push({ type: 'cmd', act: 'dump', ant: this.playerAnt, tx: 0, ty: 0, note: 'surface' });
-            this.sim.dump(this.playerAnt, 0, 0);
-            this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
-            return;
-          }
-          const kind = this.sim.tileAt(1, tx, ty);
+      }
+      // carrying something → place/drop it (egg, dirt, food)
+      if (me !== undefined && me.aux > 1.5) {
+        if (me.aux >= 2.5) {
+          // egg: place on the adjacent empty cell
+          const kind = this.sim.tileAt(me.layer, tx, ty);
           const adjacent =
             Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
-          if (kind === 0 && adjacent && this.sim.dump(this.playerAnt, tx, ty)) {
-            this.log.push({ type: 'cmd', act: 'dump', ant: this.playerAnt, tx, ty });
+          if (kind === 0 && adjacent && this.sim.drop(this.playerAnt, tx, ty)) {
+            this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'egg' });
             this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
             return;
           }
-          // invalid fill target → fall through (walk / entrance / dig-refused)
+        } else if (me.layer === 1) {
+          // dirt: fill the fully-empty adjacent 2×2 block — but never the
+          // entrance hole: clicking near it while hauling means "carry it out"
+          const ent0 = this.sim.entrance;
+          const isHoleBlock =
+            ent0 !== null && (tx & ~1) === ent0[0] && (ty & ~1) === ent0[1];
+          const bx = tx & ~1;
+          const by = ty & ~1;
+          let emptyBlock = true;
+          for (let dy = 0; dy < 2; dy++) {
+            for (let dx = 0; dx < 2; dx++) {
+              if (this.sim.tileAt(1, bx + dx, by + dy) !== 0) emptyBlock = false;
+            }
+          }
+          if (
+            !isHoleBlock &&
+            emptyBlock &&
+            Math.max(Math.abs(me.x - bx - 1), Math.abs(me.y - by - 1)) <= 2 &&
+            this.sim.drop(this.playerAnt, tx, ty)
+          ) {
+            this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'dirt' });
+            this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+            return;
+          }
+        } else {
+          // dirt above ground: the drop simply discards it
+          this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx: 0, ty: 0, note: 'surface' });
+          this.sim.drop(this.playerAnt, 0, 0);
+          this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+          return;
+        }
+        // invalid placement → fall through (walk / entrance / dig-refused)
+      } else if (me !== undefined && me.extra > 0.5 && me.kind !== 0) {
+        // food: drop one unit on the adjacent cell (spoils off silver)
+        const kind = this.sim.tileAt(me.layer, tx, ty);
+        const adjacent =
+          Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
+        if (kind === 0 && adjacent && this.sim.drop(this.playerAnt, tx, ty)) {
+          this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'food' });
+          this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+          return;
         }
       }
-      // dig/fill intent wins over entrance crossing — the starter-chamber
-      // walls sit inside the entrance click radius, and the hole itself is
-      // never a soft tile, so crossing still works on the marked hole
-      const ent = this.sim.entrance;
-      const kind = this.sim.tileAt(1, tx, ty);
+      // empty hands + adjacent egg under the cursor → pick it up
+      if (me !== undefined && me.extra <= 0.5 && me.aux <= 1.5) {
+        let egg: Snap | null = null;
+        let bestD = 0.8 * 0.8;
+        for (const s of this.sim.cur.values()) {
+          if (s.kind !== 3 || s.layer !== layer || s.state === 1) continue;
+          const d = (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y);
+          if (d < bestD) {
+            bestD = d;
+            egg = s;
+          }
+        }
+        if (egg !== null) {
+          const adjacent =
+            Math.max(Math.abs(me.x - egg.x), Math.abs(me.y - egg.y)) <= 1.5;
+          if (adjacent && this.sim.pickEgg(this.playerAnt, egg.id)) {
+            this.log.push({ type: 'cmd', act: 'pick-egg', ant: this.playerAnt, target: egg.id });
+            this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+            return;
+          }
+          // egg clicked but out of reach: walk to it instead
+          this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: r2(x), y: r2(y), note: 'to-egg' });
+          this.sim.move(this.playerAnt, x, y);
+          this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+          return;
+        }
+      }
+      // dig any dirt: the ant walks there and digs on arrival (core handles it)
+      const kind = this.sim.tileAt(layer, tx, ty);
       const soft = kind >= 1 && kind <= 3;
-      const adjacent =
-        me !== undefined &&
-        Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
-      if (layer === 1 && soft && adjacent) {
+      if (layer === 1 && soft) {
         if (this.sim.dig(this.playerAnt, tx, ty)) {
           this.log.push({ type: 'cmd', act: 'dig', ant: this.playerAnt, tx, ty });
-        } else {
-          this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: tx + 0.5, y: ty + 0.5, note: 'dig-refused' });
-          this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
+          this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+          return;
         }
-      } else if (ent && Math.max(Math.abs(tx - ent[0]), Math.abs(ty - ent[1])) <= 2) {
+        this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: tx + 0.5, y: ty + 0.5, note: 'dig-refused' });
+        this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
+        this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+        return;
+      }
+      const ent = this.sim.entrance;
+      if (
+        ent &&
+        Math.max(Math.abs(tx - (ent[0] + 1)), Math.abs(ty - (ent[1] + 1))) <= 2
+      ) {
         this.log.push({ type: 'cmd', act: 'entrance', ant: this.playerAnt });
         this.sim.useEntrance(this.playerAnt);
       } else {
@@ -555,6 +632,7 @@ export class Game {
     // the entrance appears when the founding queen creates the nest
     if (this.sim.entrance !== this.lastEntrance) {
       this.lastEntrance = this.sim.entrance;
+      this.sim.refreshSoil(); // founding grants paint soil blocks at this moment
       this.renderer.drawTiles(0);
       this.sim.consumeDirty(0);
       this.renderer.drawTiles(1);
@@ -612,13 +690,17 @@ export class Game {
       else if (c.act === 'entrance') this.sim.useEntrance(c.ant ?? 0);
       else if (c.act === 'land') this.sim.land(c.ant ?? 0);
       else if (c.act === 'found') this.sim.found(c.ant ?? 0);
-      else if (c.act === 'dump') this.sim.dump(c.ant ?? 0, c.tx ?? 0, c.ty ?? 0);
+      else if (c.act === 'dump' || c.act === 'drop')
+        this.sim.drop(c.ant ?? 0, c.tx ?? 0, c.ty ?? 0);
+      else if (c.act === 'pick-egg') this.sim.pickEgg(c.ant ?? 0, c.target ?? 0);
       else if (c.act === 'dev-spawn') this.sim.devSpawn(String(c.kind), c.x ?? 0, c.y ?? 0);
       else if (c.act === 'dev-food') this.sim.devSetFood(Number(c.n ?? 0));
       else if (c.act === 'dev-super') this.sim.devSetSuper(Number(c.n ?? 0));
       else if (c.act === 'dev-kill-spiders') {
         for (const s of [...this.sim.cur.values()]) if (s.kind === 4) this.sim.devKill(s.id);
       } else if (c.act === 'dev-kill') this.sim.devKill(Number(c.target ?? 0));
+      else if (c.act === 'dev-soil')
+        this.sim.devSetSoil(Number(c.layer ?? 0), c.x ?? 0, c.y ?? 0, Number(c.soil ?? 0));
       applied = true;
     }
     if (applied && rp.i >= rp.cmds.length) {

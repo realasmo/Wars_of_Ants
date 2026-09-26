@@ -10,13 +10,14 @@ const HELP_COLONY =
   'the camera follows your ant; spectate (Tab, drag, WASD) when it dies';
 
 const HELP_FOUNDING =
-  'Right-click dirt: dig · Carrying dirt: right-click an empty cell to fill it, or haul it out and drop it above ground · ' +
-  'The marked hole is the entrance · Hold left button: walk · F2: dev tools · F3: perf';
+  'Right-click dirt: walk there and dig (2×2) · Dirt: right-click empty space to refill a 2×2 block, haul it out and drop above ground to discard · ' +
+  'Orange soil = eggs only hatch there · Silver = food never spoils there · Right-click an egg to carry it, again to place · F2 · F3';
 
 const HELP_FLIGHT = 'Hold left button: fly toward the cursor · Right-click: land here · F2: dev tools · F3: perf';
 
 const HELP_GROUNDED =
-  'Hold left button: walk · Right-click: found the nest where the queen stands (keep ~3 tiles from the map edges) · F2: dev tools · F3: perf';
+  'Hold left button: walk · Right-click: found the nest where the queen stands (orange/silver dust patches grant that soil nearby — dig to find it) · ' +
+  'Keep ~6 tiles from the map edges · F2 · F3';
 
 export class Hud {
   private helpText = '';

@@ -15,6 +15,8 @@ declare global {
       state: () => Record<string, unknown>;
       px: (x: number, y: number) => number[];
       tile: (layer: number, x: number, y: number) => number;
+      soil: (layer: number, x: number, y: number) => number;
+      setsoil: (layer: number, x: number, y: number, soil: number) => void;
       log: () => Record<string, unknown>;
       mark: (label: string) => void;
       replay: () => Record<string, unknown>;
@@ -62,6 +64,8 @@ async function main(): Promise<void> {
     state: () => game.debugState(),
     px: (x, y) => game.debugPixel(x, y),
     tile: (layer, x, y) => game.debugTile(layer, x, y),
+    soil: (layer, x, y) => game.debugSoil(layer, x, y),
+    setsoil: (layer, x, y, soil) => game.debugSetSoil(layer, x, y, soil),
     log: () => game.debugLog(),
     mark: (label) => game.debugMark(label),
     replay: () => game.debugReplay(),

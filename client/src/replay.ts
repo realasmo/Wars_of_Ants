@@ -16,11 +16,14 @@ export interface ReplayCmd {
     | 'land'
     | 'found'
     | 'dump'
+    | 'drop'
+    | 'pick-egg'
     | 'dev-spawn'
     | 'dev-food'
     | 'dev-super'
     | 'dev-kill'
-    | 'dev-kill-spiders';
+    | 'dev-kill-spiders'
+    | 'dev-soil';
   ant?: number;
   x?: number;
   y?: number;
@@ -29,6 +32,8 @@ export interface ReplayCmd {
   target?: number;
   kind?: string;
   n?: number;
+  layer?: number;
+  soil?: number;
 }
 
 export interface Replay {

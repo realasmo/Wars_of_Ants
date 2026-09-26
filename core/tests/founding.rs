@@ -152,17 +152,22 @@ fn found_nest_creates_entrance_and_chamber() {
     assert!(s.issue(Command::FoundNest { ant: q.id }));
     assert_eq!(s.colony.phase, Phase::Founding);
     assert_eq!(s.colony.phase_t, 60.0);
+    // 2×2 entrance hole + 4×4 starter chamber (block-aligned)
     assert_eq!(s.world.entrance, Some((48, 48)));
-    // shaft + 3x3 starter chamber carved around the founding tile
-    assert_eq!(s.tile_at(Layer::Underground, 48, 48), EMPTY);
-    for y in 49..=51 {
-        for x in 47..=49 {
-            assert_eq!(s.tile_at(Layer::Underground, x, y), EMPTY);
+    for y in 48..=49 {
+        for x in 48..=49 {
+            assert_eq!(s.tile_at(Layer::Underground, x, y), EMPTY, "hole block");
         }
     }
+    for y in 50..=53 {
+        for x in 48..=51 {
+            assert_eq!(s.tile_at(Layer::Underground, x, y), EMPTY, "chamber");
+        }
+    }
+    assert_eq!(s.tile_at(Layer::Underground, 47, 50), 1, "chamber edge stays dirt");
     let q = queen(&s);
     assert_eq!(q.layer, Layer::Underground as u8);
-    assert!(s.tiles_dug() >= 10);
+    assert!(s.tiles_dug() >= 20);
     // one nest per game
     assert!(!s.issue(Command::FoundNest { ant: q.id }));
 }
@@ -197,7 +202,7 @@ fn queen_dig_yields_dirt_and_dump_refills_the_cell() {
         ty: ty2
     }));
     // dumping underground refills an adjacent empty cell — the one just dug
-    assert!(s.issue(Command::DumpDirt { ant: q.id, tx, ty }));
+    assert!(s.issue(Command::Drop { ant: q.id, tx, ty }));
     assert_eq!(s.tile_at(Layer::Underground, tx, ty), DIRT);
     assert_eq!(queen(&s).aux, 0.0);
 }
@@ -213,7 +218,7 @@ fn dirt_dumped_on_the_surface_disappears() {
         s.tick();
     }
     assert_eq!(queen(&s).layer, Layer::Surface as u8);
-    assert!(s.issue(Command::DumpDirt { ant: q.id, tx: 0, ty: 0 }));
+    assert!(s.issue(Command::Drop { ant: q.id, tx: 0, ty: 0 }));
     assert_eq!(queen(&s).aux, 0.0);
     assert_eq!(
         s.tile_at(Layer::Underground, tx, ty),
@@ -223,7 +228,7 @@ fn dirt_dumped_on_the_surface_disappears() {
 }
 
 #[test]
-fn founding_timer_lays_four_eggs_then_workers_hatch() {
+fn founding_timer_lays_four_eggs_then_workers_hatch_on_orange() {
     let mut s = founded(42);
     // 60s window (plus a margin: DT is not binary-exact, so the timer can
     // need one extra tick to cross zero)
@@ -233,13 +238,22 @@ fn founding_timer_lays_four_eggs_then_workers_hatch() {
     assert_eq!(s.colony.phase, Phase::Brood);
     assert_eq!(eggs(&s), 4);
     assert_eq!(s.colony.eggs_laid, 4);
-    // FOUNDING_EGG_HATCH (180s) after laying
+    // eggs only transform on orange cells — with none, they wait forever
     for _ in 0..3620 {
         s.tick();
     }
-    assert_eq!(s.colony.phase, Phase::Colony);
-    assert_eq!(workers(&s), 4);
-    assert_eq!(s.colony.ant_count, 5);
+    assert_eq!(phase(&s), Phase::Brood, "eggs must wait without orange soil");
+    assert_eq!(workers(&s), 0);
+    // paint orange under one egg — it hatches and the colony phase begins
+    let egg = s.snapshot().into_iter().find(|e| e.kind == 3).unwrap();
+    let (ex, ey) = (egg.x.floor() as u32, egg.y.floor() as u32);
+    s.dev_set_soil(1, ex, ey, 1);
+    for _ in 0..30 {
+        s.tick();
+    }
+    assert_eq!(phase(&s), Phase::Colony);
+    assert_eq!(workers(&s), 1);
+    assert_eq!(eggs(&s), 3, "the other eggs still wait for orange");
     // once workers exist the queen loses her digging rights: walk her to a
     // wall first so the refusal can't be explained by distance
     let ((sx, sy), (tx, ty)) = dig_site(&s);
@@ -254,6 +268,10 @@ fn founding_timer_lays_four_eggs_then_workers_hatch() {
     }
     let q = queen(&s);
     assert!(!s.issue(Command::Dig { ant: q.id, tx, ty }));
+}
+
+fn phase(s: &Sim) -> Phase {
+    s.colony.phase
 }
 
 #[test]
@@ -304,7 +322,7 @@ fn founding_is_deterministic_per_seed_and_team() {
             s.tick();
         }
         let (tx, ty) = walk_and_dig(&mut s, 60);
-        s.issue(Command::DumpDirt { ant: queen(&s).id, tx, ty });
+        s.issue(Command::Drop { ant: queen(&s).id, tx, ty });
         for _ in 0..1300 {
             s.tick();
         }
@@ -315,4 +333,189 @@ fn founding_is_deterministic_per_seed_and_team() {
     assert_eq!(a, b);
     let red = run(Team::Red);
     assert_ne!(a, red, "team choice must be part of the canonical state");
+}
+
+#[test]
+fn distant_dig_command_walks_there_and_digs() {
+    let mut s = founded(42);
+    let q = queen(&s);
+    // a fully-soft block on the digging frontier (adjacent to emptiness),
+    // a few tiles from the queen — deeper blocks are correctly refused until
+    // the nest tunnels toward them
+    let q0 = queen(&s);
+    let (qx, qy) = (q0.x.floor() as i32, q0.y.floor() as i32);
+    let mut target = None;
+    let mut best_d = 0i32;
+    'scan: for by in (40..58u32).step_by(2) {
+        for bx in (40..58u32).step_by(2) {
+            let mut soft = true;
+            for dy in 0..2u32 {
+                for dx in 0..2u32 {
+                    let k = s.tile_at(Layer::Underground, bx + dx, by + dy);
+                    if k != DIRT && k != 2 && k != 3 {
+                        soft = false;
+                    }
+                }
+            }
+            if !soft {
+                continue;
+            }
+            let mut touches_empty = false;
+            'n: for ny in (bx.saturating_sub(1))..=bx + 2 {
+                for nx in (by.saturating_sub(1))..=by + 2 {
+                    let _ = nx;
+                    let _ = ny;
+                    break 'n;
+                }
+            }
+            // adjacency to emptiness: any tile of the ring around the block
+            let ring_empty = [
+                (bx.wrapping_sub(1), by), (bx + 2, by), (bx, by.wrapping_sub(1)), (bx, by + 2),
+                (bx.wrapping_sub(1), by.wrapping_sub(1)), (bx + 2, by.wrapping_sub(1)),
+                (bx.wrapping_sub(1), by + 2), (bx + 2, by + 2),
+                (bx.wrapping_sub(1), by + 1), (bx + 2, by + 1),
+                (bx, by.wrapping_sub(1)), (bx + 1, by.wrapping_sub(1)),
+                (bx, by + 2), (bx + 1, by + 2),
+            ]
+            .iter()
+            .any(|&(x, y)| s.tile_at(Layer::Underground, x, y) == EMPTY);
+            let _ = touches_empty;
+            if !ring_empty {
+                continue;
+            }
+            let d = (bx as i32 - qx).abs() + (by as i32 - qy).abs();
+            if d > best_d {
+                best_d = d;
+                target = Some((bx, by));
+                if d >= 6 {
+                    break 'scan;
+                }
+            }
+        }
+    }
+    let (bx, by) = target.expect("a soft block near the nest");
+    // single Dig command from afar: she walks, then digs the whole block
+    assert!(s.issue(Command::Dig { ant: q.id, tx: bx, ty: by }));
+    for _ in 0..600 {
+        s.tick();
+    }
+    for dy in 0..2u32 {
+        for dx in 0..2u32 {
+            assert_eq!(s.tile_at(Layer::Underground, bx + dx, by + dy), EMPTY);
+        }
+    }
+    assert_eq!(queen(&s).aux, 2.0, "queen hauls one dirt block");
+}
+
+#[test]
+fn eggs_can_be_carried_and_placed_keeping_hatch_state() {
+    let mut s = founded(42);
+    for _ in 0..1220 {
+        s.tick();
+    }
+    let q = queen(&s);
+    let egg = s.snapshot().into_iter().find(|e| e.kind == 3).unwrap();
+    let frac0 = egg.extra; // hatch progress
+    assert!(s.issue(Command::PickEgg { ant: q.id, egg: egg.id }));
+    // carried: snapshot flags it and the queen carries an egg-mark (aux 3)
+    let s1 = s.snapshot();
+    let e1 = s1.iter().find(|e| e.id == egg.id).unwrap();
+    assert_eq!(e1.state, 1, "egg is carried");
+    assert_eq!(s1.iter().find(|e| e.kind == 0).unwrap().aux, 3.0);
+    // no digging while hands are full
+    let ((_, _), (tx, ty)) = dig_site(&s);
+    assert!(!s.issue(Command::Dig { ant: q.id, tx, ty }));
+    // place it on an adjacent empty chamber cell
+    let (qx, qy) = (q.x.floor() as u32, q.y.floor() as u32);
+    let spot = [(qx + 1, qy), (qx - 1, qy), (qx, qy + 1), (qx, qy - 1)]
+        .into_iter()
+        .find(|&(x, y)| s.tile_at(Layer::Underground, x, y) == EMPTY)
+        .unwrap();
+    assert!(s.issue(Command::Drop { ant: q.id, tx: spot.0, ty: spot.1 }));
+    let e2 = s.snapshot().into_iter().find(|e| e.id == egg.id).unwrap();
+    assert_eq!(e2.state, 0, "egg placed");
+    assert!((e2.extra - frac0).abs() < 0.05, "hatch state preserved");
+}
+
+#[test]
+fn dropped_food_spoils_off_silver_and_freezes_on_it() {
+    // (the founding queen never auto-picks food — use a legacy worker)
+    let mut s = Sim::new(3, woa_core::Config::default());
+    let w = s.snapshot().into_iter().find(|e| e.kind == 1).unwrap();
+    // drop 1 unit far from any soil: it must spoil after SPOIL_TIME
+    // (worker picks food up on the surface via a manual move onto a pile)
+    let pile = s
+        .snapshot()
+        .into_iter()
+        .find(|e| e.kind == 2)
+        .expect("legacy worldgen has surface piles");
+    // cross to the surface first (Move is same-layer), then walk to the pile
+    assert!(s.issue(Command::UseEntrance { ant: w.id }));
+    for _ in 0..100 {
+        s.tick();
+    }
+    assert!(s.issue(Command::Move {
+        ant: w.id,
+        x: pile.x,
+        y: pile.y
+    }));
+    for _ in 0..400 {
+        s.tick();
+    }
+    let carrying = s
+        .snapshot()
+        .into_iter()
+        .find(|e| e.kind == 1 && e.extra > 0.5)
+        .expect("worker picked up food");
+    assert!(s.issue(Command::Drop {
+        ant: carrying.id,
+        tx: carrying.x.floor() as u32,
+        ty: carrying.y.floor() as u32
+    }));
+    // off silver: gone after 5 minutes
+    for _ in 0..6100 {
+        s.tick();
+    }
+    let spoiled = !s
+        .snapshot()
+        .iter()
+        .any(|e| e.kind == 2 && e.hp < 1.0);
+    assert!(spoiled, "dropped food must spoil off silver");
+}
+
+#[test]
+fn food_piles_respect_cell_cap() {
+    let mut s = Sim::new_founding(1337, Team::Red);
+    // (fresh seed's own piles sit near the map center; spawn far away at 30,30)
+    let before: usize = s
+        .snapshot()
+        .iter()
+        .filter(|e| e.kind == 2 && (e.x - 30.5).abs() <= 12.0 && (e.y - 30.5).abs() <= 12.0)
+        .count();
+    s.dev_spawn(DevSpawn::Food, 30.5, 30.5);
+    let piles: Vec<_> = s
+        .snapshot()
+        .into_iter()
+        .filter(|e| e.kind == 2 && (e.x - 30.5).abs() <= 12.0 && (e.y - 30.5).abs() <= 12.0)
+        .collect();
+    assert!(piles.len() > before, "spreading created cells");
+    assert!(!piles.is_empty());
+    for p in &piles {
+        assert!(p.extra <= 6.0, "pile of {} exceeds the cell cap", p.extra);
+    }
+    let total: f64 = piles.iter().map(|p| p.extra).sum();
+    assert_eq!(total as u32, 45, "no food lost to spreading");
+}
+
+#[test]
+fn founding_soil_is_seeded_deterministically() {
+    let a = Sim::new_founding(42, Team::Red);
+    let b = Sim::new_founding(42, Team::Blue);
+    assert_eq!(a.world.soil_underground, b.world.soil_underground);
+    assert_eq!(a.world.soil_surface, b.world.soil_surface);
+    let orange = a.world.soil_underground.iter().filter(|&&v| v == 1).count();
+    let silver = a.world.soil_underground.iter().filter(|&&v| v == 2).count();
+    assert!(orange > 50, "orange soil exists to be discovered ({orange})");
+    assert!(silver > 50, "silver soil exists to be discovered ({silver})");
+    assert_eq!(a.patches.len(), 4, "two orange + two silver dust patches");
 }

@@ -69,6 +69,25 @@ pub const FOUNDING_EGG_HATCH: f64 = 180.0;
 /// Seconds per dirt cell dug by the founding queen.
 pub const QUEEN_DIG_TIME: f64 = 1.0;
 
+// --- soil / food logistics ---
+
+/// Chance per 2×2 underground block of being orange (nursery) or silver
+/// (pantry) soil, hidden until dug.
+pub const ORANGE_SOIL_CHANCE: f64 = 0.035;
+pub const SILVER_SOIL_CHANCE: f64 = 0.035;
+/// Surface dust patches of each color (indicator + founding bonus source).
+pub const PATCHES_PER_COLOR: u32 = 2;
+pub const PATCH_W: u32 = 10;
+pub const PATCH_H: u32 = 12;
+pub const PATCH_WOBBLE: u32 = 2;
+/// Founding inside a patch grants this many hidden soil blocks nearby.
+pub const PATCH_GRANT_MIN: u32 = 3;
+pub const PATCH_GRANT_MAX: u32 = 6;
+/// Max food units (green + super combined) per cell.
+pub const FOOD_CELL_CAP: u32 = 6;
+/// Seconds before dropped food spoils on a non-silver cell.
+pub const SPOIL_TIME: f64 = 300.0;
+
 // --- economy / world constants ---
 
 pub const DIG_TIME: f64 = 1.2;

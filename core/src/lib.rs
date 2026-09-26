@@ -81,7 +81,16 @@ impl WoaSim {
     }
 
     pub fn cmd_dump(&mut self, ant: u32, tx: u32, ty: u32) -> bool {
-        self.inner.issue(Command::DumpDirt { ant, tx, ty })
+        // legacy name for dropping the carried item (dirt semantics kept)
+        self.inner.issue(Command::Drop { ant, tx, ty })
+    }
+
+    pub fn cmd_drop(&mut self, ant: u32, tx: u32, ty: u32) -> bool {
+        self.inner.issue(Command::Drop { ant, tx, ty })
+    }
+
+    pub fn cmd_pick_egg(&mut self, ant: u32, egg: u32) -> bool {
+        self.inner.issue(Command::PickEgg { ant, egg })
     }
 
     /// Returns the new entity id, or u32::MAX for an unknown kind.
@@ -102,6 +111,11 @@ impl WoaSim {
 
     pub fn dev_kill(&mut self, id: u32) -> bool {
         self.inner.dev_kill(id)
+    }
+
+    /// Paint a 2×2 soil block: `soil` 0 none, 1 orange, 2 silver.
+    pub fn dev_set_soil(&mut self, layer: u32, x: u32, y: u32, soil: u32) {
+        self.inner.dev_set_soil(layer, x, y, soil);
     }
 
     pub fn colony_dead(&self) -> bool {
@@ -166,6 +180,15 @@ impl WoaSim {
 
     pub fn tiles_surface(&self) -> Vec<u8> {
         self.inner.tiles(Layer::Surface).to_vec()
+    }
+
+    /// Per-tile soil quality (0 none, 1 orange, 2 silver) per layer.
+    pub fn soil_underground(&self) -> Vec<u8> {
+        self.inner.world.soil_underground.clone()
+    }
+
+    pub fn soil_surface(&self) -> Vec<u8> {
+        self.inner.world.soil_surface.clone()
     }
 
     pub fn snapshot(&self) -> Vec<f64> {

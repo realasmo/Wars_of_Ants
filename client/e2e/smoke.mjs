@@ -120,41 +120,46 @@ try {
 
   // --- dig a wall, refill it, dig again, haul the dirt out, drop it above ---
   const [ex, ey] = s.entrance;
-  const walls = [
-    [ex + 2, ey + 2, ex + 1, ey + 2],
-    [ex + 2, ey + 1, ex + 1, ey + 1],
-    [ex + 2, ey + 3, ex + 1, ey + 3],
-    [ex - 2, ey + 2, ex - 1, ey + 2],
-    [ex, ey + 4, ex, ey + 3],
+  // frontier blocks: fully-soft 2×2 blocks touching the chamber
+  const blocks = [
+    [ex + 2, ey + 2], [ex + 2, ey], [ex + 2, ey + 4],
+    [ex - 2, ey + 2], [ex, ey + 6], [ex + 2, ey + 6],
   ];
   let wall = null;
-  for (const [wx, wy, sx, sy] of walls) {
-    const k = await tile(1, wx, wy);
-    if (k >= 1 && k <= 3) {
-      wall = { wx, wy, sx, sy };
+  for (const [bx, by] of blocks) {
+    const cells = await page.evaluate((b) => {
+      const ks = [];
+      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+        ks.push(window.__woa.tile(1, b.bx + dx, b.by + dy));
+      }
+      return ks;
+    }, { bx, by });
+    if (cells.every((k) => k >= 1 && k <= 3)) {
+      wall = { wx: bx, wy: by };
       break;
     }
   }
   if (!wall) {
-    failures.push('no soft wall around the starter chamber (seed-dependent?)');
+    failures.push('no fully-soft block around the starter chamber (seed-dependent?)');
   } else {
-    await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 0), { x: wall.sx, y: wall.sy });
-    await page.evaluate(() => window.__woa.step(60));
+    // right-click distant dirt: the queen walks there and digs on arrival
     await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: wall.wx, y: wall.wy });
-    await page.evaluate(() => window.__woa.step(25));
+    await page.evaluate(() => window.__woa.step(140));
+    const dugEmpty = await tile(1, wall.wx, wall.wy);
+    if (dugEmpty !== 0) failures.push(`walk-to-dig did not clear the block (kind ${dugEmpty})`);
     s = await state();
     if (s.queen.aux !== 2) failures.push(`queen not hauling dirt after dig (aux ${s.queen.aux})`);
-    // refill the same cell
+    // refill the whole block
     await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: wall.wx, y: wall.wy });
     await page.evaluate(() => window.__woa.step(3)); // force a snapshot pull
     s = await state();
     const refilled = await tile(1, wall.wx, wall.wy);
     console.log('dirt:', JSON.stringify({ aux: s.queen.aux, refilled }));
-    if (refilled < 1 || refilled > 3) failures.push(`dump did not refill the cell (kind ${refilled})`);
+    if (refilled < 1 || refilled > 3) failures.push(`dump did not refill the block (kind ${refilled})`);
     if (s.queen.aux !== 0) failures.push(`queen still hauling after dump (aux ${s.queen.aux})`);
     // dig again and haul it out through the entrance
     await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: wall.wx, y: wall.wy });
-    await page.evaluate(() => window.__woa.step(25));
+    await page.evaluate(() => window.__woa.step(140));
     await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: ex, y: ey });
     await page.evaluate(() => window.__woa.step(120));
     s = await state();
@@ -172,18 +177,49 @@ try {
     if (s.dead) failures.push('colony died during the founding haul');
   }
 
-  // --- founding timer → brood → first workers ---
+  // --- founding timer → brood: eggs wait until orange soil exists ---
   await page.evaluate(() => window.__woa.step(1250));
   s = await dump('s03-brood');
   console.log('brood:', JSON.stringify({ phase: s.phase, eggs: s.eggs }));
   if (s.phase !== 3) failures.push(`founding timer did not end in brood (${s.phase})`);
   if (s.eggs !== 4) failures.push(`expected 4 founding eggs, got ${s.eggs}`);
-  await page.evaluate(() => window.__woa.step(3650));
+  await page.evaluate(() => window.__woa.step(3700));
+  s = await state();
+  if (s.phase !== 3 || s.workers !== 0) {
+    failures.push(`eggs hatched without orange soil (phase ${s.phase}, workers ${s.workers})`);
+  }
+  // paint orange under the queen only: some eggs hatch, the rest wait —
+  // leaving eggs for the transport round-trip below
+  const q0 = s.queen;
+  await page.evaluate((p) => window.__woa.setsoil(1, Math.floor(p.x), Math.floor(p.y), 1), { x: q0.x, y: q0.y });
+  await page.evaluate(() => window.__woa.step(80));
   s = await dump('s04-colony');
   await shot('s04-colony');
   console.log('colony:', JSON.stringify({ phase: s.phase, workers: s.workers, dead: s.dead }));
-  if (s.phase !== 4) failures.push(`workers did not start the colony phase (${s.phase})`);
-  if (s.workers !== 4) failures.push(`expected 4 hatched workers, got ${s.workers}`);
+  if (s.phase !== 4) failures.push(`hatching on orange did not start the colony phase (${s.phase})`);
+  if (s.workers < 1) failures.push(`no egg hatched on orange soil (workers ${s.workers})`);
+  // egg transport round-trip with one of the remaining eggs
+  const eggState = await state();
+  if (eggState.eggs > 0) {
+    // walk the queen onto an egg cell, then right-click to pick it up
+    const eg = eggState.queen;
+    await page.evaluate((p) => window.__woa.click(p.x, p.y, 0), { x: eg.x + 1, y: eg.y });
+    await page.evaluate(() => window.__woa.step(60));
+    await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: eg.x + 1, y: eg.y });
+    await page.evaluate(() => window.__woa.step(3));
+    s = await state();
+    if (s.queen.aux !== 3) failures.push(`queen not marked as egg-carrier (aux ${s.queen.aux})`);
+    // place it back on an adjacent empty cell
+    const qn = s.queen;
+    await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: qn.x + 1, y: qn.y });
+    await page.evaluate(() => window.__woa.step(3));
+    s = await state();
+    if (s.queen.aux !== 0) failures.push(`egg not placed (aux ${s.queen.aux})`);
+    const log2 = await page.evaluate(() => window.__woa.log());
+    const acts2 = [...new Set(log2.events.filter((e) => e.type === 'cmd').map((e) => e.act))];
+    if (!acts2.includes('pick-egg')) failures.push('right-click did not pick up an adjacent egg');
+    if (!acts2.includes('drop')) failures.push('egg drop not logged');
+  }
 
   // --- control a worker: cycle to it (C — click-selecting a foraging worker
   // is racy), walk to the surface, steer, fight ---
@@ -271,7 +307,7 @@ try {
   else {
     if (!types.includes('start')) failures.push('input log missing start event');
     if (!types.includes('view')) failures.push('input log missing view toggle');
-    for (const want of ['land', 'found', 'dump', 'entrance']) {
+    for (const want of ['land', 'found', 'drop', 'entrance', 'pick-egg']) {
       if (!acts.includes(want)) failures.push(`input log missing ${want} command`);
     }
     if (acts.includes('dig') === false && !failures.some((f) => f.includes('wall'))) {
@@ -299,7 +335,8 @@ try {
   await page.mouse.click(640, 420);
   await page.evaluate(() => window.__woa.step(3));
   s = await state();
-  if (s.foods !== foodsBefore + 1) failures.push(`panel food placement failed: ${s.foods} vs ${foodsBefore + 1}`);
+  // one dev food pile = 45 units spread across cells at the 6/cell cap
+  if (s.foods <= foodsBefore) failures.push(`panel food placement failed: ${s.foods} vs ${foodsBefore}`);
   await page.keyboard.press('F2');
 
   await page.keyboard.press('F3');
