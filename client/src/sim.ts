@@ -111,12 +111,14 @@ export class Sim {
     return this.sim.cmd_entrance(id);
   }
 
-  land(id: number): boolean {
-    return this.sim.cmd_land(id);
+  /** Flying queen: fly to (x, y) and land there. */
+  land(id: number, x: number, y: number): boolean {
+    return this.sim.cmd_land(id, x, y);
   }
 
-  found(id: number): boolean {
-    return this.sim.cmd_found(id);
+  /** Grounded queen: walk to (x, y) and found the nest at that tile. */
+  found(id: number, x: number, y: number): boolean {
+    return this.sim.cmd_found(id, x, y);
   }
 
   drop(id: number, tx: number, ty: number): boolean {

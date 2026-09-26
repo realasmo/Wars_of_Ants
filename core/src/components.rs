@@ -101,6 +101,10 @@ pub struct WorkerAi {
     pub drop_after: Option<(u32, u32)>,
     /// Walk-to-pick intent (egg id): route to the egg, pick it up there.
     pub pick_after: Option<u32>,
+    /// Flying queen: land once the flight to the clicked spot completes.
+    pub land_after: bool,
+    /// Grounded queen: found the nest at this tile once the walk completes.
+    pub found_after: Option<(u32, u32)>,
 }
 
 #[derive(Clone, Copy, Debug)]

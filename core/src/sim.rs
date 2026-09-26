@@ -77,10 +77,10 @@ pub enum Command {
     Dig { ant: u32, tx: u32, ty: u32 },
     Attack { ant: u32, target: u32 },
     UseEntrance { ant: u32 },
-    /// Flying queen descends at her current position.
-    Land { ant: u32 },
-    /// Grounded queen creates the nest at the tile she stands on.
-    FoundNest { ant: u32 },
+    /// Flying queen flies to (x, y), then lands there.
+    Land { ant: u32, x: f64, y: f64 },
+    /// Grounded queen walks to (x, y), then founds the nest at that tile.
+    FoundNest { ant: u32, x: f64, y: f64 },
     /// Drop the carried item at (tx, ty): dirt fills the adjacent fully-empty
     /// 2×2 block (or vanishes on the surface), an egg is placed on the
     /// adjacent empty cell, food is dropped as one unit (≤ cap per cell).
@@ -526,93 +526,44 @@ impl Sim {
                 };
                 self.route(ant, layer.other(), entrance)
             }
-            Command::Land { ant } => {
+            Command::Land { ant, x, y } => {
                 if ant != self.colony.queen_id || self.colony.phase != Phase::Flight {
                     return false;
                 }
-                self.colony.phase = Phase::Grounded;
+                let tx = x.floor().clamp(0.0, self.config.width as f64 - 1.0) as u32;
+                let ty = y.floor().clamp(0.0, self.config.height as f64 - 1.0) as u32;
+                self.set_job(ant, Job::Manual);
+                if self.ant_tile(ant) == (tx, ty) {
+                    self.colony.phase = Phase::Grounded;
+                    return true;
+                }
+                // fly to the destination, land on arrival
+                self.set_land_after(ant, true);
+                if !self.route(ant, Layer::Surface, (tx, ty)) {
+                    self.set_land_after(ant, false);
+                    return false;
+                }
                 true
             }
-            Command::FoundNest { ant } => {
+            Command::FoundNest { ant, x, y } => {
                 if ant != self.colony.queen_id || self.colony.phase != Phase::Grounded {
                     return false;
                 }
                 if self.ant_layer(ant) != Layer::Surface {
                     return false;
                 }
-                let (x, y) = self.ant_tile(ant);
-                // the 2×2 entrance hole plus a 4×4 starter chamber below it
-                // must fit inside the rock border ring
-                let (bx, by) = block_of(x, y);
-                if bx < 2 || by < 2 || bx + 3 > self.config.width - 3 || by + 5 > self.config.height - 3
-                {
+                let tx = x.floor().clamp(0.0, self.config.width as f64 - 1.0) as u32;
+                let ty = y.floor().clamp(0.0, self.config.height as f64 - 1.0) as u32;
+                self.set_job(ant, Job::Manual);
+                if self.ant_tile(ant) == (tx, ty) {
+                    return self.try_found_nest(ant, tx, ty);
+                }
+                // walk to the chosen ground, found the nest on arrival
+                self.set_found_after(ant, Some((tx, ty)));
+                if !self.route(ant, Layer::Surface, (tx, ty)) {
+                    self.set_found_after(ant, None);
                     return false;
                 }
-                let mut carved = 0u32;
-                for dy in 0..2u32 {
-                    for dx in 0..2u32 {
-                        if self.world.underground.get(bx + dx, by + dy) != EMPTY {
-                            carved += 1;
-                        }
-                        self.world.underground.set(bx + dx, by + dy, EMPTY);
-                    }
-                }
-                for cy in by + 2..=by + 5 {
-                    for cx in bx..=bx + 3 {
-                        if self.world.underground.get(cx, cy) != EMPTY {
-                            carved += 1;
-                        }
-                        self.world.underground.set(cx, cy, EMPTY);
-                    }
-                }
-                self.dug_tiles += carved;
-                self.world.entrance = Some((bx, by));
-                let qent = self.ids[&ant];
-                if let Some(q) = self
-                    .ecs
-                    .query_one::<(&mut Pos, &mut AntState)>(qent)
-                    .unwrap()
-                    .get()
-                {
-                    q.0.layer = Layer::Underground;
-                    q.0.p = Vec2::new(bx as f64 + 2.0, by as f64 + 4.0);
-                    *q.1 = AntState::Idle;
-                }
-                self.set_job(ant, Job::Manual);
-                // founding inside a dust patch grants hidden soil blocks of
-                // that color near the nest — dig them out
-                let patch_soil = self
-                    .patches
-                    .iter()
-                    .find(|p| x >= p.x0 && x < p.x1 && y >= p.y0 && y < p.y1)
-                    .map(|p| p.soil);
-                if let Some(soil) = patch_soil {
-                    let grants = self.rng.irange(PATCH_GRANT_MIN, PATCH_GRANT_MAX);
-                    let mut placed = 0u32;
-                    for _ in 0..80 {
-                        if placed >= grants {
-                            break;
-                        }
-                        let dx = self.rng.irange(0, 16) as i32 - 8;
-                        let dy = self.rng.irange(0, 16) as i32 - 8;
-                        let gx = (bx as i32 + dx) & !1;
-                        let gy = (by as i32 + dy) & !1;
-                        if gx < 2 || gy < 2 || gx + 1 >= self.config.width as i32 - 2 || gy + 1 >= self.config.height as i32 - 2 {
-                            continue;
-                        }
-                        let (gx, gy) = (gx as u32, gy as u32);
-                        if !self.block_soft(gx, gy) {
-                            continue;
-                        }
-                        if self.soil_at(Layer::Underground, gx, gy) != SOIL_NONE {
-                            continue;
-                        }
-                        self.set_soil_block(Layer::Underground, gx, gy, soil);
-                        placed += 1;
-                    }
-                }
-                self.colony.phase = Phase::Founding;
-                self.colony.phase_t = FOUNDING_TIME;
                 true
             }
             Command::Drop { ant, tx, ty } => {
@@ -677,6 +628,84 @@ impl Sim {
                 true
             }
         }
+    }
+
+    /// Found the nest with its hole block at the founding tile. Caller
+    /// guarantees the queen stands there, grounded, on the surface.
+    fn try_found_nest(&mut self, ant: u32, x: u32, y: u32) -> bool {
+        // the 2×2 entrance hole plus a 4×4 starter chamber below it
+            // must fit inside the rock border ring
+            let (bx, by) = block_of(x, y);
+            if bx < 2 || by < 2 || bx + 3 > self.config.width - 3 || by + 5 > self.config.height - 3
+            {
+                return false;
+            }
+            let mut carved = 0u32;
+            for dy in 0..2u32 {
+                for dx in 0..2u32 {
+                    if self.world.underground.get(bx + dx, by + dy) != EMPTY {
+                        carved += 1;
+                    }
+                    self.world.underground.set(bx + dx, by + dy, EMPTY);
+                }
+            }
+            for cy in by + 2..=by + 5 {
+                for cx in bx..=bx + 3 {
+                    if self.world.underground.get(cx, cy) != EMPTY {
+                        carved += 1;
+                    }
+                    self.world.underground.set(cx, cy, EMPTY);
+                }
+            }
+            self.dug_tiles += carved;
+            self.world.entrance = Some((bx, by));
+            let qent = self.ids[&ant];
+            if let Some(q) = self
+                .ecs
+                .query_one::<(&mut Pos, &mut AntState)>(qent)
+                .unwrap()
+                .get()
+            {
+                q.0.layer = Layer::Underground;
+                q.0.p = Vec2::new(bx as f64 + 2.0, by as f64 + 4.0);
+                *q.1 = AntState::Idle;
+            }
+            self.set_job(ant, Job::Manual);
+            // founding inside a dust patch grants hidden soil blocks of
+            // that color near the nest — dig them out
+            let patch_soil = self
+                .patches
+                .iter()
+                .find(|p| x >= p.x0 && x < p.x1 && y >= p.y0 && y < p.y1)
+                .map(|p| p.soil);
+            if let Some(soil) = patch_soil {
+                let grants = self.rng.irange(PATCH_GRANT_MIN, PATCH_GRANT_MAX);
+                let mut placed = 0u32;
+                for _ in 0..80 {
+                    if placed >= grants {
+                        break;
+                    }
+                    let dx = self.rng.irange(0, 16) as i32 - 8;
+                    let dy = self.rng.irange(0, 16) as i32 - 8;
+                    let gx = (bx as i32 + dx) & !1;
+                    let gy = (by as i32 + dy) & !1;
+                    if gx < 2 || gy < 2 || gx + 1 >= self.config.width as i32 - 2 || gy + 1 >= self.config.height as i32 - 2 {
+                        continue;
+                    }
+                    let (gx, gy) = (gx as u32, gy as u32);
+                    if !self.block_soft(gx, gy) {
+                        continue;
+                    }
+                    if self.soil_at(Layer::Underground, gx, gy) != SOIL_NONE {
+                        continue;
+                    }
+                    self.set_soil_block(Layer::Underground, gx, gy, soil);
+                    placed += 1;
+                }
+            }
+        self.colony.phase = Phase::Founding;
+        self.colony.phase_t = FOUNDING_TIME;
+        true
     }
 
     fn set_state(&mut self, id: u32, state: AntState) {
@@ -1051,6 +1080,8 @@ impl Sim {
                 dig_after: None,
                 drop_after: None,
                 pick_after: None,
+                land_after: false,
+                found_after: None,
             },
         ));
         self.ids.insert(id, ent);
@@ -1315,6 +1346,22 @@ impl Sim {
         }
     }
 
+    fn set_land_after(&mut self, id: u32, on: bool) {
+        if let Some(&ent) = self.ids.get(&id) {
+            if let Ok(mut q) = self.ecs.get::<&mut WorkerAi>(ent) {
+                q.land_after = on;
+            }
+        }
+    }
+
+    fn set_found_after(&mut self, id: u32, tile: Option<(u32, u32)>) {
+        if let Some(&ent) = self.ids.get(&id) {
+            if let Ok(mut q) = self.ecs.get::<&mut WorkerAi>(ent) {
+                q.found_after = tile;
+            }
+        }
+    }
+
     /// True when the ant stands where this drop can happen right now.
     fn drop_in_range(&self, ant: u32, tx: u32, ty: u32) -> bool {
         let Some(&ent) = self.ids.get(&ant) else {
@@ -1564,7 +1611,8 @@ impl Sim {
                 Some(&e) => e,
                 None => continue,
             };
-            let (caste, pos, state, carrying, job, pending, retry, attack_after, dig_after, drop_after, pick_after) = {
+            #[allow(clippy::type_complexity)]
+            let (caste, pos, state, carrying, job, pending, retry, attack_after, dig_after, drop_after, pick_after, land_after, found_after) = {
                 let mut qo = match self
                     .ecs
                     .query_one::<(&Ant, &Pos, &AntState, &Carrying, &WorkerAi)>(ent)
@@ -1588,6 +1636,8 @@ impl Sim {
                     q.4.dig_after,
                     q.4.drop_after,
                     q.4.pick_after,
+                    q.4.land_after,
+                    q.4.found_after,
                 )
             };
             // The queen is player-driven: she never takes forage/dig jobs and
@@ -1595,6 +1645,22 @@ impl Sim {
             // intents move her.
             if caste == Caste::Queen {
                 if !matches!(state, AntState::Idle) || retry > 0 {
+                    continue;
+                }
+                if land_after {
+                    // the flight reached its destination: touch down
+                    self.set_land_after(id, false);
+                    self.colony.phase = Phase::Grounded;
+                    continue;
+                }
+                if let Some((tx, ty)) = found_after {
+                    if self.ant_tile(id) == (tx, ty) {
+                        self.set_found_after(id, None);
+                        self.try_found_nest(id, tx, ty);
+                    } else if !self.route(id, Layer::Surface, (tx, ty)) {
+                        self.set_found_after(id, None);
+                        self.set_retry(id, 60);
+                    }
                     continue;
                 }
                 if let Some((bx, by)) = dig_after {

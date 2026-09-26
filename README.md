@@ -1,7 +1,7 @@
 # Wars of Ants
 
 A browser-based ant colony game: multiplayer colony simulation + RTS + survival + ecosystem.
-Design reference: AntWar.io (see `docs/BASED-ON.md`).
+Design reference: AntWar.io (see `docs/BASED-ON.md`); world content draft: `docs/WORLD-DESIGN.md`.
 
 ## Repository
 
@@ -46,6 +46,13 @@ AntWar.io is a great proof of concept, but it is not perfect and no longer maint
 - **First brood:** when the timer ends she lays **4 eggs** (fewer if the chamber is too small — excavate!); they hatch **3 minutes** later into 4 controllable workers → standard colony gameplay. Ongoing egg production is **not** part of this wave (the founding script replaces auto-laying; production design is a later decision).
 - **Founding grace:** starvation is suspended while the colony has no workers; the queen is still on her own against spiders once grounded (her death by any means ends the colony).
 - All founding numbers live in `core/src/balance.rs` (`QUEEN_FLY_SPEED`, `QUEEN.speed`, `QUEEN_DIG_TIME`, `FOUNDING_TIME`, `FOUNDING_EGGS`, `FOUNDING_EGG_HATCH`).
+
+### World content (design draft — see docs/WORLD-DESIGN.md)
+Creatures (worker/soldier/honey/medic/queen castes, neutral earthworm/snail/rove
+beetle, hostile bosses TBD), the resource economy (protein / carbohydrates /
+water / aphid honeydew, finite map resources, aphid farming with a dedicated
+chamber) and worker scouting flows are drafted in `docs/WORLD-DESIGN.md` and
+gate into the roadmap through playtesting, phase by phase.
 
 ### Nest soil & food logistics (confirmed)
 - **Digging is 2×2:** one dig action removes an aligned 2×2 block (all four cells must be dirt); one carried dirt block refills one fully-empty block — or vanishes dropped above ground. Right-clicking distant dirt **walks the ant there and digs on arrival** (the reported bug — fixed).

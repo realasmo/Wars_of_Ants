@@ -452,24 +452,27 @@ export class Game {
       if (me !== undefined && me.kind === 0) {
         const phase = this.sim.phase();
         if (phase === 0) {
-          this.log.push({ type: 'cmd', act: 'land', ant: this.playerAnt });
-          this.sim.land(this.playerAnt);
+          // right-click: fly to the destination and land there
+          this.log.push({ type: 'cmd', act: 'land', ant: this.playerAnt, x: r2(x), y: r2(y) });
+          this.sim.land(this.playerAnt, x, y);
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }
         if (phase === 1 && me.layer === 0) {
-          if (this.sim.found(this.playerAnt)) {
-            this.log.push({ type: 'cmd', act: 'found', ant: this.playerAnt });
-          } else {
-            // too close to the map edge for the starter chamber: walk instead
-            this.log.push({
-              type: 'cmd',
-              act: 'found',
-              ant: this.playerAnt,
-              note: 'refused-near-edge',
-            });
-            this.sim.move(this.playerAnt, x, y);
-          }
+          // right-click: walk to the chosen ground and found the nest there
+          const bx = Math.floor(x) & ~1;
+          const by = Math.floor(y) & ~1;
+          const fits =
+            bx >= 2 && by >= 2 && bx + 3 <= this.sim.w - 3 && by + 5 <= this.sim.h - 3;
+          this.log.push({
+            type: 'cmd',
+            act: 'found',
+            ant: this.playerAnt,
+            x: r2(x),
+            y: r2(y),
+            ...(fits ? {} : { note: 'refused-near-edge' }),
+          });
+          this.sim.found(this.playerAnt, x, y);
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }
@@ -668,8 +671,8 @@ export class Game {
       else if (c.act === 'dig') this.sim.dig(c.ant ?? 0, c.tx ?? 0, c.ty ?? 0);
       else if (c.act === 'attack') this.sim.attack(c.ant ?? 0, c.target ?? 0);
       else if (c.act === 'entrance') this.sim.useEntrance(c.ant ?? 0);
-      else if (c.act === 'land') this.sim.land(c.ant ?? 0);
-      else if (c.act === 'found') this.sim.found(c.ant ?? 0);
+      else if (c.act === 'land') this.sim.land(c.ant ?? 0, c.x ?? 0, c.y ?? 0);
+      else if (c.act === 'found') this.sim.found(c.ant ?? 0, c.x ?? 0, c.y ?? 0);
       else if (c.act === 'dump' || c.act === 'drop')
         this.sim.drop(c.ant ?? 0, c.tx ?? 0, c.ty ?? 0);
       else if (c.act === 'pick-egg') this.sim.pickEgg(c.ant ?? 0, c.target ?? 0);

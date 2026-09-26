@@ -54,8 +54,16 @@ fn main() {
                     target: obj.get("target")?.as_u64()? as u32,
                 }),
                 "entrance" => Step::Cmd(Command::UseEntrance { ant: ant()? }),
-                "land" => Step::Cmd(Command::Land { ant: ant()? }),
-                "found" => Step::Cmd(Command::FoundNest { ant: ant()? }),
+                "land" => Step::Cmd(Command::Land {
+                    ant: ant()?,
+                    x: obj.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    y: obj.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                }),
+                "found" => Step::Cmd(Command::FoundNest {
+                    ant: ant()?,
+                    x: obj.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    y: obj.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                }),
                 "dump" | "drop" => Step::Cmd(Command::Drop {
                     ant: ant()?,
                     // surface dumps carry no meaningful target — default 0 like

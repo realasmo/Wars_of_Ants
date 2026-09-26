@@ -17,8 +17,8 @@ fn workers(s: &Sim) -> usize {
 fn founded(seed: u64) -> Sim {
     let mut s = Sim::new_founding(seed, Team::Red);
     let q = queen(&s);
-    assert!(s.issue(Command::Land { ant: q.id }));
-    assert!(s.issue(Command::FoundNest { ant: q.id }));
+    assert!(s.issue(Command::Land { ant: q.id, x: q.x, y: q.y }));
+    assert!(s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y }));
     s
 }
 
@@ -122,7 +122,7 @@ fn queen_flies_fast_then_lands_and_walks_slower() {
     let flown = q.x - (48.5);
     assert!(flown >= 9.5, "queen flew only {} tiles in 2s", flown);
 
-    assert!(s.issue(Command::Land { ant: q.id }));
+    assert!(s.issue(Command::Land { ant: q.id, x: q.x, y: q.y }));
     assert_eq!(s.colony.phase, Phase::Grounded);
     // walk 5 tiles at QUEEN.speed (2.5/s) = 2s
     assert!(s.issue(Command::Move {
@@ -141,15 +141,15 @@ fn queen_flies_fast_then_lands_and_walks_slower() {
         walked
     );
     // landing is one-way: a second Land is refused
-    assert!(!s.issue(Command::Land { ant: q.id }));
+    assert!(!s.issue(Command::Land { ant: q.id, x: q.x, y: q.y }));
 }
 
 #[test]
 fn found_nest_creates_entrance_and_chamber() {
     let mut s = Sim::new_founding(42, Team::Red);
     let q = queen(&s);
-    assert!(s.issue(Command::Land { ant: q.id }));
-    assert!(s.issue(Command::FoundNest { ant: q.id }));
+    assert!(s.issue(Command::Land { ant: q.id, x: q.x, y: q.y }));
+    assert!(s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y }));
     assert_eq!(s.colony.phase, Phase::Founding);
     assert_eq!(s.colony.phase_t, 60.0);
     // 2×2 entrance hole + 4×4 starter chamber (block-aligned)
@@ -169,21 +169,21 @@ fn found_nest_creates_entrance_and_chamber() {
     assert_eq!(q.layer, Layer::Underground as u8);
     assert!(s.tiles_dug() >= 20);
     // one nest per game
-    assert!(!s.issue(Command::FoundNest { ant: q.id }));
+    assert!(!s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y }));
 }
 
 #[test]
 fn found_nest_refused_near_map_border() {
     let mut s = Sim::new_founding(42, Team::Red);
     let q = queen(&s);
-    assert!(s.issue(Command::Land { ant: q.id }));
+    assert!(s.issue(Command::Land { ant: q.id, x: q.x, y: q.y }));
     // walk to the bottom rows where the starter chamber would not fit
     assert!(s.issue(Command::Move { ant: q.id, x: 48.5, y: 92.5 }));
     for _ in 0..420 {
         s.tick();
     }
     let q = queen(&s);
-    assert!(!s.issue(Command::FoundNest { ant: q.id }));
+    assert!(!s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y }));
     assert_eq!(s.colony.phase, Phase::Grounded);
     assert!(s.world.entrance.is_none());
 }
@@ -289,7 +289,7 @@ fn spiders_ignore_the_flying_queen_but_not_the_grounded_one() {
     }
     assert_eq!(queen(&s).hp, 1.0, "flying queen must be untouchable");
 
-    assert!(s.issue(Command::Land { ant: q.id }));
+    assert!(s.issue(Command::Land { ant: q.id, x: q.x, y: q.y }));
     s.dev_spawn(DevSpawn::Spider, queen(&s).x, queen(&s).y);
     for _ in 0..500 {
         s.tick();
@@ -310,8 +310,11 @@ fn founding_is_deterministic_per_seed_and_team() {
         for _ in 0..80 {
             s.tick();
         }
-        s.issue(Command::Land { ant: q.id });
-        s.issue(Command::FoundNest { ant: q.id });
+        // land where she stands now, then found the nest there (landing
+        // targets a spot, so read the position fresh)
+        let q = queen(&s);
+        s.issue(Command::Land { ant: q.id, x: q.x, y: q.y });
+        s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y });
         for _ in 0..60 {
             s.tick();
         }
@@ -702,4 +705,40 @@ fn distant_pick_and_drop_send_the_ant_walking() {
     assert_eq!(queen(&s).aux, 0.0, "egg should be placed after walking");
     let placed = s.snapshot().into_iter().find(|e| e.id == egg.id).unwrap();
     assert_eq!((placed.x.floor() as u32, placed.y.floor() as u32), (sx, sy));
+}
+
+#[test]
+fn right_click_flies_there_lands_then_walks_and_founds() {
+    let mut s = Sim::new_founding(42, Team::Red);
+    let q = queen(&s);
+    // distant land target: no instant touchdown mid-flight
+    let (lx, ly) = (q.x + 12.0, q.y - 5.0);
+    assert!(s.issue(Command::Land { ant: q.id, x: lx, y: ly }));
+    for _ in 0..20 {
+        s.tick();
+    }
+    assert_eq!(phase(&s), Phase::Flight, "must not land before arriving");
+    for _ in 0..100 {
+        s.tick();
+    }
+    assert_eq!(phase(&s), Phase::Grounded);
+    let q = queen(&s);
+    assert_eq!(
+        (q.x.floor() as u32, q.y.floor() as u32),
+        (lx.floor() as u32, ly.floor() as u32),
+        "lands at the clicked destination"
+    );
+    // distant found target: the nest appears only after the walk
+    let (fx, fy) = (q.x + 6.0, q.y + 4.0);
+    assert!(s.issue(Command::FoundNest { ant: q.id, x: fx, y: fy }));
+    for _ in 0..30 {
+        s.tick();
+    }
+    assert!(s.world.entrance.is_none(), "must not found mid-walk");
+    for _ in 0..140 {
+        s.tick();
+    }
+    let e = s.world.entrance.expect("nest founded after the walk");
+    assert_eq!(e, ((fx.floor() as u32) & !1, (fy.floor() as u32) & !1));
+    assert_eq!(phase(&s), Phase::Founding);
 }

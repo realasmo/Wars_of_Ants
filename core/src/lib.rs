@@ -72,12 +72,12 @@ impl WoaSim {
         self.inner.issue(Command::UseEntrance { ant })
     }
 
-    pub fn cmd_land(&mut self, ant: u32) -> bool {
-        self.inner.issue(Command::Land { ant })
+    pub fn cmd_land(&mut self, ant: u32, x: f64, y: f64) -> bool {
+        self.inner.issue(Command::Land { ant, x, y })
     }
 
-    pub fn cmd_found(&mut self, ant: u32) -> bool {
-        self.inner.issue(Command::FoundNest { ant })
+    pub fn cmd_found(&mut self, ant: u32, x: f64, y: f64) -> bool {
+        self.inner.issue(Command::FoundNest { ant, x, y })
     }
 
     pub fn cmd_dump(&mut self, ant: u32, tx: u32, ty: u32) -> bool {
