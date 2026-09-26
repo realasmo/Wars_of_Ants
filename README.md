@@ -40,7 +40,7 @@ AntWar.io is a great proof of concept, but it is not perfect and no longer maint
 
 ### Combat & content (confirmed, Phase 3 wave 1)
 - **Combat model:** original-style melee — HP / damage / attack cooldown / speed per unit; click an enemy to lock on and auto-attack in range.
-- **Stats (wave 1):** Worker 100 HP / 8 dmg / 1.0s CD / speed 3.0 · Soldier 130 / 22 / 1.0s / 2.6 · Queen 150 HP · Spider 130 / 15 / 1.2s / 2.2 (aggro 5 tiles, wanders near lair, surface only).
+- **Stats (wave 1):** Worker 100 HP / 8 dmg / 1.0s CD / speed 3.0 · Soldier 130 / 22 / 1.0s / 2.6 · Queen 150 HP · Spider 130 / 15 / 1.2s / 2.2 (aggro 5 tiles, wanders near lair, surface only). Values live in `core/src/balance.rs` — see "Balance table".
 - **Predators:** spiders (2 per map) wander the surface, attack ants in aggro range.
 - **Super Food (blue):** dropped by killed spiders (8 units); Soldier eggs cost 2 Super + 3 Green; soldiers produced automatically while Super is available, capped at 1 soldier per 2 workers.
 - **Fog of war:** removed for now (was implemented in wave 1) — may return later, likely server-authoritative for multiplayer.
@@ -94,12 +94,13 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 
 - All tunable gameplay numbers (unit HP/damage/cooldown/speed/range per caste and predator, economy constants) live in `core/src/balance.rs` — data only, no logic. Sim code reads them via `stats_for(caste)`; changing a number there is a balance change, not a code change.
 
-### Dev tools (F2)
+### Dev tools (F2, F3)
 
 - **F2 opens the dev panel**: pick an entity (worker / soldier / egg / spider / food / super food), then click the map to place it. Quick actions: food = 50, super = 5, kill spiders, pause, +10s fast-forward. Esc cancels placement. Ants and eggs spawn underground; spiders and food on the surface.
 - **Console API** (devtools, with the game open): `__woa.spawn('spider', x, y)` (omit x/y for the nest entrance), `__woa.setfood(n)`, `__woa.setsuper(n)`, `__woa.kill(id)`, `__woa.killspiders()`, `__woa.pause()`.
 - Dev operations live in the Rust core (`Sim::dev_spawn/dev_set_food/dev_set_super/dev_kill`) — so they are deterministic, recorded in the input log (act `dev-*`), and replayable like any command. Dev actions are blocked while a replay is running. Killing the queen via dev tools flags the colony dead (the sim dereferences the queen id every tick).
 - `__woa.state()` includes `foods` (food pile count) and `paused` for test assertions.
+- **F3 toggles the perf overlay** (`?perf=1` also enables it on load): fps, avg/worst frame ms (0.5s window), measured sim ticks/s, entity total vs shown-on-layer, zoom. Baseline headless (SwiftShader): ~31–36 fps with 40–60 entities and flat scaling — the fixed per-frame entity `Graphics` rebuild is the known cost center if optimization is ever needed; the sim holds 20 tps regardless.
 
 ## Undecided (vs. the original game)
 
