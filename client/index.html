@@ -12,6 +12,7 @@
       <div id="left">
         <div id="panel">
           <div class="row"><span>Colony</span><span id="stat-time">0:00</span></div>
+          <div class="row"><span>Phase</span><span id="stat-phase">—</span></div>
           <div class="row"><span>Food store</span><span id="stat-food">0</span></div>
           <div class="row"><span>Super food</span><span id="stat-super">0</span></div>
           <div class="row"><span>Ants</span><span id="stat-ants">0</span></div>
@@ -30,6 +31,20 @@
         <b>C</b>: control next ant &nbsp;·&nbsp; <b>F2</b>: dev tools &nbsp;·&nbsp;
         <b>F3</b>: perf &nbsp;·&nbsp; the camera follows your ant; spectate (Tab, drag, WASD)
         when it dies
+      </div>
+    </div>
+    <div id="menu" class="hidden">
+      <div class="box" id="menu-title">
+        <h1>Wars of Ants</h1>
+        <p>Found a colony. Keep the queen alive.</p>
+        <button id="btn-play">PLAY</button>
+      </div>
+      <div class="box hidden" id="menu-team">
+        <h1>Choose your team</h1>
+        <div class="team-row">
+          <button id="btn-team-red" class="team-btn team-red">RED ANTS</button>
+          <button id="btn-team-blue" class="team-btn team-blue">BLUE ANTS</button>
+        </div>
       </div>
     </div>
     <div id="overlay" class="hidden">

@@ -8,7 +8,7 @@ mod world;
 
 pub use balance::UnitStats;
 pub use components::{AntState, Caste, Layer};
-pub use sim::{Colony, Command, Config, DevSpawn, EntitySnap, Sim, DT, TPS};
+pub use sim::{Colony, Command, Config, DevSpawn, EntitySnap, Phase, Sim, Team, DT, TPS};
 pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK};
 
 use wasm_bindgen::prelude::*;
@@ -37,6 +37,15 @@ impl WoaSim {
         }
     }
 
+    /// Founding start: lone flying queen, no workers, no nest yet.
+    /// `team`: 0 = red, 1 = blue.
+    pub fn new_founding(seed: u64, team: u32) -> WoaSim {
+        let team = if team == 1 { Team::Blue } else { Team::Red };
+        WoaSim {
+            inner: Sim::new_founding(seed, team),
+        }
+    }
+
     pub fn tick(&mut self, n: u32) {
         for _ in 0..n {
             self.inner.tick();
@@ -61,6 +70,18 @@ impl WoaSim {
 
     pub fn cmd_entrance(&mut self, ant: u32) -> bool {
         self.inner.issue(Command::UseEntrance { ant })
+    }
+
+    pub fn cmd_land(&mut self, ant: u32) -> bool {
+        self.inner.issue(Command::Land { ant })
+    }
+
+    pub fn cmd_found(&mut self, ant: u32) -> bool {
+        self.inner.issue(Command::FoundNest { ant })
+    }
+
+    pub fn cmd_dump(&mut self, ant: u32, tx: u32, ty: u32) -> bool {
+        self.inner.issue(Command::DumpDirt { ant, tx, ty })
     }
 
     /// Returns the new entity id, or u32::MAX for an unknown kind.
@@ -112,8 +133,31 @@ impl WoaSim {
     }
 
     pub fn entrance(&self) -> Vec<u32> {
-        let (x, y) = self.inner.world.entrance;
-        vec![x, y]
+        // empty until the founding queen creates the nest
+        self.inner
+            .world
+            .entrance
+            .map(|(x, y)| vec![x, y])
+            .unwrap_or_default()
+    }
+
+    /// Colony start phase: 0 flight, 1 grounded, 2 founding, 3 brood, 4 colony.
+    pub fn phase(&self) -> u8 {
+        self.inner.colony.phase as u8
+    }
+
+    /// Seconds left in the founding excavation window (0.0 otherwise).
+    pub fn phase_time(&self) -> f64 {
+        if self.inner.colony.phase == Phase::Founding {
+            self.inner.colony.phase_t.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Team color: 0 red, 1 blue.
+    pub fn team(&self) -> u8 {
+        self.inner.colony.team as u8
     }
 
     pub fn tiles_underground(&self) -> Vec<u8> {

@@ -35,12 +35,41 @@ impl Default for Config {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Team {
+    Red = 0,
+    Blue = 1,
+}
+
+/// Game-start state machine. The founded (legacy) constructor jumps straight
+/// to `Colony`; the founding constructor starts at `Flight` with a lone queen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    /// Queen flying over the surface, choosing a nest site (state code 4).
+    Flight = 0,
+    /// Queen landed; walks the surface; right-click founds the nest.
+    Grounded = 1,
+    /// Nest founded; excavation window before the first brood (`t` = seconds left).
+    Founding = 2,
+    /// First brood incubating; queen may keep excavating.
+    Brood = 3,
+    /// Workers exist; standard colony gameplay.
+    Colony = 4,
+}
+
 #[derive(Clone, Debug)]
 pub enum Command {
     Move { ant: u32, x: f64, y: f64 },
     Dig { ant: u32, tx: u32, ty: u32 },
     Attack { ant: u32, target: u32 },
     UseEntrance { ant: u32 },
+    /// Flying queen descends at her current position.
+    Land { ant: u32 },
+    /// Grounded queen creates the nest at the tile she stands on.
+    FoundNest { ant: u32 },
+    /// Drop carried dirt: fill the target empty cell underground, or let the
+    /// dirt vanish by dropping it on the surface.
+    DumpDirt { ant: u32, tx: u32, ty: u32 },
 }
 
 /// Spawnable entities for dev tools. Natural layers: spiders/food on the
@@ -96,6 +125,14 @@ pub struct Colony {
     pub eat_t: f64,
     pub lay_cooldown: f64,
     pub dig_queue: Vec<(u32, u32)>,
+    /// Game-start phase (see `Phase`); Founding timer lives in `phase_t`.
+    pub phase: Phase,
+    /// Seconds remaining in Phase::Founding (0.0 outside it).
+    pub phase_t: f64,
+    pub team: Team,
+    /// True when started via `new_founding`: the founding script (4 eggs,
+    /// no auto-laying) governs brood; false in the legacy founded start.
+    pub founding: bool,
 }
 
 pub struct Sim {
@@ -111,7 +148,17 @@ pub struct Sim {
 }
 
 impl Sim {
+    /// Legacy founded start: pre-dug nest, queen + `start_workers` workers.
     pub fn new(seed: u64, config: Config) -> Sim {
+        Self::build(seed, config, false, Team::Red)
+    }
+
+    /// Founding start: a lone queen flying over the surface at map center.
+    pub fn new_founding(seed: u64, team: Team) -> Sim {
+        Self::build(seed, Config::default(), true, team)
+    }
+
+    fn build(seed: u64, config: Config, founding: bool, team: Team) -> Sim {
         let w = config.width;
         let h = config.height;
         let e = w / 2;
@@ -129,7 +176,8 @@ impl Sim {
         }
         for y in 1..h - 1 {
             for x in 1..w - 1 {
-                if y < 8 && (x as i32 - e as i32).abs() <= 4 {
+                // legacy start keeps a rock-free zone around the fixed nest
+                if !founding && y < 8 && (x as i32 - e as i32).abs() <= 4 {
                     continue;
                 }
                 if rng.f64() < 0.08 {
@@ -137,18 +185,23 @@ impl Sim {
                 }
             }
         }
-        for y in 1..=3 {
-            for x in e.saturating_sub(1)..=e + 1 {
-                underground.set(x, y, EMPTY);
+        let entrance = if founding {
+            None
+        } else {
+            for y in 1..=3 {
+                for x in e.saturating_sub(1)..=e + 1 {
+                    underground.set(x, y, EMPTY);
+                }
             }
-        }
-        underground.set(e, 0, EMPTY);
+            underground.set(e, 0, EMPTY);
+            Some((e, 0))
+        };
 
         let mut sim = Sim {
             world: World {
                 surface,
                 underground,
-                entrance: (e, 0),
+                entrance,
             },
             ecs: hecs::World::new(),
             rng,
@@ -164,6 +217,10 @@ impl Sim {
                 eat_t: 0.0,
                 lay_cooldown: LAY_COOLDOWN,
                 dig_queue: Vec::new(),
+                phase: if founding { Phase::Flight } else { Phase::Colony },
+                phase_t: 0.0,
+                team,
+                founding,
             },
             config,
             tick: 0,
@@ -172,17 +229,27 @@ impl Sim {
             dug_tiles: 0,
         };
 
-        let queen_id = sim.spawn_ant(Caste::Queen, tile_center(e, 2), Layer::Underground);
+        let (queen_id, anchor) = if founding {
+            let c = tile_center(w / 2, h / 2);
+            (sim.spawn_ant(Caste::Queen, c, Layer::Surface), w / 2)
+        } else {
+            let q = sim.spawn_ant(Caste::Queen, tile_center(e, 2), Layer::Underground);
+            for i in 0..sim.config.start_workers {
+                let x = e.saturating_sub(1) + (i % 3);
+                let y = 3 + (i / 3);
+                sim.spawn_ant(Caste::Worker, tile_center(x, y), Layer::Underground);
+            }
+            (q, e)
+        };
         sim.colony.queen_id = queen_id;
-        for i in 0..sim.config.start_workers {
-            let x = e.saturating_sub(1) + (i % 3);
-            let y = 3 + (i / 3);
-            sim.spawn_ant(Caste::Worker, tile_center(x, y), Layer::Underground);
-        }
 
         for _ in 0..sim.config.food_clusters {
-            let cx = (e as i32 + sim.rng.irange(0, 41) as i32 - 20).clamp(2, w as i32 - 3) as u32;
-            let cy = sim.rng.irange(15, 41).min(h - 3);
+            let cx = (anchor as i32 + sim.rng.irange(0, 41) as i32 - 20).clamp(2, w as i32 - 3) as u32;
+            let cy = if founding {
+                (h as i32 / 2 + sim.rng.irange(0, 41) as i32 - 20).clamp(2, h as i32 - 3) as u32
+            } else {
+                sim.rng.irange(15, 41).min(h - 3)
+            };
             let piles = sim.rng.irange(4, 8);
             for _ in 0..piles {
                 let px =
@@ -198,8 +265,12 @@ impl Sim {
             let dy = sim.rng.range(-1.0, 1.0);
             let len = (dx * dx + dy * dy).sqrt().max(0.001);
             let dist = sim.rng.range(25.0, 45.0);
-            let sx = ((e as f64 + dx / len * dist) as i32).clamp(2, w as i32 - 3) as f64 + 0.5;
-            let sy = ((dy / len * dist) as i32).clamp(2, h as i32 - 3) as f64 + 0.5;
+            let sx = ((anchor as f64 + dx / len * dist) as i32).clamp(2, w as i32 - 3) as f64 + 0.5;
+            let sy = if founding {
+                ((h as f64 / 2.0 + dy / len * dist) as i32).clamp(2, h as i32 - 3) as f64 + 0.5
+            } else {
+                ((dy / len * dist) as i32).clamp(2, h as i32 - 3) as f64 + 0.5
+            };
             sim.spawn_spider(Vec2::new(sx, sy));
         }
         sim
@@ -217,8 +288,8 @@ impl Sim {
         match what {
             DevSpawn::Worker => self.spawn_ant(Caste::Worker, p, Layer::Underground),
             DevSpawn::Soldier => self.spawn_ant(Caste::Soldier, p, Layer::Underground),
-            DevSpawn::EggWorker => self.spawn_egg(p, Caste::Worker),
-            DevSpawn::EggSoldier => self.spawn_egg(p, Caste::Soldier),
+            DevSpawn::EggWorker => self.spawn_egg(p, Caste::Worker, EGG_TIME),
+            DevSpawn::EggSoldier => self.spawn_egg(p, Caste::Soldier, EGG_TIME),
             DevSpawn::Spider => self.spawn_spider(p),
             DevSpawn::Food => self.spawn_food(p, PILE_AMOUNT, FoodKind::Green),
             DevSpawn::SuperFood => self.spawn_food(p, SUPER_PER_SPIDER, FoodKind::Super),
@@ -276,11 +347,23 @@ impl Sim {
                     Some(&e) => e,
                     None => return false,
                 };
-                let (caste, pos) = match self.ecs.query_one::<(&Ant, &Pos)>(ent).unwrap().get() {
-                    Some(q) => (q.0.caste, q.1.layer),
+                let (caste, pos, carrying) = match self
+                    .ecs
+                    .query_one::<(&Ant, &Pos, &Carrying)>(ent)
+                    .unwrap()
+                    .get()
+                {
+                    Some(q) => (q.0.caste, q.1.layer, *q.2),
                     None => return false,
                 };
-                if caste != Caste::Worker
+                let queen_may_dig = caste == Caste::Queen
+                    && self.colony.founding
+                    && matches!(
+                        self.colony.phase,
+                        Phase::Founding | Phase::Brood
+                    )
+                    && carrying.amount == 0;
+                if (caste != Caste::Worker && !queen_may_dig)
                     || pos != Layer::Underground
                     || !self.world.underground.in_bounds(tx, ty)
                 {
@@ -327,7 +410,97 @@ impl Sim {
                 }
                 let layer = self.ant_layer(ant);
                 self.set_job(ant, Job::Manual);
-                self.route(ant, layer.other(), self.world.entrance)
+                let Some(entrance) = self.world.entrance else {
+                    return false;
+                };
+                self.route(ant, layer.other(), entrance)
+            }
+            Command::Land { ant } => {
+                if ant != self.colony.queen_id || self.colony.phase != Phase::Flight {
+                    return false;
+                }
+                self.colony.phase = Phase::Grounded;
+                true
+            }
+            Command::FoundNest { ant } => {
+                if ant != self.colony.queen_id || self.colony.phase != Phase::Grounded {
+                    return false;
+                }
+                if self.ant_layer(ant) != Layer::Surface {
+                    return false;
+                }
+                let (x, y) = self.ant_tile(ant);
+                // the starter chamber (x±1, y+1..=y+3) must fit inside the
+                // rock border ring
+                if x < 2 || y < 2 || x > self.config.width - 3 || y + 3 > self.config.height - 2 {
+                    return false;
+                }
+                let mut carved = 1;
+                self.world.underground.set(x, y, EMPTY);
+                for cy in y + 1..=y + 3 {
+                    for cx in x.saturating_sub(1)..=x + 1 {
+                        if self.world.underground.get(cx, cy) != EMPTY {
+                            carved += 1;
+                        }
+                        self.world.underground.set(cx, cy, EMPTY);
+                    }
+                }
+                self.dug_tiles += carved;
+                self.world.entrance = Some((x, y));
+                let qent = self.ids[&ant];
+                if let Some(q) = self
+                    .ecs
+                    .query_one::<(&mut Pos, &mut AntState)>(qent)
+                    .unwrap()
+                    .get()
+                {
+                    q.0.layer = Layer::Underground;
+                    q.0.p = tile_center(x, y + 2);
+                    *q.1 = AntState::Idle;
+                }
+                self.set_job(ant, Job::Manual);
+                self.colony.phase = Phase::Founding;
+                self.colony.phase_t = FOUNDING_TIME;
+                true
+            }
+            Command::DumpDirt { ant, tx, ty } => {
+                let ent = match self.ids.get(&ant) {
+                    Some(&e) => e,
+                    None => return false,
+                };
+                let (carrying, layer) = match self.ecs.query_one::<(&Carrying, &Pos)>(ent)
+                    .unwrap()
+                    .get()
+                {
+                    Some(q) => (*q.0, q.1.layer),
+                    None => return false,
+                };
+                if carrying.amount == 0 || carrying.kind != FoodKind::Dirt {
+                    return false;
+                }
+                match layer {
+                    Layer::Surface => {
+                        // dumped above ground: the dirt disappears
+                        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+                            q.amount = 0;
+                        }
+                        true
+                    }
+                    Layer::Underground => {
+                        // dumped below: the dirt refills the target empty cell
+                        if !self.world.underground.in_bounds(tx, ty)
+                            || self.world.underground.get(tx, ty) != EMPTY
+                            || chebyshev(self.ant_tile(ant), (tx, ty)) > 1
+                        {
+                            return false;
+                        }
+                        self.world.underground.set(tx, ty, DIRT);
+                        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+                            q.amount = 0;
+                        }
+                        true
+                    }
+                }
             }
         }
     }
@@ -402,7 +575,9 @@ impl Sim {
                 None => false,
             }
         } else {
-            let entrance = self.world.entrance;
+            let Some(entrance) = self.world.entrance else {
+                return false;
+            };
             let grid = self.grid_of(start_layer);
             match find_path(grid, start_tile, entrance, is_worker) {
                 Some(path) => {
@@ -530,12 +705,12 @@ impl Sim {
         id
     }
 
-    fn spawn_egg(&mut self, p: Vec2, caste: Caste) -> u32 {
+    fn spawn_egg(&mut self, p: Vec2, caste: Caste, total: f64) -> u32 {
         let id = self.fresh_id();
         let ent = self.ecs.spawn((
             Egg {
-                hatch: EGG_TIME,
-                total: EGG_TIME,
+                hatch: total,
+                total,
                 caste,
             },
             Pos {
@@ -578,12 +753,17 @@ impl Sim {
             let _ = self.ecs.despawn(ent);
             if was_ant {
                 self.colony.ant_count -= 1;
+                // the queen's death by any means (starvation, combat) ends the
+                // colony — the systems below dereference queen_id every tick
+                if id == self.colony.queen_id {
+                    self.colony.dead = true;
+                }
             }
         }
     }
 
     fn best_food(&self) -> Option<u32> {
-        let entrance = self.world.entrance;
+        let entrance = self.world.entrance?;
         let mut best: Option<(u32, u32, u32)> = None;
         for &fid in &self.food_ids() {
             let ent = self.ids[&fid];
@@ -643,10 +823,10 @@ impl Sim {
                 Some(&e) => e,
                 None => continue,
             };
-            let (pos, state, carrying, job, pending, retry, attack_after) = {
+            let (caste, pos, state, carrying, job, pending, retry, attack_after) = {
                 let mut qo = match self
                     .ecs
-                    .query_one::<(&Pos, &AntState, &Carrying, &WorkerAi)>(ent)
+                    .query_one::<(&Ant, &Pos, &AntState, &Carrying, &WorkerAi)>(ent)
                 {
                     Ok(q) => q,
                     Err(_) => continue,
@@ -656,15 +836,49 @@ impl Sim {
                     None => continue,
                 };
                 (
-                    *q.0,
-                    (*q.1).clone(),
-                    *q.2,
-                    q.3.job,
-                    q.3.pending,
-                    q.3.retry,
-                    q.3.attack_after,
+                    q.0.caste,
+                    *q.1,
+                    (*q.2).clone(),
+                    *q.3,
+                    q.4.job,
+                    q.4.pending,
+                    q.4.retry,
+                    q.4.attack_after,
                 )
             };
+            // The queen is player-driven: she never takes forage/dig jobs and
+            // never auto-picks-up food — only an Attack order moves her.
+            if caste == Caste::Queen {
+                if !matches!(state, AntState::Idle) || retry > 0 {
+                    continue;
+                }
+                if let Some(tid) = attack_after {
+                    let ok = self
+                        .ids
+                        .get(&tid)
+                        .and_then(|&tent| {
+                            self.ecs
+                                .get::<&Pos>(tent)
+                                .ok()
+                                .map(|q| (q.layer, tile_of(q.p)))
+                        })
+                        .map(|(tlayer, ttile)| {
+                            if let (Layer::Surface, Layer::Surface) = (tlayer, pos.layer) {
+                                self.set_state(id, AntState::Fighting { target: tid });
+                                true
+                            } else {
+                                self.route(id, tlayer, ttile)
+                            }
+                        })
+                        .unwrap_or(true);
+                    if ok {
+                        self.set_attack_after(id, None);
+                    } else {
+                        self.set_retry(id, 60);
+                    }
+                }
+                continue;
+            }
             if !matches!(state, AntState::Idle) {
                 continue;
             }
@@ -732,6 +946,7 @@ impl Sim {
                             match carrying.kind {
                                 FoodKind::Green => self.colony.food += 1,
                                 FoodKind::Super => self.colony.food_super += 1,
+                                FoodKind::Dirt => {}
                             }
                             self.colony.delivered += 1;
                             if let Some(&aent) = self.ids.get(&id) {
@@ -823,6 +1038,7 @@ impl Sim {
                             match carrying.kind {
                                 FoodKind::Green => self.colony.food += 1,
                                 FoodKind::Super => self.colony.food_super += 1,
+                                FoodKind::Dirt => {}
                             }
                             self.colony.delivered += 1;
                             if let Some(&aent) = self.ids.get(&id) {
@@ -858,9 +1074,12 @@ impl Sim {
                 Some(q) => (q.0.speed, q.0.caste, *q.1, (*q.2).clone()),
                 None => continue,
             };
-            if caste == Caste::Queen {
-                continue;
-            }
+            // the founding queen flies faster than any ant walks
+            let speed = if caste == Caste::Queen && self.colony.phase == Phase::Flight {
+                QUEEN_FLY_SPEED
+            } else {
+                speed
+            };
             let (path, mut next, then_swap) = match state {
                 AntState::Moving {
                     path,
@@ -911,7 +1130,9 @@ impl Sim {
             } else if finished {
                 if then_swap {
                     pos.layer = pos.layer.other();
-                    p = tile_center(self.world.entrance.0, self.world.entrance.1);
+                    if let Some((ex, ey)) = self.world.entrance {
+                        p = tile_center(ex, ey);
+                    }
                 }
                 AntState::Idle
             } else {
@@ -971,10 +1192,28 @@ impl Sim {
                 }
                 continue;
             }
+            let caste = self
+                .ecs
+                .get::<&Ant>(ent)
+                .map(|a| a.caste)
+                .unwrap_or(Caste::Worker);
+            let dig_time = if caste == Caste::Queen {
+                QUEEN_DIG_TIME
+            } else {
+                DIG_TIME
+            };
             progress += DT;
-            if progress >= DIG_TIME {
+            if progress >= dig_time {
                 self.world.underground.set(tx, ty, EMPTY);
                 self.dug_tiles += 1;
+                // the founding queen carries excavated dirt out; workers'
+                // spoil handling is a later wave
+                if caste == Caste::Queen {
+                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+                        q.amount = 1;
+                        q.kind = FoodKind::Dirt;
+                    }
+                }
                 match resume {
                     Some(b) => {
                         self.set_state(
@@ -1112,21 +1351,24 @@ impl Sim {
                 }
             }
             if pred.target.is_none() {
-                let mut best: Option<(f64, u32)> = None;
-                for aid in self.ant_ids() {
-                    let aent = self.ids[&aid];
-                    let Ok(ap) = self.ecs.get::<&Pos>(aent) else {
-                        continue;
-                    };
-                    if ap.layer != Layer::Surface {
-                        continue;
+                // nobody is attackable while the founding queen is airborne
+                if self.colony.phase != Phase::Flight {
+                    let mut best: Option<(f64, u32)> = None;
+                    for aid in self.ant_ids() {
+                        let aent = self.ids[&aid];
+                        let Ok(ap) = self.ecs.get::<&Pos>(aent) else {
+                            continue;
+                        };
+                        if ap.layer != Layer::Surface {
+                            continue;
+                        }
+                        let d = (ap.p - pos.p).len();
+                        if d <= SPIDER_AGGRO && best.map(|(bd, _)| d < bd).unwrap_or(true) {
+                            best = Some((d, aid));
+                        }
                     }
-                    let d = (ap.p - pos.p).len();
-                    if d <= SPIDER_AGGRO && best.map(|(bd, _)| d < bd).unwrap_or(true) {
-                        best = Some((d, aid));
-                    }
+                    pred.target = best.map(|(_, id)| id);
                 }
-                pred.target = best.map(|(_, id)| id);
             }
             let mut new_pos = pos;
             match pred.target {
@@ -1255,6 +1497,21 @@ impl Sim {
         if self.colony.dead {
             return;
         }
+        // founding script: excavation window ends → the first brood is laid
+        if self.colony.phase == Phase::Founding {
+            self.colony.phase_t -= DT;
+            if self.colony.phase_t <= 0.0 {
+                self.colony.phase = Phase::Brood;
+                self.colony.phase_t = 0.0;
+                for _ in 0..FOUNDING_EGGS {
+                    let Some(tile) = self.free_egg_tile() else {
+                        break;
+                    };
+                    self.colony.eggs_laid += 1;
+                    self.spawn_egg(tile_center(tile.0, tile.1), Caste::Worker, FOUNDING_EGG_HATCH);
+                }
+            }
+        }
         self.colony.lay_cooldown -= DT;
         if self.colony.food > 0 {
             self.colony.eat_t += DT;
@@ -1265,13 +1522,24 @@ impl Sim {
             self.colony.starve_t = 0.0;
         } else {
             self.colony.eat_t = 0.0;
-            self.colony.starve_t += DT;
-            if self.colony.starve_t >= STARVE_TIME {
-                self.colony.dead = true;
-                let q = self.colony.queen_id;
-                self.kill(q);
-                return;
+            // founding grace: the lone queen carries reserves — starvation
+            // only threatens a colony that has a workforce
+            let grace = self.colony.founding && self.caste_counts().0 == 0;
+            if !grace {
+                self.colony.starve_t += DT;
+                if self.colony.starve_t >= STARVE_TIME {
+                    self.colony.dead = true;
+                    let q = self.colony.queen_id;
+                    self.kill(q);
+                    return;
+                }
             }
+        }
+        // ongoing auto-laying is legacy-mode only: in a founding game the
+        // brood comes from the founding script (production redesign is a
+        // later wave)
+        if self.colony.founding {
+            return;
         }
         if self.colony.lay_cooldown <= 0.0 && self.colony.ant_count < self.config.max_ants {
             let (workers, soldiers) = self.caste_counts();
@@ -1298,7 +1566,7 @@ impl Sim {
                         }
                         self.colony.eggs_laid += 1;
                         self.colony.lay_cooldown = LAY_COOLDOWN;
-                        self.spawn_egg(tile_center(tile.0, tile.1), caste);
+                        self.spawn_egg(tile_center(tile.0, tile.1), caste, EGG_TIME);
                     }
                     None => {
                         if self.colony.dig_queue.len() < 3 {
@@ -1397,6 +1665,10 @@ impl Sim {
                 let p = pos.p;
                 self.kill(id);
                 self.spawn_ant(caste, p, Layer::Underground);
+                // the first hatched worker ends the founding script
+                if self.colony.phase == Phase::Brood && self.caste_counts().0 > 0 {
+                    self.colony.phase = Phase::Colony;
+                }
             } else if let Ok(mut q) = self.ecs.get::<&mut Egg>(ent) {
                 q.hatch = hatch.max(0.0);
             }
@@ -1434,14 +1706,23 @@ impl Sim {
     /// same seed + command script — this is what the cross-platform
     /// determinism test compares.
     pub fn canonical_state(&self) -> String {
+        let entrance = self
+            .world
+            .entrance
+            .map(|(x, y)| format!("{},{}", x, y))
+            .unwrap_or_else(|| "-".to_string());
         let mut s = format!(
-            "t={};food={};super={};dead={};dug={};next_id={}",
+            "t={};food={};super={};dead={};dug={};next_id={};phase={};phase_t={:.4};team={};ent={}",
             self.tick,
             self.colony.food,
             self.colony.food_super,
             self.colony.dead,
             self.dug_tiles,
-            self.next_id
+            self.next_id,
+            self.colony.phase as u8,
+            self.colony.phase_t,
+            self.colony.team as u8,
+            entrance
         );
         for e in self.snapshot() {
             s.push_str(&format!(
@@ -1469,11 +1750,15 @@ impl Sim {
                 Caste::Worker => 1,
                 Caste::Soldier => 5,
             };
-            let state = match state {
-                AntState::Idle => 0u8,
-                AntState::Moving { .. } => 1,
-                AntState::Digging { .. } => 2,
-                AntState::Fighting { .. } => 3,
+            let state = if ant.caste == Caste::Queen && self.colony.phase == Phase::Flight {
+                4u8 // flying (founding queen airborne)
+            } else {
+                match state {
+                    AntState::Idle => 0u8,
+                    AntState::Moving { .. } => 1,
+                    AntState::Digging { .. } => 2,
+                    AntState::Fighting { .. } => 3,
+                }
             };
             let extra = if ant.caste == Caste::Queen {
                 self.colony.starve_t / STARVE_TIME
@@ -1489,7 +1774,13 @@ impl Sim {
                 state,
                 extra,
                 hp: (combat.hp / combat.max_hp).clamp(0.0, 1.0),
-                aux: carry.kind as u8 as f64,
+                // for the queen, aux encodes what she hauls only while she
+                // hauls it (0 = empty-handed, 2 = dirt)
+                aux: if ant.caste == Caste::Queen && carry.amount == 0 {
+                    0.0
+                } else {
+                    carry.kind as u8 as f64
+                },
             });
         }
         for (ent, (food, pos)) in self.ecs.query::<(&Food, &Pos)>().iter() {

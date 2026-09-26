@@ -26,6 +26,9 @@ pub enum Caste {
 pub enum FoodKind {
     Green = 0,
     Super = 1,
+    /// Excavated dirt carried by the founding queen — not food; dropped dirt
+    /// refills an empty underground cell or vanishes on the surface.
+    Dirt = 2,
 }
 
 #[derive(Clone, Debug)]

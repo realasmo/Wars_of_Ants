@@ -17,17 +17,33 @@ export const TPS = 20;
 /** Interpolated position between two snapshots, for smooth rendering between
  * fixed ticks. Snaps instead of lerps when the prev→cur jump can't be motion —
  * a layer change (entrance crossing teleports to the entrance tile) or a hop
- * larger than 2 tiles (max real per-tick motion is ~0.15 tiles). */
+ * larger than 2 tiles (max real per-tick motion is ~0.25 tiles in flight). */
 export function lerpPos(p: Snap, s: Snap, t: number): { x: number; y: number } {
   if (p.layer !== s.layer || (s.x - p.x) ** 2 + (s.y - p.y) ** 2 > 4) return { x: s.x, y: s.y };
   return { x: p.x + (s.x - p.x) * t, y: p.y + (s.y - p.y) * t };
 }
 
+export interface SimOptions {
+  /** Founding start: lone flying queen, no workers, no nest yet. */
+  founding?: boolean;
+  /** Team color: 0 red, 1 blue (founding mode only). */
+  team?: number;
+}
+
+/** Colony start phases, mirroring the core enum. */
+export const PHASE_FLIGHT = 0;
+export const PHASE_GROUNDED = 1;
+export const PHASE_FOUNDING = 2;
+export const PHASE_BROOD = 3;
+export const PHASE_COLONY = 4;
+
 export class Sim {
   private sim: WoaSim;
   readonly w: number;
   readonly h: number;
-  readonly entrance: [number, number];
+  /** Nest hole; null until the founding queen creates the nest. Polled per tick. */
+  entrance: [number, number] | null = null;
+  readonly foundingMode: boolean;
   prev = new Map<number, Snap>();
   cur = new Map<number, Snap>();
   tickCount = 0;
@@ -36,13 +52,16 @@ export class Sim {
   private tilesCache: (Uint8Array | null)[] = [null, null];
   private tilesDirtyFlag = [true, true];
 
-  constructor(seed: number, workers = 3, clusters = 6) {
-    this.sim = new WoaSim(BigInt(Math.floor(seed)), workers, clusters);
+  constructor(seed: number, workers = 3, clusters = 6, opts: SimOptions = {}) {
+    this.foundingMode = opts.founding ?? false;
+    this.sim = this.foundingMode
+      ? WoaSim.new_founding(BigInt(Math.floor(seed)), opts.team ?? 0)
+      : new WoaSim(BigInt(Math.floor(seed)), workers, clusters);
     const dims = this.sim.dims();
     this.w = dims[0];
     this.h = dims[1];
     const e = this.sim.entrance();
-    this.entrance = [e[0], e[1]];
+    this.entrance = e.length === 2 ? [e[0], e[1]] : null;
     this.pull();
     this.pollTiles();
   }
@@ -75,6 +94,33 @@ export class Sim {
 
   useEntrance(id: number): boolean {
     return this.sim.cmd_entrance(id);
+  }
+
+  land(id: number): boolean {
+    return this.sim.cmd_land(id);
+  }
+
+  found(id: number): boolean {
+    return this.sim.cmd_found(id);
+  }
+
+  dump(id: number, tx: number, ty: number): boolean {
+    return this.sim.cmd_dump(id, tx, ty);
+  }
+
+  /** Colony start phase: 0 flight, 1 grounded, 2 founding, 3 brood, 4 colony. */
+  phase(): number {
+    return this.sim.phase();
+  }
+
+  /** Seconds left in the founding excavation window (0 otherwise). */
+  phaseTime(): number {
+    return this.sim.phase_time();
+  }
+
+  /** Team color: 0 red, 1 blue. */
+  team(): number {
+    return this.sim.team();
   }
 
   devSpawn(kind: string, x: number, y: number): number {
@@ -173,6 +219,8 @@ export class Sim {
     this.tickCount = Number(this.sim.tick_count());
     this.dead = this.sim.colony_dead();
     this.food = this.sim.food_store();
+    const e = this.sim.entrance();
+    this.entrance = e.length === 2 ? [e[0], e[1]] : null;
     const prev = this.cur;
     const cur = new Map<number, Snap>();
     const n = raw[3];

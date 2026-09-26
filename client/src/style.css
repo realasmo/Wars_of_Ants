@@ -99,6 +99,88 @@ body {
   display: none;
 }
 
+#menu-team.hidden {
+  display: none;
+}
+
+/* pre-game menu: title screen, then team choice */
+#menu {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0b0a08;
+}
+
+#menu.hidden {
+  display: none;
+}
+
+#menu .box {
+  text-align: center;
+  background: #171310;
+  border: 1px solid #5c4033;
+  border-radius: 12px;
+  padding: 36px 48px;
+}
+
+#menu h1 {
+  color: #d8cfc0;
+  font-size: 30px;
+  letter-spacing: 3px;
+  margin-bottom: 10px;
+}
+
+#menu p {
+  color: #8f8371;
+  font-size: 14px;
+  margin-bottom: 22px;
+}
+
+#menu button {
+  background: #5c4033;
+  color: #f0e8da;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 26px;
+  font-size: 15px;
+  font-family: inherit;
+  letter-spacing: 2px;
+  cursor: pointer;
+}
+
+#menu button:hover {
+  background: #6e4f3a;
+}
+
+#menu .team-row {
+  display: flex;
+  gap: 14px;
+}
+
+#menu .team-btn {
+  padding: 18px 26px;
+  font-size: 16px;
+}
+
+#menu .team-red {
+  background: #7a2a2a;
+}
+
+#menu .team-red:hover {
+  background: #963434;
+}
+
+#menu .team-blue {
+  background: #2a4a7a;
+}
+
+#menu .team-blue:hover {
+  background: #345e96;
+}
+
 #overlay .box {
   text-align: center;
   background: #171310;

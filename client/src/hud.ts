@@ -4,7 +4,23 @@ function el(id: string): HTMLElement {
   return document.getElementById(id) as HTMLElement;
 }
 
+const HELP_COLONY =
+  'Hold left button: your ant follows the cursor · Left-click an ant: take control · Right-click: dig tile / attack spider / ' +
+  'enter-exit nest (the marked hole) · Mouse wheel: zoom · C: control next ant · F2: dev tools · F3: perf · ' +
+  'the camera follows your ant; spectate (Tab, drag, WASD) when it dies';
+
+const HELP_FOUNDING =
+  'Right-click dirt: dig · Carrying dirt: right-click an empty cell to fill it, or haul it out and drop it above ground · ' +
+  'The marked hole is the entrance · Hold left button: walk · F2: dev tools · F3: perf';
+
+const HELP_FLIGHT = 'Hold left button: fly toward the cursor · Right-click: land here · F2: dev tools · F3: perf';
+
+const HELP_GROUNDED =
+  'Hold left button: walk · Right-click: found the nest where the queen stands (keep ~3 tiles from the map edges) · F2: dev tools · F3: perf';
+
 export class Hud {
+  private helpText = '';
+
   update(sim: Sim, playerAnt: number | null, layer: number): void {
     const snap = playerAnt !== null ? sim.cur.get(playerAnt) : undefined;
     const state = snap
@@ -14,7 +30,9 @@ export class Hud {
           ? 'digging'
           : snap.state === 3
             ? 'fighting'
-            : 'idle'
+            : snap.state === 4
+              ? 'flying'
+              : 'idle'
       : '';
     const counts = sim.casteCounts();
     el('stat-food').textContent = String(sim.food);
@@ -25,8 +43,33 @@ export class Hud {
     el('stat-dug').textContent = String(sim.tilesDug());
     const secs = Math.floor(sim.tickCount / 20);
     el('stat-time').textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-    el('ctrl-ant').textContent = snap ? `ant #${playerAnt} (${state})` : 'spectating';
+    const phase = sim.phase();
+    el('stat-phase').textContent = sim.foundingMode
+      ? phase === 0
+        ? 'flight'
+        : phase === 1
+          ? 'grounded'
+          : phase === 2
+            ? `founding ${Math.ceil(sim.phaseTime())}s`
+            : phase === 3
+              ? 'brood'
+              : 'colony'
+      : 'colony';
+    el('ctrl-ant').textContent = snap
+      ? snap.kind === 0
+        ? `queen (${state})`
+        : `ant #${playerAnt} (${state})`
+      : 'spectating';
     el('ctrl-layer').textContent = layer === 0 ? 'Surface' : 'Underground';
+    this.setHelp(
+      phase === 0 ? HELP_FLIGHT : phase === 1 ? HELP_GROUNDED : phase >= 4 ? HELP_COLONY : HELP_FOUNDING,
+    );
+  }
+
+  private setHelp(text: string): void {
+    if (text === this.helpText) return;
+    this.helpText = text;
+    el('help').innerHTML = text;
   }
 
   showDead(sim: Sim, onRestart: () => void): void {

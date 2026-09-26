@@ -7,7 +7,7 @@
 
 use std::fs;
 
-use woa_core::{Command, Config, DevSpawn, Sim};
+use woa_core::{Command, Config, DevSpawn, Sim, Team};
 
 enum Step {
     Cmd(Command),
@@ -26,6 +26,9 @@ fn main() {
     let replay: serde_json::Value = serde_json::from_str(&raw).expect("parse replay json");
     let seed = replay["seed"].as_u64().expect("seed") as u64;
     let ticks = replay["ticks"].as_u64().expect("ticks") as u64;
+    // v2 replays are founding sessions (team recorded); v1 replays predate
+    // the founding update and keep the legacy constructor
+    let version = replay["version"].as_u64().unwrap_or(1);
     let cmds: Vec<(u64, Step)> = replay["cmds"]
         .as_array()
         .expect("cmds")
@@ -50,6 +53,16 @@ fn main() {
                     target: obj.get("target")?.as_u64()? as u32,
                 }),
                 "entrance" => Step::Cmd(Command::UseEntrance { ant: ant()? }),
+                "land" => Step::Cmd(Command::Land { ant: ant()? }),
+                "found" => Step::Cmd(Command::FoundNest { ant: ant()? }),
+                "dump" => Step::Cmd(Command::DumpDirt {
+                    ant: ant()?,
+                    // surface dumps carry no meaningful target — default 0 like
+                    // the client's replay applier (missing fields must not
+                    // drop the whole command here)
+                    tx: obj.get("tx").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    ty: obj.get("ty").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                }),
                 "dev-spawn" => Step::Spawn(
                     DevSpawn::parse(obj.get("kind")?.as_str()?)?,
                     obj.get("x")?.as_f64()?,
@@ -65,7 +78,16 @@ fn main() {
         })
         .collect();
 
-    let mut sim = Sim::new(seed, Config::default());
+    let mut sim = if version >= 2 {
+        let team = if replay["team"].as_u64() == Some(1) {
+            Team::Blue
+        } else {
+            Team::Red
+        };
+        Sim::new_founding(seed, team)
+    } else {
+        Sim::new(seed, Config::default())
+    };
     let mut i = 0usize;
     for _ in 0..ticks {
         sim.tick();

@@ -20,6 +20,12 @@ const UNDER_COLORS: Record<number, number> = {
 
 const BASE_PX = 30;
 
+/** Team body palettes: [queen body, queen head, worker body, worker head, soldier body, soldier head]. */
+const TEAM_COLORS: Record<number, number[]> = {
+  0: [0x8e2f3c, 0x5e1e27, 0x9c6b3c, 0x6e4826, 0x3d2b1f, 0x7a2a2a],
+  1: [0x3c5a8e, 0x27405e, 0x4a6b9c, 0x2e486e, 0x2b3542, 0x2a4a7a],
+};
+
 interface EntityGfx {
   c: Container;
   g: Graphics;
@@ -28,6 +34,9 @@ interface EntityGfx {
   carrying: boolean;
   hpBucket: number;
   label: string;
+  flying: boolean;
+  dirt: boolean;
+  team: number;
 }
 
 function labelText(s: Snap): string {
@@ -72,6 +81,7 @@ export class Renderer {
   private entities = new Container();
   private sprites = new Map<number, EntityGfx>();
   private ring = new Graphics();
+  private entranceMarks: [Text, Text] = [new Text(''), new Text('')];
   private sim: Sim;
   cam = { x: 48, y: 8, zoom: 1 };
   activeLayer = 1;
@@ -103,22 +113,48 @@ export class Renderer {
     app.renderer.resize(window.innerWidth, window.innerHeight);
     r.drawTiles(0);
     r.drawTiles(1);
-    r.addEntranceMarkers();
-    r.setActiveLayer(1);
-    r.cam.x = sim.entrance[0];
-    r.cam.y = sim.entrance[1] + 3;
+    r.makeEntranceMarkers();
+    if (sim.foundingMode) {
+      // founding: the camera starts on the surface, on the flying queen
+      r.setActiveLayer(0);
+      const q = sim.queenId();
+      const qs = q !== null ? sim.cur.get(q) : undefined;
+      r.cam.x = qs?.x ?? sim.w / 2;
+      r.cam.y = qs?.y ?? sim.h / 2;
+    } else {
+      r.setActiveLayer(1);
+      r.cam.x = sim.entrance?.[0] ?? sim.w / 2;
+      r.cam.y = (sim.entrance?.[1] ?? 0) + 3;
+    }
+    r.refreshEntrance();
     r.applyCamera();
     return r;
   }
 
-  private addEntranceMarkers(): void {
-    const [ex, ey] = this.sim.entrance;
+  private makeEntranceMarkers(): void {
     const under = makeLabel('EXIT ▲');
-    under.position.set(ex + 0.5, ey + 1.8);
-    this.layerC[1].addChild(under);
     const surface = makeLabel('NEST ▼');
-    surface.position.set(ex + 0.5, ey + 2.2);
+    under.visible = false;
+    surface.visible = false;
+    this.layerC[1].addChild(under);
     this.layerC[0].addChild(surface);
+    this.entranceMarks = [under, surface];
+  }
+
+  /** Position/show/hide the entrance labels; call whenever the entrance
+   * changes (it appears when the founding queen creates the nest). */
+  refreshEntrance(): void {
+    const [under, surface] = this.entranceMarks;
+    const ent = this.sim.entrance;
+    if (ent === null) {
+      under.visible = false;
+      surface.visible = false;
+      return;
+    }
+    under.visible = true;
+    surface.visible = true;
+    under.position.set(ent[0] + 0.5, ent[1] + 1.8);
+    surface.position.set(ent[0] + 0.5, ent[1] + 2.2);
   }
 
   setActiveLayer(layer: number): void {
@@ -143,7 +179,7 @@ export class Renderer {
         g.rect(x, y, 1, 1).fill(pal[t[y * this.sim.w + x]]);
       }
     }
-    const [ex, ey] = this.sim.entrance;
+    const [ex, ey] = this.sim.entrance ?? [-10, -10];
     g.circle(ex + 0.5, ey + 0.5, 1.6).fill({ color: 0xd9c27a, alpha: 0.22 });
     g.circle(ex + 0.5, ey + 0.5, 1.6).stroke({ width: 0.1, color: 0xd9c27a, alpha: 0.9 });
     g.circle(ex + 0.5, ey + 0.5, 0.45).stroke({ width: 0.08, color: 0xf0e0a0 });
@@ -215,20 +251,30 @@ export class Renderer {
     this.world.position.set(screen.width / 2 - this.cam.x * s, screen.height / 2 - this.cam.y * s);
   }
 
-  private drawEntity(g: Graphics, s: Snap): void {
+  private drawEntity(g: Graphics, s: Snap, team: number): void {
+    const pal = TEAM_COLORS[team] ?? TEAM_COLORS[0];
     g.clear();
     if (s.kind === 0) {
-      g.circle(0, 0, 0.5).fill(0x8e2f3c);
-      g.circle(0, -0.45, 0.22).fill(0x5e1e27);
+      if (s.state === 4) {
+        // wings while the founding queen is airborne
+        g.moveTo(-0.1, -0.1).lineTo(-0.55, -0.5).stroke({ width: 0.09, color: 0xd8cfc0, alpha: 0.55 });
+        g.moveTo(0.1, -0.1).lineTo(0.55, -0.5).stroke({ width: 0.09, color: 0xd8cfc0, alpha: 0.55 });
+      }
+      g.circle(0, 0, 0.5).fill(pal[0]);
+      g.circle(0, -0.45, 0.22).fill(pal[1]);
+      if (s.aux > 1.5) {
+        // excavated dirt hauled by the founding queen
+        g.circle(0.3, 0.12, 0.13).fill(0x8a6d4a);
+      }
     } else if (s.kind === 1) {
-      g.ellipse(0, 0, 0.34, 0.24).fill(0x9c6b3c);
-      g.circle(0, -0.26, 0.14).fill(0x6e4826);
+      g.ellipse(0, 0, 0.34, 0.24).fill(pal[2]);
+      g.circle(0, -0.26, 0.14).fill(pal[3]);
       if (s.extra > 0.5) {
         g.circle(0.2, 0.05, 0.13).fill(s.aux > 0.5 ? 0x4a7fd9 : 0x3fa34d);
       }
     } else if (s.kind === 5) {
-      g.ellipse(0, 0, 0.4, 0.3).fill(0x3d2b1f);
-      g.circle(0, -0.32, 0.18).fill(0x7a2a2a);
+      g.ellipse(0, 0, 0.4, 0.3).fill(pal[4]);
+      g.circle(0, -0.32, 0.18).fill(pal[5]);
       if (s.extra > 0.5) {
         g.circle(0.24, 0.06, 0.14).fill(s.aux > 0.5 ? 0x4a7fd9 : 0x3fa34d);
       }
@@ -271,18 +317,31 @@ export class Renderer {
         const t = makeLabel(labelText(s));
         t.position.set(0, -0.85);
         c.addChild(g, t);
-        e = { c, g, t, kind: -1, carrying: false, hpBucket: -1, label: '' };
+        e = { c, g, t, kind: -1, carrying: false, hpBucket: -1, label: '', flying: false, dirt: false, team: -1 };
         this.sprites.set(s.id, e);
         this.entities.addChild(c);
       }
       const carrying = s.extra > 0.5;
       const hpBucket = Math.floor(s.hp * 8);
       const label = labelText(s);
-      if (e.kind !== s.kind || e.carrying !== carrying || e.hpBucket !== hpBucket) {
+      const flying = s.state === 4;
+      const dirt = s.aux > 1.5;
+      const team = this.sim.team();
+      if (
+        e.kind !== s.kind ||
+        e.carrying !== carrying ||
+        e.hpBucket !== hpBucket ||
+        e.flying !== flying ||
+        e.dirt !== dirt ||
+        e.team !== team
+      ) {
         e.kind = s.kind;
         e.carrying = carrying;
         e.hpBucket = hpBucket;
-        this.drawEntity(e.g, s);
+        e.flying = flying;
+        e.dirt = dirt;
+        e.team = team;
+        this.drawEntity(e.g, s, team);
       }
       if (e.label !== label) {
         e.label = label;
@@ -335,9 +394,18 @@ export class Renderer {
     this.sprites.clear();
     this.drawTiles(0);
     this.drawTiles(1);
-    this.setActiveLayer(this.activeLayer);
-    this.cam.x = sim.entrance[0];
-    this.cam.y = sim.entrance[1] + 3;
+    if (sim.foundingMode) {
+      this.setActiveLayer(0);
+      const q = sim.queenId();
+      const qs = q !== null ? sim.cur.get(q) : undefined;
+      this.cam.x = qs?.x ?? sim.w / 2;
+      this.cam.y = qs?.y ?? sim.h / 2;
+    } else {
+      this.setActiveLayer(1);
+      this.cam.x = sim.entrance?.[0] ?? sim.w / 2;
+      this.cam.y = (sim.entrance?.[1] ?? 0) + 3;
+    }
+    this.refreshEntrance();
     this.cam.zoom = 1;
     this.applyCamera();
   }

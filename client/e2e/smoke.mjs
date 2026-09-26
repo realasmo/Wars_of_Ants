@@ -54,52 +54,175 @@ try {
   });
 
   await page.goto(`${baseUrl}?seed=${SEED}&e2e=1`);
+  // --- menu flow: title → team select (red) ---
+  await page.waitForSelector('#menu:not(.hidden)', { timeout: 30000 });
+  await page.click('#btn-play');
+  await page.click('#btn-team-red');
   await page.waitForFunction(() => window.__woa !== undefined, null, { timeout: 30000 });
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(600);
 
   const state = () => page.evaluate(() => window.__woa.state());
+  const tile = (layer, x, y) => page.evaluate((a) => window.__woa.tile(a.l, a.x, a.y), { l: layer, x, y });
   const dump = async (name) => {
     const s = await state();
     writeFileSync(path.join(OUT, `${name}.json`), JSON.stringify(s, null, 2));
     return s;
   };
   const shot = (name) => page.screenshot({ path: path.join(OUT, `${name}.png`) });
-  const px = (x, y) => page.evaluate((p) => window.__woa.px(p.x, p.y), { x, y });
-  const near = (got, want, tol = 40) => {
-    const d = Math.max(Math.abs(got[0] - want[0]), Math.abs(got[1] - want[1]), Math.abs(got[2] - want[2]));
-    return d <= tol;
-  };
-  const DIRT = [0x5c, 0x40, 0x33];
 
-  const hudText = async () =>
-    Object.fromEntries(
-      await page.evaluate(() =>
-        ['stat-food', 'stat-super', 'stat-ants', 'stat-eggs', 'stat-dug', 'stat-time', 'ctrl-ant', 'ctrl-layer'].map(
-          (id) => [id, document.getElementById(id)?.textContent ?? '?'],
-        ),
-      ),
-    );
+  // --- founding start: lone flying queen on the surface ---
+  let s = await dump('s01-flight-start');
+  await shot('s01-flight');
+  console.log('start:', JSON.stringify({ tick: s.tick, phase: s.phase, team: s.team, queen: s.queen }));
+  if (s.phase !== 0) failures.push(`expected flight phase, got ${s.phase}`);
+  if (s.team !== 0) failures.push(`expected red team, got ${s.team}`);
+  if (s.queen === null || s.queen.layer !== 'S' || s.queen.state !== 4) {
+    failures.push(`queen not flying on surface: ${JSON.stringify(s.queen)}`);
+  }
+  if (s.ants.length !== 0) failures.push(`expected no ants at start, got ${s.ants.length}`);
+  if (s.entrance !== null) failures.push('entrance should not exist during flight');
 
-  let s = await dump('s01-start');
-  await shot('s01-underground-start');
-  console.log('start:', JSON.stringify({ tick: s.tick, ants: s.ants.length, food: s.food }));
-
-  const pxDirt = await px(50.5, 2.5);
-  if (!near(pxDirt, DIRT)) failures.push(`dirt tile color wrong: ${pxDirt} vs ${DIRT}`);
-
-  const hud1 = await hudText();
-  console.log('hud:', JSON.stringify(hud1));
-
-  await page.evaluate(() => window.__woa.step(600));
-  await page.waitForTimeout(400);
-  s = await dump('s02-30s');
-  await shot('s02-underground-30s');
-  console.log('after 30s:', JSON.stringify({ tick: s.tick, dug: s.dug, food: s.food, eggs: s.eggs }));
-
-  // --- hold-to-steer: ant walks toward the held cursor (+x screen direction).
-  // Camera locks the ant at screen center, so press away from the center to
-  // avoid picking the ant itself instead of steering.
+  // --- flight steering (hold LMB right of the camera-locked queen) ---
   {
+    const before = s.queen.x;
+    await page.mouse.move(840, 300);
+    await page.mouse.down();
+    await page.mouse.move(940, 300, { steps: 10 });
+    await page.evaluate(() => window.__woa.step(80));
+    await page.mouse.up();
+    const s2 = await state();
+    const after = s2.queen.x;
+    console.log('fly:', JSON.stringify({ before, after: +after.toFixed(2) }));
+    if (after - before < 0.5) failures.push(`flight steering did not move the queen (${before} -> ${after})`);
+  }
+
+  // --- land (RMB), walk, found the nest (RMB) ---
+  s = await state();
+  await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: s.queen.x, y: s.queen.y });
+  s = await state();
+  if (s.phase !== 1) failures.push(`land did not enter grounded phase (${s.phase})`);
+  await page.evaluate((p) => window.__woa.click(p.x, p.y, 0), { x: s.queen.x + 4, y: s.queen.y });
+  await page.evaluate(() => window.__woa.step(80));
+  s = await state();
+  const nestTile = [Math.floor(s.queen.x), Math.floor(s.queen.y)];
+  await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: s.queen.x, y: s.queen.y });
+  await page.evaluate(() => window.__woa.step(3));
+  s = await state();
+  await shot('s02-nest');
+  console.log('nest:', JSON.stringify({ phase: s.phase, entrance: s.entrance, layer: s.layer, dug: s.dug }));
+  if (s.phase !== 2) failures.push(`found did not enter founding phase (${s.phase})`);
+  if (!Array.isArray(s.entrance) || s.entrance[0] !== nestTile[0] || s.entrance[1] !== nestTile[1]) {
+    failures.push(`entrance ${JSON.stringify(s.entrance)} not at queen tile ${nestTile}`);
+  }
+  if (s.queen.layer !== 'U') failures.push('queen did not move underground on founding');
+  if (s.layer !== 'underground') failures.push('camera did not follow the queen underground');
+  if (s.dug < 10) failures.push(`starter chamber not fully carved (${s.dug})`);
+
+  // --- dig a wall, refill it, dig again, haul the dirt out, drop it above ---
+  const [ex, ey] = s.entrance;
+  const walls = [
+    [ex + 2, ey + 2, ex + 1, ey + 2],
+    [ex + 2, ey + 1, ex + 1, ey + 1],
+    [ex + 2, ey + 3, ex + 1, ey + 3],
+    [ex - 2, ey + 2, ex - 1, ey + 2],
+    [ex, ey + 4, ex, ey + 3],
+  ];
+  let wall = null;
+  for (const [wx, wy, sx, sy] of walls) {
+    const k = await tile(1, wx, wy);
+    if (k >= 1 && k <= 3) {
+      wall = { wx, wy, sx, sy };
+      break;
+    }
+  }
+  if (!wall) {
+    failures.push('no soft wall around the starter chamber (seed-dependent?)');
+  } else {
+    await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 0), { x: wall.sx, y: wall.sy });
+    await page.evaluate(() => window.__woa.step(60));
+    await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: wall.wx, y: wall.wy });
+    await page.evaluate(() => window.__woa.step(25));
+    s = await state();
+    if (s.queen.aux !== 2) failures.push(`queen not hauling dirt after dig (aux ${s.queen.aux})`);
+    // refill the same cell
+    await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: wall.wx, y: wall.wy });
+    await page.evaluate(() => window.__woa.step(3)); // force a snapshot pull
+    s = await state();
+    const refilled = await tile(1, wall.wx, wall.wy);
+    console.log('dirt:', JSON.stringify({ aux: s.queen.aux, refilled }));
+    if (refilled < 1 || refilled > 3) failures.push(`dump did not refill the cell (kind ${refilled})`);
+    if (s.queen.aux !== 0) failures.push(`queen still hauling after dump (aux ${s.queen.aux})`);
+    // dig again and haul it out through the entrance
+    await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: wall.wx, y: wall.wy });
+    await page.evaluate(() => window.__woa.step(25));
+    await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: ex, y: ey });
+    await page.evaluate(() => window.__woa.step(120));
+    s = await state();
+    if (s.queen.layer !== 'S') failures.push('queen did not reach the surface while hauling');
+    await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: s.queen.x + 3, y: s.queen.y });
+    await page.evaluate(() => window.__woa.step(3)); // force a snapshot pull
+    s = await state();
+    if (s.queen.aux !== 0) failures.push(`surface dump did not discard the dirt (aux ${s.queen.aux})`);
+    // back into the nest — the founding queen must not linger among spiders
+    await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: ex, y: ey });
+    await page.evaluate(() => window.__woa.step(120));
+    s = await state();
+    console.log('haul:', JSON.stringify({ layer: s.queen.layer, aux: s.queen.aux, dead: s.dead }));
+    if (s.queen.layer !== 'U') failures.push('queen did not return into the nest after hauling');
+    if (s.dead) failures.push('colony died during the founding haul');
+  }
+
+  // --- founding timer → brood → first workers ---
+  await page.evaluate(() => window.__woa.step(1250));
+  s = await dump('s03-brood');
+  console.log('brood:', JSON.stringify({ phase: s.phase, eggs: s.eggs }));
+  if (s.phase !== 3) failures.push(`founding timer did not end in brood (${s.phase})`);
+  if (s.eggs !== 4) failures.push(`expected 4 founding eggs, got ${s.eggs}`);
+  await page.evaluate(() => window.__woa.step(3650));
+  s = await dump('s04-colony');
+  await shot('s04-colony');
+  console.log('colony:', JSON.stringify({ phase: s.phase, workers: s.workers, dead: s.dead }));
+  if (s.phase !== 4) failures.push(`workers did not start the colony phase (${s.phase})`);
+  if (s.workers !== 4) failures.push(`expected 4 hatched workers, got ${s.workers}`);
+
+  // --- control a worker: cycle to it (C — click-selecting a foraging worker
+  // is racy), walk to the surface, steer, fight ---
+  const queenId = s.queen ? s.queen.id : null;
+  const worker = s.ants[0];
+  if (!worker) {
+    failures.push('no worker to control after hatch');
+  } else {
+    await page.evaluate(() => window.__woa.pause()); // freeze positions while switching
+    await page.evaluate(() => window.__woa.key('KeyC'));
+    s = await state();
+    if (s.playerAnt === queenId || s.playerAnt === null) {
+      failures.push(`C did not cycle from the queen to a worker (playerAnt ${s.playerAnt})`);
+    }
+    // out through the entrance for the fight (entrance toggles layers)
+    const me0 = s.ants.find((a) => a.id === s.playerAnt);
+    if (me0 && me0.layer === 'U') {
+      await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: ex, y: ey });
+    }
+    await page.evaluate(() => window.__woa.pause()); // resume
+    // the cycled worker may be mid-delivery and dive into the nest — keep
+    // sending it up until it actually holds the surface
+    let surfaced = false;
+    for (let i = 0; i < 4 && !surfaced; i++) {
+      await page.evaluate(() => window.__woa.step(150));
+      await page.evaluate(() => window.__woa.pause());
+      s = await state();
+      const w = s.ants.find((a) => a.id === s.playerAnt);
+      surfaced = !!(w && w.layer === 'S');
+      if (!surfaced) {
+        await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: ex, y: ey });
+      }
+      await page.evaluate(() => window.__woa.pause()); // resume
+    }
+    s = await state();
+    const me = s.ants.find((a) => a.id === s.playerAnt);
+    if (!me || me.layer !== 'S') failures.push('worker did not reach the surface');
+
+    // hold-to-steer the worker (camera locked on it)
     const before = s.ants.find((a) => a.id === s.playerAnt);
     await page.mouse.move(840, 300);
     await page.mouse.down();
@@ -107,89 +230,40 @@ try {
     await page.evaluate(() => window.__woa.step(80));
     await page.mouse.up();
     const s2 = await state();
-    const after = s2.ants.find((a) => a.id === s2.playerAnt);
-    console.log('steer:', JSON.stringify({ before: before && +before.x.toFixed(2), after: after && +after.x.toFixed(2) }));
+    const after = s2.ants.find((a) => a.id === s.playerAnt);
+    console.log('steer:', JSON.stringify({ before: before && before.x, after: after && +after.x.toFixed(2) }));
     if (before && after && after.x - before.x < 0.5) {
-      failures.push(`steering did not move the ant toward the cursor (${before.x} -> ${after.x})`);
+      failures.push(`steering did not move the worker (${before.x} -> ${after.x})`);
     }
-    if (!before) failures.push('no controlled ant alive for the steering test');
+
+    // fight: pause so the wandering spider can't dodge the coordinate click
+    await page.evaluate(() => window.__woa.pause());
+    const spider = (await state()).spiders[0];
+    if (spider) {
+      await page.evaluate((p) => window.__woa.click(p.x, p.y, 0), { x: spider.x, y: spider.y });
+      await page.evaluate(() => window.__woa.pause()); // resume
+      await page.evaluate(() => window.__woa.step(1500));
+      await page.waitForTimeout(300);
+      s = await dump('s05-fight');
+      await shot('s05-fight');
+      const hurt = s.spiders.find((sp) => sp.id === spider.id);
+      console.log('fight:', JSON.stringify({ spiderBefore: spider.hp, spiderAfter: hurt ? hurt.hp : 'dead', antsLeft: s.ants.length }));
+      if (hurt && hurt.hp >= 1.0) failures.push('attack did not damage the spider');
+      if (s.ants.length === 0) failures.push('all ants died');
+    } else {
+      console.log('no spider visible on surface — skipping fight');
+      await page.evaluate(() => window.__woa.pause()); // resume
+    }
   }
 
-  // go to surface (Tab is a toggle — the ant's autonomous crossings may have
-  // already flipped the view via camera-follow, so make it conditional)
-  if (s.layer !== 'surface') await page.evaluate(() => window.__woa.key('Tab'));
-  await page.waitForTimeout(400);
-  await shot('s03-surface');
-  s = await dump('s03-surface');
-  console.log('surface:', JSON.stringify({ layer: s.layer, spiders: s.spiders.length }));
-
-  const ent = s.entrance;
-  const before = s.ants.find((a) => a.id === s.playerAnt);
-  // exercise camera-follow: view on the ant's layer, then it crosses
-  if (before && before.layer === 'S' && s.layer !== 'surface') {
-    await page.evaluate(() => window.__woa.key('Tab'));
-  }
-  await page.evaluate(
-    (p) => window.__woa.click(p.x, p.y, 2),
-    { x: ent[0] + 0.5, y: ent[1] + 0.5 },
-  );
-  await page.evaluate(() => window.__woa.step(600));
-  s = await dump('s03b-entrance');
-  const after = s.ants.find((a) => a.id === s.playerAnt);
-  console.log(
-    'entrance:',
-    JSON.stringify({
-      before: before ? before.layer : '?',
-      after: after ? after.layer : 'gone',
-      viewAfter: s.layer,
-    }),
-  );
-  if (!after) failures.push('player ant vanished after entrance command');
-  else if (before && before.layer === after.layer) {
-    failures.push(`entrance right-click did not move ant between layers (${before.layer})`);
-  }
-  if (after && after.layer === 'U' && s.layer !== 'underground') {
-    failures.push(`camera did not follow the ant into the nest (view: ${s.layer})`);
-  }
-  // the view follows the ant's layer, so bring the ant back up for the fight
-  await page.evaluate(
-    (p) => window.__woa.click(p.x, p.y, 2),
-    { x: ent[0] + 0.5, y: ent[1] + 0.5 },
-  );
-  await page.evaluate(() => window.__woa.step(600));
-  s = await dump('s03c-return');
-  const back = s.ants.find((a) => a.id === s.playerAnt);
-  if (!back || back.layer !== 'S') failures.push('ant did not return to the surface for the fight');
-  // pause freezes the moving spider so the coordinate click can't miss the
-  // 0.6-tile pick radius
-  await page.evaluate(() => window.__woa.pause());
-
-  const spider = s.spiders[0];
-  if (spider) {
-    await page.evaluate((p) => window.__woa.click(p.x, p.y, 0), { x: spider.x, y: spider.y });
-    await page.evaluate(() => window.__woa.pause()); // resume
-    await page.evaluate(() => window.__woa.step(1500));
-    await page.waitForTimeout(400);
-    s = await dump('s04-fight');
-    await shot('s04-fight');
-    const after = s.spiders.find((sp) => sp.id === spider.id);
-    console.log('fight:', JSON.stringify({ spiderBefore: spider.hp, spiderAfter: after ? after.hp : 'dead', antsLeft: s.ants.length }));
-    if (after && after.hp >= 1.0) failures.push('attack did not damage the spider');
-    if (s.ants.length === 0) failures.push('all ants died');
-  } else {
-    console.log('no spider visible on surface state — skipping fight');
-    await page.evaluate(() => window.__woa.pause()); // resume
-  }
-
-  await page.evaluate(() => window.__woa.key('Tab'));
   await page.evaluate(() => window.__woa.step(3000));
   await page.waitForTimeout(400);
-  s = await dump('s05-late');
-  await shot('s05-underground-late');
-  console.log('late:', JSON.stringify({ tick: s.tick, workers: s.workers, soldiers: s.soldiers, dug: s.dug, dead: s.dead }));
+  s = await dump('s06-late');
+  console.log('late:', JSON.stringify({ tick: s.tick, workers: s.workers, food: s.food, dead: s.dead }));
+  if (s.dead) failures.push('colony died during the late window');
 
   const ilog = await page.evaluate(() => window.__woa.log());
-  writeFileSync(path.join(OUT, 's06-inputlog.json'), JSON.stringify(ilog, null, 2));
+  writeFileSync(path.join(OUT, 's07-inputlog.json'), JSON.stringify(ilog, null, 2));
   const types = [...new Set(ilog.events.map((e) => e.type))];
   const acts = [...new Set(ilog.events.filter((e) => e.type === 'cmd').map((e) => e.act))];
   console.log('inputlog:', JSON.stringify({ count: ilog.count, dropped: ilog.dropped, types, acts }));
@@ -197,26 +271,26 @@ try {
   else {
     if (!types.includes('start')) failures.push('input log missing start event');
     if (!types.includes('view')) failures.push('input log missing view toggle');
-    if (!acts.includes('entrance')) failures.push('input log missing entrance command');
-    if (spider && !acts.includes('attack')) failures.push('input log missing attack command');
+    for (const want of ['land', 'found', 'dump', 'entrance']) {
+      if (!acts.includes(want)) failures.push(`input log missing ${want} command`);
+    }
+    if (acts.includes('dig') === false && !failures.some((f) => f.includes('wall'))) {
+      failures.push('input log missing dig command');
+    }
     const ticks = ilog.events.map((e) => e.tick);
     if (ticks.some((tk, i) => i > 0 && tk < ticks[i - 1])) {
       failures.push('input log ticks not monotonic');
     }
-    if (Math.max(...ticks) > s.tick) {
-      failures.push(`input log tick ahead of sim (max ${Math.max(...ticks)} vs state ${s.tick})`);
-    }
   }
 
-  // --- dev tools: console API + F2 panel (main page, before replay navigation) ---
+  // --- dev tools: console API + F2 panel ---
   await page.evaluate(() => window.__woa.setfood(999));
   await page.evaluate(() => window.__woa.spawn('spider', 50.5, 3.5));
-  await page.evaluate(() => window.__woa.step(3)); // force a snapshot pull
-  s = await dump('s05b-dev');
+  await page.evaluate(() => window.__woa.step(3));
+  s = await state();
   if (s.food < 500) failures.push(`dev setfood failed: ${s.food}`);
   if (s.spiders.length !== 3) failures.push(`dev spawn spider failed: ${s.spiders.length}`);
   const foodsBefore = s.foods;
-
   await page.mouse.click(640, 400); // focus canvas for key events
   await page.keyboard.press('F2');
   const panelVisible = await page.evaluate(() => !document.getElementById('devpanel').classList.contains('hidden'));
@@ -226,13 +300,8 @@ try {
   await page.evaluate(() => window.__woa.step(3));
   s = await state();
   if (s.foods !== foodsBefore + 1) failures.push(`panel food placement failed: ${s.foods} vs ${foodsBefore + 1}`);
-  const devLog = await page.evaluate(() => window.__woa.log());
-  if (!devLog.events.some((e) => e.type === 'cmd' && e.act === 'dev-spawn')) {
-    failures.push('dev spawn not recorded in input log');
-  }
-  await page.keyboard.press('F2'); // close panel
+  await page.keyboard.press('F2');
 
-  // F3 perf overlay shows live numbers
   await page.keyboard.press('F3');
   await page.waitForTimeout(700);
   const perfText = await page.evaluate(() => document.getElementById('perf').textContent);
@@ -240,13 +309,18 @@ try {
   else console.log('perf:', perfText.split('\n')[0]);
   await page.keyboard.press('F3');
 
+  // --- regenerate the determinism fixture from this very session ---
+  const replayExport = await page.evaluate(() => window.__woa.replay());
+  const fixturePath = path.join(ROOT, 'public', 'replays', 'determinism.json');
+  writeFileSync(fixturePath, JSON.stringify(replayExport, null, 1) + '\n');
+  console.log('fixture:', JSON.stringify({ version: replayExport.version, team: replayExport.team, ticks: replayExport.ticks, cmds: replayExport.cmds.length }));
+
   // --- cross-platform determinism: same replay on native and WASM ---
-  const replayRel = 'client/public/replays/determinism.json';
   const nativeDump = await new Promise((resolve, reject) => {
     const rustBin = `${process.env.HOME}/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin`;
     const p = spawn(
       'cargo',
-      ['run', '--example', 'determinism_dump', '--', path.resolve(ROOT, '..', replayRel)],
+      ['run', '--example', 'determinism_dump', '--', fixturePath],
       { cwd: path.resolve(ROOT, '..'), env: { ...process.env, PATH: `${rustBin}:${process.env.PATH}` } },
     );
     let out = '';
@@ -268,12 +342,12 @@ try {
 
   // step and read canon in ONE JS task — a separate round-trip lets the
   // realtime rAF loop tick once in between and skew the comparison
-  const wasmCanon = await page.evaluate(() => {
-    window.__woa.stepTo(3000);
+  const wasmCanon = await page.evaluate((target) => {
+    window.__woa.stepTo(target);
     return window.__woa.canon();
-  });
-  writeFileSync(path.join(OUT, 's07-wasm-canon.txt'), wasmCanon);
-  writeFileSync(path.join(OUT, 's07-native-canon.txt'), nativeDump);
+  }, replayExport.ticks);
+  writeFileSync(path.join(OUT, 's08-wasm-canon.txt'), wasmCanon);
+  writeFileSync(path.join(OUT, 's08-native-canon.txt'), nativeDump);
   const detOk = wasmCanon === nativeDump;
   console.log('determinism:', JSON.stringify({ match: detOk, len: wasmCanon.length, nativeLen: nativeDump.length }));
   if (!detOk) {

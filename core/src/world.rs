@@ -55,5 +55,7 @@ pub fn tile_center(x: u32, y: u32) -> Vec2 {
 pub struct World {
     pub surface: Grid,
     pub underground: Grid,
-    pub entrance: (u32, u32),
+    /// Nest hole position (same tile on both layers). None until the founding
+    /// queen creates the nest; cross-layer routing refuses while unset.
+    pub entrance: Option<(u32, u32)>,
 }

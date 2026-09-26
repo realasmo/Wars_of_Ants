@@ -27,6 +27,9 @@ export class Game {
   private lastPlayerLayer: number | null = null;
   private steerTarget: { x: number; y: number } | null = null;
   private lastSteerTick = -1;
+  private lastEntrance: [number, number] | null | undefined = undefined;
+  /** Set by main.ts: death overlay goes back to the team menu instead of restarting in place. */
+  onToMenu: (() => void) | null = null;
   private perfStart = 0;
   private perfFrames = 0;
   private perfMs = 0;
@@ -60,7 +63,7 @@ export class Game {
       onFF: () => this.debugStep(200),
       onPauseState: () => this.paused,
     });
-    this.playerAnt = sim.workers()[0] ?? null;
+    this.playerAnt = this.initialAnt();
     this.log.push({ type: 'start', seed, workers: sim.workers().length });
     if (replay) {
       this.replay = { cmds: [...replay.cmds].sort((a, b) => a.t - b.t), i: 0 };
@@ -69,10 +72,28 @@ export class Game {
     }
   }
 
-  static async create(host: HTMLElement, seed: number, replay: Replay | null = null): Promise<Game> {
-    const sim = new Sim(seed);
+  /** The founding player starts as the queen; the legacy start as first worker. */
+  private initialAnt(): number | null {
+    if (this.sim.foundingMode) return this.sim.queenId();
+    return this.sim.workers()[0] ?? null;
+  }
+
+  static async create(
+    host: HTMLElement,
+    seed: number,
+    replay: Replay | null = null,
+    team = 0,
+  ): Promise<Game> {
+    // v2 replays are founding sessions (team recorded); v1 replays predate
+    // the founding update and no longer reproduce — loader warns
+    const sim =
+      replay !== null && replay.version < 2
+        ? new Sim(replay.seed)
+        : replay !== null
+          ? new Sim(replay.seed, 3, 6, { founding: true, team: replay.team ?? 0 })
+          : new Sim(seed, 3, 6, { founding: true, team });
     const renderer = await Renderer.create(sim, host);
-    return new Game(sim, renderer, seed, replay);
+    return new Game(sim, renderer, replay !== null ? replay.seed : seed, replay);
   }
 
   start(): void {
@@ -138,10 +159,11 @@ export class Game {
         return c;
       });
     return {
-      version: 1,
+      version: 2,
       seed: this.seed,
       name: `session-${new Date().toISOString().slice(0, 19)}`,
       core: coreVersion(),
+      team: this.sim.team(),
       ticks: this.sim.tickCount,
       cmds,
     };
@@ -203,6 +225,10 @@ export class Game {
     return this.renderer.pixelAt(x, y);
   }
 
+  debugTile(layer: number, x: number, y: number): number {
+    return this.sim.tileAt(layer, x, y);
+  }
+
   debugState(): Record<string, unknown> {
     const counts = this.sim.casteCounts();
     const spiders: Record<string, unknown>[] = [];
@@ -216,9 +242,14 @@ export class Game {
     }
     let foods = 0;
     for (const s of this.sim.cur.values()) if (s.kind === 2) foods++;
+    const qid = this.sim.queenId();
+    const qs = qid !== null ? this.sim.cur.get(qid) : undefined;
     return {
       tick: this.sim.tickCount,
       dead: this.sim.dead,
+      phase: this.sim.phase(),
+      phaseTime: +this.sim.phaseTime().toFixed(1),
+      team: this.sim.team(),
       food: this.sim.food,
       super: this.sim.superFood(),
       workers: counts.workers,
@@ -227,6 +258,16 @@ export class Game {
       dug: this.sim.tilesDug(),
       layer: this.renderer.activeLayer === 0 ? 'surface' : 'underground',
       playerAnt: this.playerAnt,
+      queen: qs
+        ? {
+            id: qs.id,
+            x: +qs.x.toFixed(2),
+            y: +qs.y.toFixed(2),
+            layer: qs.layer === 0 ? 'S' : 'U',
+            state: qs.state,
+            aux: +qs.aux.toFixed(2),
+          }
+        : null,
       entrance: this.sim.entrance,
       paused: this.paused,
       spiders,
@@ -235,23 +276,25 @@ export class Game {
     };
   }
 
-  restart(): void {
+  restartFounding(team: number): void {
     if (this.replay !== null) {
       this.replay = null;
       this.hud.setReplay(false);
       this.log.push({ type: 'mark', label: 'replay-aborted-by-restart' });
     }
-    this.log.push({ type: 'restart', seed: Date.now() % 0x7fffffff });
     this.seed = Date.now() % 0x7fffffff;
-    this.sim = new Sim(this.seed);
-    this.playerAnt = this.sim.workers()[0] ?? null;
+    this.log.push({ type: 'restart', seed: this.seed, team });
+    this.sim = new Sim(this.seed, 3, 6, { founding: true, team });
+    this.playerAnt = this.initialAnt();
     this.lastPlayerLayer = null;
+    this.steerTarget = null;
+    this.lastEntrance = undefined;
     this.renderer.reset(this.sim);
     this.hud.hideDead();
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
     this.acc = 0;
     this.deadShown = false;
-    this.log.push({ type: 'start', seed: this.seed, workers: this.sim.workers().length });
+    this.log.push({ type: 'start', seed: this.seed, team, workers: 0 });
   }
 
   private toggleLayer(): void {
@@ -278,7 +321,9 @@ export class Game {
       this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
       return true;
     }
-    if (pick && (pick.kind === 1 || pick.kind === 5)) {
+    // selecting the already-controlled ant must not consume the press —
+    // steering starts with LMB down and the controlled ant sits at center
+    if (pick && (pick.kind === 0 || pick.kind === 1 || pick.kind === 5) && pick.id !== this.playerAnt) {
       this.playerAnt = pick.id;
       this.lastPlayerLayer = null;
       this.log.push({ type: 'cmd', act: 'select', ant: pick.id });
@@ -298,11 +343,16 @@ export class Game {
   }
 
   private cycleAnt(): void {
-    const workers = this.sim.workers();
-    if (workers.length === 0) return;
-    const i = this.playerAnt === null ? 0 : workers.indexOf(this.playerAnt);
+    // founding: the roster is the queen plus her workers
+    const roster = this.sim.workers();
+    if (this.sim.foundingMode) {
+      const q = this.sim.queenId();
+      if (q !== null) roster.unshift(q);
+    }
+    if (roster.length === 0) return;
+    const i = this.playerAnt === null ? 0 : roster.indexOf(this.playerAnt);
     const from = this.playerAnt;
-    this.playerAnt = workers[(i + 1) % workers.length];
+    this.playerAnt = roster[(i + 1) % roster.length];
     this.lastPlayerLayer = null; // re-baseline the follow camera on the new ant
     this.log.push({ type: 'cmd', act: 'cycle', from, to: this.playerAnt });
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
@@ -336,12 +386,16 @@ export class Game {
     }
   }
 
+  /** Nearest interactive entity (queen/worker/soldier/spider) within pick
+   * radius on the active layer. Food and eggs are not pickable — a crumb
+   * next to a spider must never shadow the spider. */
   private pickEntity(x: number, y: number): Snap | null {
     const layer = this.renderer.activeLayer;
     let best: Snap | null = null;
     let bestD = 0.6 * 0.6;
     for (const s of this.sim.cur.values()) {
       if (s.layer !== layer) continue;
+      if (s.kind !== 0 && s.kind !== 1 && s.kind !== 4 && s.kind !== 5) continue;
       const d = (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y);
       if (d < bestD) {
         bestD = d;
@@ -361,7 +415,6 @@ export class Game {
     }
     if (this.playerAnt === null) return;
     if (this.replay !== null) return; // replay is watch-only: camera/view stay live, sim commands don't
-    const layer = this.renderer.activeLayer;
     const pick = this.pickEntity(x, y);
     if (pick && pick.kind === 4) {
       this.log.push({ type: 'cmd', act: 'attack', ant: this.playerAnt, target: pick.id });
@@ -370,7 +423,7 @@ export class Game {
       return;
     }
     if (button === 0) {
-      if (pick && (pick.kind === 1 || pick.kind === 5)) {
+      if (pick && (pick.kind === 0 || pick.kind === 1 || pick.kind === 5) && pick.id !== this.playerAnt) {
         this.playerAnt = pick.id;
         this.lastPlayerLayer = null; // re-baseline the follow camera on the new ant
         this.log.push({ type: 'cmd', act: 'select', ant: pick.id });
@@ -379,30 +432,77 @@ export class Game {
         this.sim.move(this.playerAnt, x, y);
       }
     } else if (button === 2) {
-      const [ex, ey] = this.sim.entrance;
+      const layer = this.renderer.activeLayer;
+      const me = this.sim.cur.get(this.playerAnt);
       const tx = Math.floor(x);
       const ty = Math.floor(y);
-      if (Math.max(Math.abs(tx - ex), Math.abs(ty - ey)) <= 2) {
+      // founding queen context actions (flight → land, grounded → found nest,
+      // hauling dirt → fill a cell / discard above ground)
+      if (me !== undefined && me.kind === 0) {
+        const phase = this.sim.phase();
+        if (phase === 0) {
+          this.log.push({ type: 'cmd', act: 'land', ant: this.playerAnt });
+          this.sim.land(this.playerAnt);
+          this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+          return;
+        }
+        if (phase === 1 && me.layer === 0) {
+          if (this.sim.found(this.playerAnt)) {
+            this.log.push({ type: 'cmd', act: 'found', ant: this.playerAnt });
+          } else {
+            // too close to the map edge for the starter chamber: walk instead
+            this.log.push({
+              type: 'cmd',
+              act: 'found',
+              ant: this.playerAnt,
+              note: 'refused-near-edge',
+            });
+            this.sim.move(this.playerAnt, x, y);
+          }
+          this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+          return;
+        }
+        if (me.aux > 1.5) {
+          if (me.layer === 0) {
+            // above ground the dirt simply disappears
+            this.log.push({ type: 'cmd', act: 'dump', ant: this.playerAnt, tx: 0, ty: 0, note: 'surface' });
+            this.sim.dump(this.playerAnt, 0, 0);
+            this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+            return;
+          }
+          const kind = this.sim.tileAt(1, tx, ty);
+          const adjacent =
+            Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
+          if (kind === 0 && adjacent && this.sim.dump(this.playerAnt, tx, ty)) {
+            this.log.push({ type: 'cmd', act: 'dump', ant: this.playerAnt, tx, ty });
+            this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+            return;
+          }
+          // invalid fill target → fall through (walk / entrance / dig-refused)
+        }
+      }
+      // dig/fill intent wins over entrance crossing — the starter-chamber
+      // walls sit inside the entrance click radius, and the hole itself is
+      // never a soft tile, so crossing still works on the marked hole
+      const ent = this.sim.entrance;
+      const kind = this.sim.tileAt(1, tx, ty);
+      const soft = kind >= 1 && kind <= 3;
+      const adjacent =
+        me !== undefined &&
+        Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
+      if (layer === 1 && soft && adjacent) {
+        if (this.sim.dig(this.playerAnt, tx, ty)) {
+          this.log.push({ type: 'cmd', act: 'dig', ant: this.playerAnt, tx, ty });
+        } else {
+          this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: tx + 0.5, y: ty + 0.5, note: 'dig-refused' });
+          this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
+        }
+      } else if (ent && Math.max(Math.abs(tx - ent[0]), Math.abs(ty - ent[1])) <= 2) {
         this.log.push({ type: 'cmd', act: 'entrance', ant: this.playerAnt });
         this.sim.useEntrance(this.playerAnt);
       } else {
-        const kind = this.sim.tileAt(layer, tx, ty);
-        const soft = kind >= 1 && kind <= 3;
-        const me = this.sim.cur.get(this.playerAnt);
-        const adjacent =
-          me !== undefined &&
-          Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
-        if (layer === 1 && soft && adjacent) {
-          if (this.sim.dig(this.playerAnt, tx, ty)) {
-            this.log.push({ type: 'cmd', act: 'dig', ant: this.playerAnt, tx, ty });
-          } else {
-            this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: tx + 0.5, y: ty + 0.5, note: 'dig-refused' });
-            this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
-          }
-        } else {
-          this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: tx + 0.5, y: ty + 0.5 });
-          this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
-        }
+        this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: tx + 0.5, y: ty + 0.5 });
+        this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
       }
     }
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
@@ -446,7 +546,20 @@ export class Game {
     if (this.sim.dead && !this.deadShown) {
       this.deadShown = true;
       this.log.push({ type: 'death', tick: this.sim.tickCount, ants: this.sim.workers().length });
-      this.hud.showDead(this.sim, () => this.restart());
+      this.hud.showDead(this.sim, () => {
+        this.hud.hideDead();
+        if (this.onToMenu !== null) this.onToMenu();
+        else this.restartFounding(0);
+      });
+    }
+    // the entrance appears when the founding queen creates the nest
+    if (this.sim.entrance !== this.lastEntrance) {
+      this.lastEntrance = this.sim.entrance;
+      this.renderer.drawTiles(0);
+      this.sim.consumeDirty(0);
+      this.renderer.drawTiles(1);
+      this.sim.consumeDirty(1);
+      this.renderer.refreshEntrance();
     }
     this.renderer.panContinuous(dt, this.playerAnt === null ? this.input.keys : Input.NO_KEYS);
     if (this.sim.consumeDirty(this.renderer.activeLayer)) {
@@ -497,6 +610,9 @@ export class Game {
       else if (c.act === 'dig') this.sim.dig(c.ant ?? 0, c.tx ?? 0, c.ty ?? 0);
       else if (c.act === 'attack') this.sim.attack(c.ant ?? 0, c.target ?? 0);
       else if (c.act === 'entrance') this.sim.useEntrance(c.ant ?? 0);
+      else if (c.act === 'land') this.sim.land(c.ant ?? 0);
+      else if (c.act === 'found') this.sim.found(c.ant ?? 0);
+      else if (c.act === 'dump') this.sim.dump(c.ant ?? 0, c.tx ?? 0, c.ty ?? 0);
       else if (c.act === 'dev-spawn') this.sim.devSpawn(String(c.kind), c.x ?? 0, c.y ?? 0);
       else if (c.act === 'dev-food') this.sim.devSetFood(Number(c.n ?? 0));
       else if (c.act === 'dev-super') this.sim.devSetSuper(Number(c.n ?? 0));

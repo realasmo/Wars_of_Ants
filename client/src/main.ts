@@ -3,6 +3,7 @@ import { initCore } from './wasm';
 import { Game } from './game';
 import { loadReplay } from './replay';
 import type { Replay } from './replay';
+import { chooseTeam } from './menu';
 
 declare global {
   interface Window {
@@ -13,6 +14,7 @@ declare global {
       stepTo: (target: number) => void;
       state: () => Record<string, unknown>;
       px: (x: number, y: number) => number[];
+      tile: (layer: number, x: number, y: number) => number;
       log: () => Record<string, unknown>;
       mark: (label: string) => void;
       replay: () => Record<string, unknown>;
@@ -34,12 +36,24 @@ async function main(): Promise<void> {
   let replay: Replay | null = null;
   if (replayName !== null) replay = await loadReplay(replayName);
   const seedParam = params.get('seed');
-  const seed = replay !== null ? replay.seed : seedParam !== null ? Number(seedParam) : Date.now() % 0x7fffffff;
   const host = document.getElementById('app');
   if (!host) throw new Error('#app element missing');
-  const game = await Game.create(host, seed, replay);
+
+  // replays go straight to the game; a fresh run opens at the team menu
+  let game: Game;
+  if (replay !== null) {
+    game = await Game.create(host, replay.seed, replay);
+  } else {
+    const seed = seedParam !== null ? Number(seedParam) : Date.now() % 0x7fffffff;
+    const team = await chooseTeam();
+    game = await Game.create(host, seed, null, team);
+  }
   game.start();
   if (params.get('perf') !== null) game.togglePerf();
+  // death overlay → team menu → brand-new founding game
+  game.onToMenu = () => {
+    void chooseTeam().then((team) => game.restartFounding(team));
+  };
   window.__woa = {
     click: (x, y, button) => game.debugClick(x, y, button),
     key: (code) => game.debugKey(code),
@@ -47,11 +61,19 @@ async function main(): Promise<void> {
     stepTo: (target) => game.debugStepTo(target),
     state: () => game.debugState(),
     px: (x, y) => game.debugPixel(x, y),
+    tile: (layer, x, y) => game.debugTile(layer, x, y),
     log: () => game.debugLog(),
     mark: (label) => game.debugMark(label),
     replay: () => game.debugReplay(),
     canon: () => game.debugCanon(),
-    spawn: (kind, x, y) => game.debugSpawn(kind, x ?? game.sim.entrance[0] + 0.5, y ?? game.sim.entrance[1] + 0.5),
+    spawn: (kind, x, y) => {
+      const ent = game.sim.entrance;
+      return game.debugSpawn(
+        kind,
+        x ?? (ent !== null ? ent[0] + 0.5 : game.sim.w / 2),
+        y ?? (ent !== null ? ent[1] + 0.5 : game.sim.h / 2),
+      );
+    },
     setfood: (n) => game.debugSetFood(n),
     setsuper: (n) => game.debugSetSuper(n),
     kill: (id) => game.debugKill(id),

@@ -17,7 +17,7 @@ pub const QUEEN: UnitStats = UnitStats {
     hp: 150.0,
     dmg: 0.0,
     atk_cd: 1.0,
-    speed: 1.0,
+    speed: 2.5,
     range: ANT_RANGE,
 };
 
@@ -55,6 +55,19 @@ pub fn stats_for(caste: Caste) -> &'static UnitStats {
         Caste::Soldier => &SOLDIER,
     }
 }
+
+// --- founding (game start) constants ---
+
+/// Flight speed of the founding queen over the surface (tiles/s).
+pub const QUEEN_FLY_SPEED: f64 = 5.0;
+/// Seconds the founding queen has to excavate before laying the first brood.
+pub const FOUNDING_TIME: f64 = 60.0;
+/// Eggs laid when the founding timer ends (up to free-tile availability).
+pub const FOUNDING_EGGS: u32 = 4;
+/// Seconds until founding eggs hatch into the first workers.
+pub const FOUNDING_EGG_HATCH: f64 = 180.0;
+/// Seconds per dirt cell dug by the founding queen.
+pub const QUEEN_DIG_TIME: f64 = 1.0;
 
 // --- economy / world constants ---
 

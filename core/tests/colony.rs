@@ -188,7 +188,7 @@ fn player_loop_entrance_pickup_deposit() {
 #[test]
 fn dig_command_digs_tile() {
     let mut s = Sim::new(1, Config::default());
-    let e = s.world.entrance.0;
+    let e = s.world.entrance.unwrap().0;
     assert_eq!(s.tile_at(Layer::Underground, e + 3, 2), DIRT);
     let w = first_worker(&s);
     assert!(s.issue(Command::Move {
