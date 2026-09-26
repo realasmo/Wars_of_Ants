@@ -9,8 +9,8 @@ mod world;
 pub use balance::{SourceSpec, UnitStats, SOURCES};
 pub use components::{AntState, Carry, Caste, FoodKind, Layer, WorkerAi};
 pub use sim::{
-    snapshot_spec, Activity, AntSnap, Colony, Command, Config, DevSpawn, EggSnap, EntitySnap,
-    FoodRole, FoodSnap, Phase, Sim, SpiderSnap, Team, DT, TPS,
+    Activity, AntSnap, Colony, Command, Config, DevSpawn, EggSnap, EntitySnap, FoodRole,
+    FoodSnap, Phase, Sim, SpiderSnap, Team, DT, TPS,
 };
 pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK};
 
@@ -19,6 +19,13 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub fn core_version() -> String {
     format!("woa-core {}", env!("CARGO_PKG_VERSION"))
+}
+
+/// Wire-code spec for the snapshot transport — the client asserts its
+/// decoder against this at boot, before any sim exists.
+#[wasm_bindgen]
+pub fn snapshot_spec() -> String {
+    sim::snapshot_spec()
 }
 
 #[wasm_bindgen]
@@ -344,11 +351,6 @@ impl WoaSim {
             }
         }
         v
-    }
-
-    /// Wire-code spec for the client's boot-time decoder assertion.
-    pub fn snapshot_spec() -> String {
-        sim::snapshot_spec()
     }
 
     /// Bumped by every tile mutation — re-pull the grids only when it moves.
