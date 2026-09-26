@@ -24,6 +24,7 @@ declare global {
       spawn: (kind: string, x?: number, y?: number) => boolean;
       setfood: (n: number) => void;
       setsuper: (n: number) => void;
+      setwater: (n: number) => void;
       kill: (id: number) => boolean;
       killspiders: () => void;
       pause: () => void;
@@ -80,6 +81,7 @@ async function main(): Promise<void> {
     },
     setfood: (n) => game.debugSetFood(n),
     setsuper: (n) => game.debugSetSuper(n),
+    setwater: (n) => game.debugSetWater(n),
     kill: (id) => game.debugKill(id),
     killspiders: () => game.debugKillSpiders(),
     pause: () => game.togglePause(),

@@ -14,7 +14,7 @@ fn deterministic_same_seed() {
     }
     assert_eq!(a.snapshot(), b.snapshot());
     assert_eq!(a.tiles(Layer::Underground), b.tiles(Layer::Underground));
-    assert_eq!(a.colony.food, b.colony.food);
+    assert_eq!(a.colony.carbs, b.colony.carbs);
 }
 
 #[test]

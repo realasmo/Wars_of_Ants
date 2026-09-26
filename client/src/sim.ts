@@ -165,8 +165,20 @@ export class Sim {
     return this.sim.dev_kill(id);
   }
 
-  superFood(): number {
-    return this.sim.food_super();
+  storeCarbs(): number {
+    return this.sim.store_carbs();
+  }
+
+  storeProtein(): number {
+    return this.sim.store_protein();
+  }
+
+  storeWater(): number {
+    return this.sim.store_water();
+  }
+
+  devSetWater(n: number): void {
+    this.sim.dev_set_water(n);
   }
 
   canonical(): string {
@@ -244,7 +256,7 @@ export class Sim {
     const raw = this.sim.snapshot();
     this.tickCount = Number(this.sim.tick_count());
     this.dead = this.sim.colony_dead();
-    this.food = this.sim.food_store();
+    this.food = this.sim.store_carbs(); // legacy field name: carbs
     const e = this.sim.entrance();
     this.entrance = e.length === 2 ? [e[0], e[1]] : null;
     const prev = this.cur;

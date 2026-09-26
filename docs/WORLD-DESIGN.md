@@ -70,6 +70,13 @@ Size: TBD — comfortable for the above. (Current: 96×96.)
 ## Implementation status
 - ✅ Flight right-click = fly to destination then land; grounded right-click =
   walk to location then found the nest there (was: instant land/found).
-- Open mapping decisions (see README "Undecided"): how protein/carbs/water map
-  onto (or replace) the current green/super food; worker scouting AI; panic
-  mechanic; aphid chamber building; bosses.
+- ✅ **Resource economy (Wave A):** protein / carbs / water stores; green food
+  removed from the founding map; the six finite source types scattered as
+  single finds (counts/spacing/yields/harvest times in `core/src/balance.rs`
+  `SOURCES`); harvest takes per-unit time; scouts discover sources by sight
+  (8 tiles) before foraging targets them; spiders drop protein; carbs below
+  CARB_LOW slow the colony. Water/honeydew sinks (healing, Honey ant) come
+  with later waves — water accumulates for now.
+- ✅ Honeydew→carbs intent noted: ~20 carbs per extracted honeydew unit, once
+  aphid farming lands (Wave D).
+- Open: worker avoid-hostile behavior, panic mechanic, aphid chamber, bosses.

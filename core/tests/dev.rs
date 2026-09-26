@@ -42,8 +42,8 @@ fn dev_set_stores() {
     let mut s = sim();
     s.dev_set_food(50);
     s.dev_set_super(5);
-    assert_eq!(s.colony.food, 50);
-    assert_eq!(s.colony.food_super, 5);
+    assert_eq!(s.colony.carbs, 50);
+    assert_eq!(s.colony.protein, 5);
 }
 
 #[test]

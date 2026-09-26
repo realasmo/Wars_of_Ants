@@ -101,6 +101,8 @@ pub enum DevSpawn {
     Spider,
     Food,
     SuperFood,
+    /// A map source by visual type 1..6.
+    Source(u8),
 }
 
 impl DevSpawn {
@@ -113,6 +115,12 @@ impl DevSpawn {
             "spider" => DevSpawn::Spider,
             "food" => DevSpawn::Food,
             "super" => DevSpawn::SuperFood,
+            "moss" => DevSpawn::Source(1),
+            "mushroom" => DevSpawn::Source(2),
+            "raspberry" => DevSpawn::Source(3),
+            "strawberry" => DevSpawn::Source(4),
+            "cockroach" => DevSpawn::Source(5),
+            "caterpillar" => DevSpawn::Source(6),
             _ => return None,
         })
     }
@@ -132,8 +140,9 @@ pub struct EntitySnap {
 }
 
 pub struct Colony {
-    pub food: u32,
-    pub food_super: u32,
+    pub carbs: u32,
+    pub protein: u32,
+    pub water: u32,
     pub delivered: u32,
     pub eggs_laid: u32,
     pub dead: bool,
@@ -151,6 +160,8 @@ pub struct Colony {
     /// True when started via `new_founding`: the founding script (4 eggs,
     /// no auto-laying) governs brood; false in the legacy founded start.
     pub founding: bool,
+    /// Source ids discovered by the colony (within sight of any ant).
+    pub known: std::collections::BTreeSet<u32>,
 }
 
 pub struct Sim {
@@ -288,8 +299,9 @@ impl Sim {
             ecs: hecs::World::new(),
             rng,
             colony: Colony {
-                food: START_FOOD,
-                food_super: 0,
+                carbs: START_FOOD,
+                protein: 0,
+                water: 0,
                 delivered: 0,
                 eggs_laid: 0,
                 dead: false,
@@ -303,6 +315,7 @@ impl Sim {
                 phase_t: 0.0,
                 team,
                 founding,
+                known: std::collections::BTreeSet::new(),
             },
             config,
             tick: 0,
@@ -326,20 +339,59 @@ impl Sim {
         };
         sim.colony.queen_id = queen_id;
 
-        for _ in 0..sim.config.food_clusters {
-            let cx = (anchor as i32 + sim.rng.irange(0, 41) as i32 - 20).clamp(2, w as i32 - 3) as u32;
-            let cy = if founding {
-                (h as i32 / 2 + sim.rng.irange(0, 41) as i32 - 20).clamp(2, h as i32 - 3) as u32
-            } else {
-                sim.rng.irange(15, 41).min(h - 3)
-            };
-            let piles = sim.rng.irange(4, 8);
-            for _ in 0..piles {
-                let px =
-                    (cx as i32 + sim.rng.irange(0, 5) as i32 - 2).clamp(1, w as i32 - 2) as u32;
-                let py =
-                    (cy as i32 + sim.rng.irange(0, 5) as i32 - 2).clamp(1, h as i32 - 2) as u32;
-                sim.spawn_food(tile_center(px, py), PILE_AMOUNT, FoodKind::Green);
+        if founding {
+            // finite scattered sources: a couple of carb sources near the
+            // founding center so the first workers can survive, everything
+            // else spread wide — scouts have to find them
+            let mut placed: Vec<(u32, u32)> = Vec::new();
+            let mut near_count = 0u32;
+            let cy0 = h as f64 / 2.0;
+            for spec in SOURCES.iter() {
+                for _ in 0..spec.count {
+                    for _ in 0..60 {
+                        let want_near =
+                            spec.kind == FoodKind::Carbs && near_count < SOURCES_NEAR_NEST;
+                        let (px, py) = if want_near {
+                            let a = sim.rng.range(0.0, std::f64::consts::TAU);
+                            let d = sim.rng.range(7.0, 14.0);
+                            (
+                                (anchor as f64 + a.cos() * d).clamp(3.0, w as f64 - 4.0) as u32,
+                                (cy0 + a.sin() * d).clamp(3.0, h as f64 - 4.0) as u32,
+                            )
+                        } else {
+                            (sim.rng.irange(6, w - 7), sim.rng.irange(6, h - 7))
+                        };
+                        let too_close = placed.iter().any(|&(x, y)| {
+                            let dx = (x.max(px) - x.min(px)) as i32;
+                            let dy = (y.max(py) - y.min(py)) as i32;
+                            dx.max(dy) < SOURCE_MIN_GAP as i32
+                        });
+                        if too_close {
+                            continue;
+                        }
+                        let amount = sim.rng.irange(spec.amount.0, spec.amount.1);
+                        sim.spawn_source(tile_center(px, py), spec, amount);
+                        placed.push((px, py));
+                        if want_near {
+                            near_count += 1;
+                        }
+                        break;
+                    }
+                }
+            }
+        } else {
+            for _ in 0..sim.config.food_clusters {
+                let cx =
+                    (anchor as i32 + sim.rng.irange(0, 41) as i32 - 20).clamp(2, w as i32 - 3) as u32;
+                let cy = sim.rng.irange(15, 41).min(h - 3);
+                let piles = sim.rng.irange(4, 8);
+                for _ in 0..piles {
+                    let px =
+                        (cx as i32 + sim.rng.irange(0, 5) as i32 - 2).clamp(1, w as i32 - 2) as u32;
+                    let py =
+                        (cy as i32 + sim.rng.irange(0, 5) as i32 - 2).clamp(1, h as i32 - 2) as u32;
+                    sim.spawn_food(tile_center(px, py), PILE_AMOUNT, FoodKind::Green);
+                }
             }
         }
 
@@ -376,15 +428,26 @@ impl Sim {
             DevSpawn::Spider => self.spawn_spider(p),
             DevSpawn::Food => self.spawn_food(p, PILE_AMOUNT, FoodKind::Green),
             DevSpawn::SuperFood => self.spawn_food(p, SUPER_PER_SPIDER, FoodKind::Super),
+            DevSpawn::Source(src) => match SOURCES.iter().find(|s| s.src == src) {
+                Some(spec) => {
+                    let amount = (spec.amount.0 + spec.amount.1) / 2;
+                    self.spawn_source(p, spec, amount)
+                }
+                None => self.spawn_food(p, PILE_AMOUNT, FoodKind::Green),
+            }
         }
     }
 
     pub fn dev_set_food(&mut self, n: u32) {
-        self.colony.food = n;
+        self.colony.carbs = n;
     }
 
     pub fn dev_set_super(&mut self, n: u32) {
-        self.colony.food_super = n;
+        self.colony.protein = n;
+    }
+
+    pub fn dev_set_water(&mut self, n: u32) {
+        self.colony.water = n;
     }
 
     /// Paint a 2×2 soil block (dev/test op, deterministic + replayable).
@@ -423,6 +486,7 @@ impl Sim {
         self.tick += 1;
         self.worker_ai();
         self.movement();
+        self.discover();
         self.digging();
         self.combat();
         self.predators();
@@ -1118,6 +1182,9 @@ impl Sim {
                 kind,
                 stored,
                 spoil,
+                harvest_t: 0.0,
+                progress: 0.0,
+                src: 0,
             },
             Pos {
                 p: tile_center(tile.0, tile.1),
@@ -1157,6 +1224,28 @@ impl Sim {
             r += 1;
         }
         first
+    }
+
+    /// A finite map source (harvest takes time, despawns when depleted).
+    fn spawn_source(&mut self, p: Vec2, spec: &SourceSpec, amount: u32) -> u32 {
+        let id = self.fresh_id();
+        let ent = self.ecs.spawn((
+            Food {
+                amount,
+                kind: spec.kind,
+                stored: false,
+                spoil: None,
+                harvest_t: spec.harvest,
+                progress: 0.0,
+                src: spec.src,
+            },
+            Pos {
+                p,
+                layer: Layer::Surface,
+            },
+        ));
+        self.ids.insert(id, ent);
+        id
     }
 
     /// One unit of loose (spoiling) dropped food on a cell with room.
@@ -1225,8 +1314,9 @@ impl Sim {
             .map(|c| c.kind)
             .unwrap_or(FoodKind::Green);
         match kind {
-            FoodKind::Green => self.colony.food += 1,
-            FoodKind::Super => self.colony.food_super += 1,
+            FoodKind::Green | FoodKind::Carbs => self.colony.carbs += 1,
+            FoodKind::Super | FoodKind::Protein => self.colony.protein += 1,
+            FoodKind::Water => self.colony.water += 1,
             _ => {}
         }
         self.colony.delivered += 1;
@@ -1309,6 +1399,40 @@ impl Sim {
         }
     }
 
+    /// Advance the harvest bar on a food entity by one tick. Loose units
+    /// (harvest_t == 0) are picked instantly; sources need their full
+    /// pickup time per unit. Returns the carried kind when a unit is ready.
+    fn advance_harvest(&mut self, fent: Entity) -> Option<FoodKind> {
+        let (amount, kind, harvest_t, progress) = {
+            let q = self.ecs.get::<&Food>(fent).ok()?;
+            (q.amount, q.kind, q.harvest_t, q.progress)
+        };
+        if amount == 0 {
+            return None;
+        }
+        if harvest_t <= 0.0 {
+            if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
+                q.amount -= 1;
+            }
+            return Some(kind);
+        }
+        let progress = progress + DT;
+        if progress >= harvest_t {
+            if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
+                if q.amount > 0 {
+                    q.amount -= 1;
+                }
+                q.progress = 0.0;
+            }
+            Some(kind)
+        } else {
+            if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
+                q.progress = progress;
+            }
+            None
+        }
+    }
+
     fn best_food(&self) -> Option<u32> {
         let entrance = self.world.entrance?;
         let mut best: Option<(u32, u32, u32)> = None;
@@ -1320,8 +1444,18 @@ impl Sim {
             if ff.stored {
                 continue; // pantry piles are not forage targets
             }
+            if ff.harvest_t > 0.0 && !self.colony.known.contains(&fid) {
+                continue; // undiscovered sources need scouting first
+            }
+            if ff.amount == 0 {
+                continue;
+            }
             let tile = tile_of(fp.p);
-            let super_first = if ff.kind == FoodKind::Super { 0 } else { 1 };
+            let super_first = if ff.kind == FoodKind::Super || ff.kind == FoodKind::Protein {
+                0
+            } else {
+                1
+            };
             let key = (super_first, manhattan(tile, entrance), fid);
             if best.map(|b| key < b).unwrap_or(true) {
                 best = Some(key);
@@ -1492,7 +1626,7 @@ impl Sim {
                 }
                 placed
             }
-            FoodKind::Green | FoodKind::Super => {
+            FoodKind::Green | FoodKind::Super | FoodKind::Protein | FoodKind::Carbs | FoodKind::Water => {
                 // drop one unit as loose (spoiling) food
                 let tile = (tx, ty);
                 if !self.grid_of(layer).in_bounds(tx, ty)
@@ -1810,20 +1944,13 @@ impl Sim {
                         && self.egg_carried_by(id).is_none()
                     {
                         if let Some(fid) = self.food_on_tile(tile_of(pos.p)) {
-                            let mut picked: Option<FoodKind> = None;
                             if let Some(&fent) = self.ids.get(&fid) {
-                                if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
-                                    if q.amount > 0 {
-                                        q.amount -= 1;
-                                        picked = Some(q.kind);
-                                    }
-                                }
-                            }
-                            if let Some(kind) = picked {
-                                if let Some(&aent) = self.ids.get(&id) {
-                                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
-                                        q.amount = 1;
-                                        q.kind = kind;
+                                if let Some(kind) = self.advance_harvest(fent) {
+                                    if let Some(&aent) = self.ids.get(&id) {
+                                        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
+                                            q.amount = 1;
+                                            q.kind = kind;
+                                        }
                                     }
                                 }
                             }
@@ -1861,6 +1988,15 @@ impl Sim {
                         self.set_job(id, Job::DigTile(t.0, t.1));
                     } else if let Some(fid) = self.best_food() {
                         self.set_job(id, Job::Fetch(fid));
+                    } else if let Some((ex, ey)) = self.world.entrance {
+                        // nothing known: scout outward from the nest
+                        let a = self.rng.range(0.0, std::f64::consts::TAU);
+                        let d = self.rng.range(12.0, 35.0);
+                        let dx = (ex as f64 + a.cos() * d).clamp(2.0, self.config.width as f64 - 3.0)
+                            as u32;
+                        let dy = (ey as f64 + a.sin() * d).clamp(2.0, self.config.height as f64 - 3.0)
+                            as u32;
+                        self.set_job(id, Job::Scout(dx, dy));
                     } else {
                         self.set_retry(id, 50);
                     }
@@ -1884,6 +2020,22 @@ impl Sim {
                         self.set_retry(id, 60);
                     }
                 }
+                Job::Scout(dx, dy) => {
+                    if pos.layer == Layer::Underground {
+                        // scouting happens on the surface
+                        if !self.route(id, Layer::Surface, (dx, dy)) {
+                            self.set_retry(id, 60);
+                            self.set_job(id, Job::Idle);
+                        }
+                    } else if tile_of(pos.p) == (dx, dy) {
+                        // looked around; let Idle decide the next move
+                        self.set_job(id, Job::Idle);
+                        self.set_retry(id, 10);
+                    } else if !self.route(id, Layer::Surface, (dx, dy)) {
+                        self.set_retry(id, 60);
+                        self.set_job(id, Job::Idle);
+                    }
+                }
                 Job::Fetch(fid) => {
                     let fent = match self.ids.get(&fid) {
                         Some(&e) => e,
@@ -1899,27 +2051,25 @@ impl Sim {
                     if pos.layer == Layer::Surface {
                         if tile_of(pos.p) == ftile {
                             if amount > 0 {
-                                let mut kind = FoodKind::Green;
-                                if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
-                                    q.amount -= 1;
-                                    kind = q.kind;
-                                }
-                                if let Some(&aent) = self.ids.get(&id) {
-                                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
-                                        q.amount = 1;
-                                        q.kind = kind;
+                                if let Some(kind) = self.advance_harvest(fent) {
+                                    if let Some(&aent) = self.ids.get(&id) {
+                                        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
+                                            q.amount = 1;
+                                            q.kind = kind;
+                                        }
                                     }
-                                }
-                                match self.pantry_tile() {
-                                    Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
-                                    None => {
-                                        // pantry full: dig out more nest first
-                                        match self.pick_dig_target() {
-                                            Some(t) => self.set_job(id, Job::DigTile(t.0, t.1)),
-                                            None => self.set_retry(id, 100),
+                                    match self.pantry_tile() {
+                                        Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
+                                        None => {
+                                            // pantry full: dig out more nest first
+                                            match self.pick_dig_target() {
+                                                Some(t) => self.set_job(id, Job::DigTile(t.0, t.1)),
+                                                None => self.set_retry(id, 100),
+                                            }
                                         }
                                     }
                                 }
+                                // else: still harvesting — stay on the source
                             } else {
                                 self.set_job(id, Job::Idle);
                             }
@@ -1958,6 +2108,44 @@ impl Sim {
         }
     }
 
+    /// Sources within sight of any colony ant become known (scouting).
+    fn discover(&mut self) {
+        if self.colony.dead {
+            return;
+        }
+        let ants: Vec<(u32, u32)> = self
+            .ant_ids()
+            .into_iter()
+            .map(|id| self.ant_tile(id))
+            .collect();
+        let mut found = Vec::new();
+        for &fid in &self.food_ids() {
+            let ent = self.ids[&fid];
+            let Ok(fp) = self.ecs.get::<&Pos>(ent) else {
+                continue;
+            };
+            if fp.layer != Layer::Surface {
+                continue;
+            }
+            let Ok(ff) = self.ecs.get::<&Food>(ent) else {
+                continue;
+            };
+            if ff.harvest_t <= 0.0 || ff.amount == 0 || self.colony.known.contains(&fid) {
+                continue;
+            }
+            let tile = tile_of(fp.p);
+            if ants
+                .iter()
+                .any(|&(ax, ay)| chebyshev((ax, ay), tile) <= SIGHT_RANGE)
+            {
+                found.push(fid);
+            }
+        }
+        for fid in found {
+            self.colony.known.insert(fid);
+        }
+    }
+
     fn movement(&mut self) {
         let ids = self.ant_ids();
         for id in ids {
@@ -1977,6 +2165,13 @@ impl Sim {
             // the founding queen flies faster than any ant walks
             let speed = if caste == Caste::Queen && self.colony.phase == Phase::Flight {
                 QUEEN_FLY_SPEED
+            } else {
+                speed
+            };
+            // a starving colony moves sluggishly until fed (founding economy;
+            // the legacy test economy is tuned without this)
+            let speed = if self.colony.founding && self.colony.carbs < CARB_LOW {
+                speed * CARB_SLOWDOWN
             } else {
                 speed
             };
@@ -2386,7 +2581,7 @@ impl Sim {
             let ent = self.ids[&pid];
             let p = self.ecs.get::<&Pos>(ent).map(|q| q.p).unwrap_or_default();
             self.kill(pid);
-            self.spawn_food(p, SUPER_PER_SPIDER, FoodKind::Super);
+            self.spawn_food(p, PROTEIN_PER_SPIDER, FoodKind::Protein);
         }
     }
 
@@ -2426,10 +2621,10 @@ impl Sim {
             }
         }
         self.colony.lay_cooldown -= DT;
-        if self.colony.food > 0 {
+        if self.colony.carbs > 0 {
             self.colony.eat_t += DT;
             if self.colony.eat_t >= EAT_PERIOD {
-                self.colony.food -= 1;
+                self.colony.carbs -= 1;
                 self.colony.eat_t = 0.0;
             }
             self.colony.starve_t = 0.0;
@@ -2456,12 +2651,12 @@ impl Sim {
         }
         if self.colony.lay_cooldown <= 0.0 && self.colony.ant_count < self.config.max_ants {
             let (workers, soldiers) = self.caste_counts();
-            let want = if self.colony.food >= SOLDIER_COST_GREEN
-                && self.colony.food_super >= SOLDIER_COST_SUPER
+            let want = if self.colony.carbs >= SOLDIER_COST_GREEN
+                && self.colony.protein >= SOLDIER_COST_SUPER
                 && soldiers * 2 < workers
             {
                 Some(Caste::Soldier)
-            } else if self.colony.food >= EGG_COST {
+            } else if self.colony.carbs >= EGG_COST {
                 Some(Caste::Worker)
             } else {
                 None
@@ -2471,10 +2666,10 @@ impl Sim {
                     Some(tile) => {
                         match caste {
                             Caste::Soldier => {
-                                self.colony.food -= SOLDIER_COST_GREEN;
-                                self.colony.food_super -= SOLDIER_COST_SUPER;
+                                self.colony.carbs -= SOLDIER_COST_GREEN;
+                                self.colony.protein -= SOLDIER_COST_SUPER;
                             }
-                            Caste::Worker => self.colony.food -= EGG_COST,
+                            Caste::Worker => self.colony.carbs -= EGG_COST,
                             Caste::Queen => {}
                         }
                         self.colony.eggs_laid += 1;
@@ -2658,6 +2853,7 @@ impl Sim {
                 None => continue,
             };
             if amount == 0 {
+                self.colony.known.remove(&id);
                 self.kill(id);
                 continue;
             }
@@ -2673,6 +2869,7 @@ impl Sim {
                 }
                 t -= DT;
                 if t <= 0.0 {
+                    self.colony.known.remove(&id);
                     self.kill(id);
                 } else if let Ok(mut q) = self.ecs.get::<&mut Food>(ent) {
                     q.spoil = Some(t);
@@ -2707,10 +2904,11 @@ impl Sim {
             .map(|(x, y)| format!("{},{}", x, y))
             .unwrap_or_else(|| "-".to_string());
         let mut s = format!(
-            "t={};food={};super={};dead={};dug={};next_id={};phase={};phase_t={:.4};team={};ent={}",
+            "t={};carbs={};protein={};water={};dead={};dug={};next_id={};phase={};phase_t={:.4};team={};ent={}",
             self.tick,
-            self.colony.food,
-            self.colony.food_super,
+            self.colony.carbs,
+            self.colony.protein,
+            self.colony.water,
             self.colony.dead,
             self.dug_tiles,
             self.next_id,
@@ -2780,18 +2978,21 @@ impl Sim {
         }
         for (ent, (food, pos)) in self.ecs.query::<(&Food, &Pos)>().iter() {
             let Some(&id) = rev.get(&ent) else { continue };
+            let is_source = food.harvest_t > 0.0;
             v.push(EntitySnap {
                 id,
                 kind: 2,
                 layer: pos.layer as u8,
                 x: pos.p.x,
                 y: pos.p.y,
-                state: if food.stored { 1 } else { 0 },
+                // 0 loose unit, 1 pantry pile, 2 map source (hp = src type)
+                state: if is_source { 2 } else if food.stored { 1 } else { 0 },
                 extra: food.amount as f64,
-                hp: food
-                    .spoil
-                    .map(|t| (t / SPOIL_TIME).clamp(0.0, 1.0))
-                    .unwrap_or(1.0),
+                hp: if is_source {
+                    food.src as f64
+                } else {
+                    food.spoil.map(|t| (t / SPOIL_TIME).clamp(0.0, 1.0)).unwrap_or(1.0)
+                },
                 aux: food.kind as u8 as f64,
             });
         }

@@ -6,7 +6,7 @@ mod rng;
 mod sim;
 mod world;
 
-pub use balance::UnitStats;
+pub use balance::{SourceSpec, UnitStats, SOURCES};
 pub use components::{AntState, Caste, Layer};
 pub use sim::{Colony, Command, Config, DevSpawn, EntitySnap, Phase, Sim, Team, DT, TPS};
 pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK};
@@ -109,6 +109,10 @@ impl WoaSim {
         self.inner.dev_set_super(n);
     }
 
+    pub fn dev_set_water(&mut self, n: u32) {
+        self.inner.dev_set_water(n);
+    }
+
     pub fn dev_kill(&mut self, id: u32) -> bool {
         self.inner.dev_kill(id)
     }
@@ -122,12 +126,16 @@ impl WoaSim {
         self.inner.colony.dead
     }
 
-    pub fn food_store(&self) -> u32 {
-        self.inner.colony.food
+    pub fn store_carbs(&self) -> u32 {
+        self.inner.colony.carbs
     }
 
-    pub fn food_super(&self) -> u32 {
-        self.inner.colony.food_super
+    pub fn store_protein(&self) -> u32 {
+        self.inner.colony.protein
+    }
+
+    pub fn store_water(&self) -> u32 {
+        self.inner.colony.water
     }
 
     pub fn ants_alive(&self) -> u32 {
@@ -196,7 +204,7 @@ impl WoaSim {
         let mut v = Vec::with_capacity(4 + snaps.len() * 9);
         v.push(self.inner.tick as f64);
         v.push(self.inner.colony.dead as u8 as f64);
-        v.push(self.inner.colony.food as f64);
+        v.push(self.inner.colony.carbs as f64);
         v.push(snaps.len() as f64);
         for s in snaps {
             v.extend([

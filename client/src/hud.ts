@@ -36,8 +36,9 @@ export class Hud {
               : 'idle'
       : '';
     const counts = sim.casteCounts();
-    el('stat-food').textContent = String(sim.food);
-    el('stat-super').textContent = String(sim.superFood());
+    el('stat-protein').textContent = String(sim.storeProtein());
+    el('stat-carbs').textContent = String(sim.storeCarbs());
+    el('stat-water').textContent = String(sim.storeWater());
     el('stat-ants').textContent =
       counts.soldiers > 0 ? `${counts.workers} +${counts.soldiers}S` : String(counts.workers);
     el('stat-eggs').textContent = String(sim.eggCount());

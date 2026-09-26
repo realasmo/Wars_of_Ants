@@ -1,4 +1,4 @@
-use woa_core::{Command, DevSpawn, Layer, Phase, Sim, Team, DIRT, EMPTY};
+use woa_core::{Command, DevSpawn, Layer, Phase, Sim, Team, DIRT, EMPTY, SOURCES};
 
 fn queen(s: &Sim) -> woa_core::EntitySnap {
     s.snapshot().into_iter().find(|e| e.kind == 0).unwrap()
@@ -474,16 +474,17 @@ fn dropped_food_spoils_off_silver_and_freezes_on_it() {
 fn food_piles_respect_cell_cap() {
     let mut s = Sim::new_founding(1337, Team::Red);
     // (fresh seed's own piles sit near the map center; spawn far away at 30,30)
+    // worldgen sources are everywhere now — only count green (aux 0) units
     let before: usize = s
         .snapshot()
         .iter()
-        .filter(|e| e.kind == 2 && (e.x - 30.5).abs() <= 12.0 && (e.y - 30.5).abs() <= 12.0)
+        .filter(|e| e.kind == 2 && e.aux == 0.0 && (e.x - 30.5).abs() <= 12.0 && (e.y - 30.5).abs() <= 12.0)
         .count();
     s.dev_spawn(DevSpawn::Food, 30.5, 30.5);
     let piles: Vec<_> = s
         .snapshot()
         .into_iter()
-        .filter(|e| e.kind == 2 && (e.x - 30.5).abs() <= 12.0 && (e.y - 30.5).abs() <= 12.0)
+        .filter(|e| e.kind == 2 && e.aux == 0.0 && (e.x - 30.5).abs() <= 12.0 && (e.y - 30.5).abs() <= 12.0)
         .collect();
     assert!(piles.len() > before, "spreading created cells");
     assert!(!piles.is_empty());
@@ -741,4 +742,155 @@ fn right_click_flies_there_lands_then_walks_and_founds() {
     let e = s.world.entrance.expect("nest founded after the walk");
     assert_eq!(e, ((fx.floor() as u32) & !1, (fy.floor() as u32) & !1));
     assert_eq!(phase(&s), Phase::Founding);
+}
+
+#[test]
+fn founding_world_has_scattered_finite_sources_and_no_green() {
+    let s = Sim::new_founding(42, Team::Red);
+    let snaps = s.snapshot();
+    // no green piles anywhere
+    assert!(
+        !snaps.iter().any(|e| e.kind == 2 && e.aux == 0.0),
+        "founding world must not contain green food"
+    );
+    let sources: Vec<_> = snaps.iter().filter(|e| e.kind == 2 && e.state == 2).collect();
+    let total: u32 = SOURCES.iter().map(|sp| sp.count).sum();
+    assert_eq!(sources.len() as u32, total, "all six source types placed");
+    let carbs_near = sources
+        .iter()
+        .filter(|e| e.aux == 5.0 && (e.x - 48.5).abs() <= 16.0 && (e.y - 48.5).abs() <= 16.0)
+        .count();
+    assert!(carbs_near >= 1, "at least one carb source near the founding center");
+    // deterministic per seed
+    let b = Sim::new_founding(42, Team::Blue);
+    let sa: Vec<_> = sources.iter().map(|e| (e.id, e.x as u32, e.y as u32, e.extra as u32)).collect();
+    let sb: Vec<_> = b
+        .snapshot()
+        .iter()
+        .filter(|e| e.kind == 2 && e.state == 2)
+        .map(|e| (e.id, e.x as u32, e.y as u32, e.extra as u32))
+        .collect();
+    assert_eq!(sa, sb);
+}
+
+#[test]
+fn scouts_discover_sources_and_harvest_takes_time() {
+    let mut s = founded(42);
+    // fast-forward to the colony phase with a painted nursery
+    for _ in 0..1220 {
+        s.tick();
+    }
+    let e = s.snapshot().into_iter().find(|e| e.kind == 3).unwrap();
+    s.dev_set_soil(1, e.x.floor() as u32, e.y.floor() as u32, 1);
+    s.dev_set_soil(1, e.x.floor() as u32 + 2, e.y.floor() as u32, 1);
+    for _ in 0..3620 + 60 {
+        s.tick();
+    }
+    assert_eq!(phase(&s), Phase::Colony);
+    // dev-spawn a strawberry (4s harvest) far from the nest, unknown
+    let q = queen(&s);
+    let sx = q.x + 20.0;
+    let sy = q.y + 15.0;
+    s.dev_spawn(DevSpawn::Source(4), sx, sy);
+    let src = s
+        .snapshot()
+        .into_iter()
+        .find(|e| e.kind == 2 && e.state == 2 && (e.x - sx).abs() < 1.0)
+        .unwrap();
+    let amount0 = src.extra as u32;
+    // not discovered: no worker fetches it while it's out of sight — verify
+    // via knowledge set indirectly: a nearby ant discovers it instantly
+    let w = s.snapshot().into_iter().find(|e| e.kind == 1).unwrap();
+    assert!(s.issue(Command::Move { ant: w.id, x: sx, y: sy }));
+    for _ in 0..10 {
+        s.tick();
+    }
+    // within sight now; give the worker time to arrive and harvest (4s/unit)
+    for _ in 0..500 {
+        s.tick();
+    }
+    let after: Vec<_> = s
+        .snapshot()
+        .into_iter()
+        .filter(|e| e.kind == 2 && (e.x - sx).abs() < 1.0)
+        .collect();
+    let total: f64 = after.iter().map(|e| e.extra).sum();
+    assert!(
+        total < amount0 as f64,
+        "harvesting consumed units from the source ({total} vs {amount0})"
+    );
+    // finite: AI workers deplete a source placed by the entrance (discovered
+    // as they pass) until it despawns. Fresh dev workers: the commanded one
+    // stays Manual forever.
+    s.dev_set_food(999); // keep the colony from starving mid-test
+    let (ex, ey) = s.world.entrance.unwrap();
+    s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
+    s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
+    s.dev_spawn(DevSpawn::Source(4), ex as f64 + 3.5, ey as f64 + 3.5);
+    let mut gone = false;
+    for _ in 0..25000 {
+        s.tick();
+        gone = !s
+            .snapshot()
+            .iter()
+            .any(|e| e.kind == 2 && e.state == 2 && (e.x - ex as f64 - 3.5).abs() < 1.0);
+        if gone {
+            break;
+        }
+    }
+    assert!(gone, "depleted sources despawn (finite map resources)");
+}
+
+#[test]
+fn spider_drops_protein_and_low_carbs_slow_the_colony() {
+    let mut s = founded(42);
+    for _ in 0..1220 {
+        s.tick();
+    }
+    let e = s.snapshot().into_iter().find(|e| e.kind == 3).unwrap();
+    s.dev_set_soil(1, e.x.floor() as u32, e.y.floor() as u32, 1);
+    s.dev_set_soil(1, e.x.floor() as u32 + 2, e.y.floor() as u32, 1);
+    for _ in 0..3620 + 60 {
+        s.tick();
+    }
+    // spider drop = protein units
+    let q = queen(&s);
+    s.dev_spawn(DevSpawn::Spider, q.x, q.y - 6.0);
+    s.dev_kill(s.snapshot().into_iter().find(|e| e.kind == 4).unwrap().id);
+    let drops = s
+        .snapshot()
+        .into_iter()
+        .filter(|e| e.kind == 2 && e.aux == 4.0)
+        .count();
+    assert!(drops > 0, "spider drops protein units");
+
+    // carb slowdown, measured on the open surface with a fresh flying queen:
+    // same 10-tile stretch, starved vs fed
+    let mut f = Sim::new_founding(7, Team::Red);
+    let fq = queen(&f);
+    f.dev_set_food(0);
+    assert!(f.issue(Command::Move {
+        ant: fq.id,
+        x: fq.x + 10.0,
+        y: fq.y
+    }));
+    for _ in 0..40 {
+        f.tick();
+    }
+    let starved = queen(&f).x - 48.5;
+    let mut g = Sim::new_founding(7, Team::Red);
+    let gq = queen(&g);
+    assert!(g.issue(Command::Move {
+        ant: gq.id,
+        x: gq.x + 10.0,
+        y: gq.y
+    }));
+    for _ in 0..40 {
+        g.tick();
+    }
+    let fed = queen(&g).x - 48.5;
+    assert!(
+        fed > starved + 1.0,
+        "well-fed ants outpace starving ones ({fed:.2} vs {starved:.2})"
+    );
 }

@@ -21,6 +21,7 @@ export interface ReplayCmd {
     | 'dev-spawn'
     | 'dev-food'
     | 'dev-super'
+    | 'dev-water'
     | 'dev-kill'
     | 'dev-kill-spiders'
     | 'dev-soil';

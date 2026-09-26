@@ -71,6 +71,41 @@ pub const QUEEN_DIG_TIME: f64 = 1.0;
 /// Dirt blocks an ant may carry before having to dump (dig two, haul once).
 pub const DIRT_CAPACITY: u32 = 2;
 
+// --- resource economy (finite map sources, see docs/WORLD-DESIGN.md) ---
+
+pub struct SourceSpec {
+    /// Client visual type 1..6.
+    pub src: u8,
+    pub kind: crate::components::FoodKind,
+    /// (min, max) units per source.
+    pub amount: (u32, u32),
+    /// Seconds to harvest one unit.
+    pub harvest: f64,
+    /// How many on the map.
+    pub count: u32,
+}
+
+pub const SOURCES: [SourceSpec; 6] = [
+    SourceSpec { src: 1, kind: crate::components::FoodKind::Water,   amount: (15, 20),  harvest: 10.0, count: 10 },
+    SourceSpec { src: 2, kind: crate::components::FoodKind::Water,   amount: (21, 26),  harvest: 20.0, count: 7 },
+    SourceSpec { src: 3, kind: crate::components::FoodKind::Carbs,   amount: (100, 110), harvest: 6.0, count: 6 },
+    SourceSpec { src: 4, kind: crate::components::FoodKind::Carbs,   amount: (40, 60),  harvest: 4.0,  count: 8 },
+    SourceSpec { src: 5, kind: crate::components::FoodKind::Protein, amount: (8, 12),   harvest: 15.0, count: 6 },
+    SourceSpec { src: 6, kind: crate::components::FoodKind::Protein, amount: (25, 35),  harvest: 13.0, count: 5 },
+];
+
+/// Source sighting distance (chebyshev tiles).
+pub const SIGHT_RANGE: u32 = 8;
+/// Carb sources placed near the founding center so the first workers can
+/// survive; the rest scatter wide.
+pub const SOURCES_NEAR_NEST: u32 = 2;
+pub const SOURCE_MIN_GAP: u32 = 8;
+/// Below this many carbs the whole colony slows down (recovers when fed).
+pub const CARB_LOW: u32 = 3;
+pub const CARB_SLOWDOWN: f64 = 0.6;
+/// Protein dropped by a killed spider.
+pub const PROTEIN_PER_SPIDER: u32 = 8;
+
 // --- soil / food logistics ---
 
 /// Chance per 2×2 underground block of being orange (nursery) or silver
@@ -98,11 +133,11 @@ pub const EGG_COST: u32 = 5;
 pub const EGG_TIME: f64 = 45.0;
 pub const LAY_COOLDOWN: f64 = 3.0;
 pub const STARVE_TIME: f64 = 90.0;
-pub const START_FOOD: u32 = 5;
+pub const START_FOOD: u32 = 5; // starting carbs
 pub const PILE_AMOUNT: u32 = 45;
 
 pub const SPIDER_AGGRO: f64 = 5.0;
 pub const SPIDER_WANDER: f64 = 8.0;
-pub const SUPER_PER_SPIDER: u32 = 8;
+pub const SUPER_PER_SPIDER: u32 = 8; // legacy worlds
 pub const SOLDIER_COST_GREEN: u32 = 3;
 pub const SOLDIER_COST_SUPER: u32 = 2;

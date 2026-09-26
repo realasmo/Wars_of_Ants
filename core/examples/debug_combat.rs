@@ -45,8 +45,8 @@ fn main() {
         soldiers,
         eggs,
         s.colony.dead,
-        s.colony.food,
-        s.colony.food_super,
+        s.colony.carbs,
+        s.colony.protein,
         s.colony.eggs_laid,
         s.colony.delivered
     );

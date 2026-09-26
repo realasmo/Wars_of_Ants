@@ -324,14 +324,14 @@ try {
   await page.evaluate(() => window.__woa.spawn('spider', 50.5, 3.5));
   await page.evaluate(() => window.__woa.step(3));
   s = await state();
-  if (s.food < 500) failures.push(`dev setfood failed: ${s.food}`);
+  if (s.carbs < 500) failures.push(`dev setfood failed: ${s.carbs}`);
   if (s.spiders.length !== 3) failures.push(`dev spawn spider failed: ${s.spiders.length}`);
   const foodsBefore = s.foods;
   await page.mouse.click(640, 400); // focus canvas for key events
   await page.keyboard.press('F2');
   const panelVisible = await page.evaluate(() => !document.getElementById('devpanel').classList.contains('hidden'));
   if (!panelVisible) failures.push('F2 did not open the dev panel');
-  await page.click('button[data-spawn="food"]');
+  await page.click('button[data-spawn="moss"]');
   await page.mouse.click(640, 420);
   await page.evaluate(() => window.__woa.step(3));
   s = await state();

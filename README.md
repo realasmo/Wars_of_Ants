@@ -62,6 +62,23 @@ gate into the roadmap through playtesting, phase by phase.
 - **Physical pantry:** workers place collected food on the **nearest silver cell** to the entrance (first free cell if none exists yet) as a visible, safe pile; placement credits the food store, and when the pantry fills up the carriers dig out more nest space. The queen still eats from the abstract store (physical eating is undecided).
 - All knobs in `core/src/balance.rs` (`ORANGE/SILVER_SOIL_CHANCE`, `PATCH_*`, `FOOD_CELL_CAP`, `SPOIL_TIME`, ...). Dev: `__woa.setsoil(layer, x, y, 0|1|2)` paints a block (replayable `dev-soil` act).
 
+### Resource economy (founding worlds)
+- Three colony stores: **protein** (ant spawning — spiders drop 8; cockroach
+  and caterpillar sources), **carbs** (the keep-alive store: the queen eats
+  it, starvation, and below `CARB_LOW` the whole colony moves at 60% until
+  fed), **water** (healing later; moss/mushroom sources).
+- The map has **no green food**: six **finite source types** (moss, mushroom,
+  raspberry, strawberry, cockroach, caterpillar) scattered as single finds —
+  spec table in `core/src/balance.rs` (`SOURCES`) and `docs/WORLD-DESIGN.md`.
+  Sources never respawn; depleted ones vanish.
+- **Scouting:** sources count as known only after a colony ant sights them
+  (8 tiles). Idle workers with nothing known wander outward from the nest
+  (Job::Scout) instead of idling. Harvesting a source takes per-unit time
+  (strawberry 4 s … mushroom 20 s) — ants stand and work the source.
+- Pantry rules (silver preservation, 6 units/cell, visible piles, dig-to-
+  expand when full) apply to all three resources; the queen eats carbs.
+- Legacy founded worlds (test economy) keep green/super food semantics.
+
 ### Combat & content (confirmed, Phase 3 wave 1)
 - **Combat model:** original-style melee — HP / damage / attack cooldown / speed per unit; click an enemy to lock on and auto-attack in range.
 - **Stats (wave 1):** Worker 100 HP / 8 dmg / 1.0s CD / speed 3.0 · Soldier 130 / 22 / 1.0s / 2.6 · Queen 150 HP · Spider 130 / 15 / 1.2s / 2.2 (aggro 5 tiles, wanders near lair, surface only). Values live in `core/src/balance.rs` — see "Balance table".

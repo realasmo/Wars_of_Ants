@@ -16,7 +16,7 @@ fn main() {
         s.tiles_dug(),
         s.colony.ant_count,
         s.colony.delivered,
-        s.colony.food,
+        s.colony.carbs,
         s.colony.dead
     );
     let eggs = s.snapshot().iter().filter(|e| e.kind == 3).count();

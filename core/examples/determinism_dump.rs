@@ -17,6 +17,7 @@ enum Step {
     KillSpiders,
     Kill(u32),
     SetSoil(u32, u32, u32, u32),
+    SetWater(u32),
 }
 
 fn main() {
@@ -81,8 +82,9 @@ fn main() {
                     obj.get("x")?.as_f64()?,
                     obj.get("y")?.as_f64()?,
                 ),
-                "dev-food" => Step::SetFood(obj.get("n")?.as_u64()? as u32),
-                "dev-super" => Step::SetSuper(obj.get("n")?.as_u64()? as u32),
+                "dev-food" => Step::SetFood(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32),
+                "dev-super" => Step::SetSuper(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32),
+                "dev-water" => Step::SetWater(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32),
                 "dev-kill-spiders" => Step::KillSpiders,
                 "dev-kill" => Step::Kill(obj.get("target")?.as_u64()? as u32),
                 "dev-soil" => Step::SetSoil(
@@ -147,6 +149,9 @@ fn main() {
                 }
                 Step::SetSoil(l, x, y, soil) => {
                     sim.dev_set_soil(*l, *x, *y, *soil);
+                }
+                Step::SetWater(n) => {
+                    sim.dev_set_water(*n);
                 }
             }
             i += 1;

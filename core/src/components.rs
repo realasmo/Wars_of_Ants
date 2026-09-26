@@ -24,13 +24,18 @@ pub enum Caste {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FoodKind {
+    /// Legacy founded worlds only (test economy).
     Green = 0,
+    /// Legacy founded worlds only (spider drops there).
     Super = 1,
-    /// Excavated dirt carried by the founding queen — not food; dropped dirt
-    /// refills an empty 2×2 block or vanishes on the surface.
+    /// Carried-resource flags (not world entities): dirt = 2, egg = 3 kept
+    /// for snapshot-code stability.
     Dirt = 2,
-    /// Flag while carrying an egg (the egg entity itself keeps the state).
     Egg = 3,
+    /// Resource economy: units and sources are one of these three.
+    Protein = 4,
+    Carbs = 5,
+    Water = 6,
 }
 
 #[derive(Clone, Debug)]
@@ -84,6 +89,8 @@ pub enum Job {
     Fetch(u32),
     /// Carry food to the pantry cell (x, y).
     Deliver(u32, u32),
+    /// Wander toward (x, y) looking for undiscovered sources.
+    Scout(u32, u32),
     DigTile(u32, u32),
 }
 
@@ -120,9 +127,16 @@ pub struct Food {
     /// True for food placed in the nest pantry by ants: visible and safe, but
     /// not a forage target.
     pub stored: bool,
-    /// Remaining spoil seconds — None = never spoils (worldgen piles, pantry
-    /// food); Some(t) ticks down while the food sits on a non-silver cell.
+    /// Remaining spoil seconds — None = never spoils (sources, pantry food);
+    /// Some(t) ticks down while the food sits on a non-silver cell.
     pub spoil: Option<f64>,
+    /// Seconds to harvest one unit; 0 = loose unit (instant pickup).
+    pub harvest_t: f64,
+    /// Shared harvest progress toward the next unit.
+    pub progress: f64,
+    /// Source visual type: 0 = not a source, 1..6 = moss, mushroom,
+    /// raspberry, strawberry, cockroach, caterpillar.
+    pub src: u8,
 }
 
 #[derive(Clone, Copy, Debug)]

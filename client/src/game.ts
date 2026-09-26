@@ -191,6 +191,13 @@ export class Game {
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
   }
 
+  debugSetWater(n: number): void {
+    if (this.sim.dead || this.replay !== null) return;
+    this.sim.devSetWater(n);
+    this.log.push({ type: 'cmd', act: 'dev-water', n });
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+  }
+
   debugSetSuper(n: number): void {
     if (this.sim.dead || this.replay !== null) return;
     this.sim.devSetSuper(n);
@@ -262,8 +269,9 @@ export class Game {
       phase: this.sim.phase(),
       phaseTime: +this.sim.phaseTime().toFixed(1),
       team: this.sim.team(),
-      food: this.sim.food,
-      super: this.sim.superFood(),
+      carbs: this.sim.storeCarbs(),
+      protein: this.sim.storeProtein(),
+      water: this.sim.storeWater(),
       workers: counts.workers,
       soldiers: counts.soldiers,
       eggs: this.sim.eggCount(),
@@ -682,6 +690,7 @@ export class Game {
       else if (c.act === 'dev-kill-spiders') {
         for (const s of [...this.sim.cur.values()]) if (s.kind === 4) this.sim.devKill(s.id);
       } else if (c.act === 'dev-kill') this.sim.devKill(Number(c.target ?? 0));
+      else if (c.act === 'dev-water') this.sim.devSetWater(Number(c.n ?? 0));
       else if (c.act === 'dev-soil')
         this.sim.devSetSoil(Number(c.layer ?? 0), c.x ?? 0, c.y ?? 0, Number(c.soil ?? 0));
       applied = true;

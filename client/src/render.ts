@@ -35,10 +35,28 @@ interface EntityGfx {
   hpBucket: number;
   label: string;
   flying: boolean;
-  dirt: boolean;
-  egg: boolean;
+  /** Carried kind code (0 none, 2 dirt, 3 egg, 4 protein, 5 carbs, 6 water). */
+  haul: number;
   team: number;
 }
+
+const SOURCE_NAMES: Record<number, string> = {
+  1: 'moss',
+  2: 'mushroom',
+  3: 'raspberry',
+  4: 'strawberry',
+  5: 'cockroach',
+  6: 'caterpillar',
+};
+
+/** Unit / carried-dot colors per resource kind code (aux). */
+const RES_COLORS: Record<number, number> = {
+  0: 0x3fa34d, // green (legacy)
+  1: 0x4a7fd9, // super (legacy)
+  4: 0xc05a5a, // protein
+  5: 0xd4a832, // carbs
+  6: 0x4a9fd9, // water
+};
 
 function labelText(s: Snap): string {
   switch (s.kind) {
@@ -53,9 +71,46 @@ function labelText(s: Snap): string {
     case 3:
       return s.aux > 0.5 ? 'egg(S)' : 'egg';
     case 2:
-      return s.aux > 0.5 ? 'SUPER' : 'food';
+      if (s.state === 2) return SOURCE_NAMES[Math.round(s.hp)] ?? 'source';
+      return s.aux > 4.5 ? 'protein' : s.aux > 5.5 ? 'water' : s.aux > 0.5 && s.aux < 4.5 ? (s.aux > 1.5 ? 'carbs' : 'SUPER') : 'food';
     default:
       return '?';
+  }
+}
+
+/** Placeholder visuals for the six finite map sources; size follows the
+ * remaining amount. */
+function drawSource(g: Graphics, s: Snap) {
+  const t = Math.round(s.hp);
+  const k = Math.max(0.25, Math.min(1, s.extra / 40));
+  if (t === 1) {
+    // moss: low green tufts
+    g.circle(-0.2 * k, 0.1, 0.22 * k).fill(0x4a7a4a);
+    g.circle(0.15 * k, 0.05, 0.18 * k).fill(0x568a52);
+    g.circle(-0.02, -0.12 * k, 0.2 * k).fill(0x4a7a4a);
+  } else if (t === 2) {
+    // mushroom: brown cap on a stem
+    g.rect(-0.08 * k, -0.1, 0.16 * k, 0.35 * k).fill(0xd8cfc0);
+    g.ellipse(0, -0.15, 0.35 * k, 0.18 * k).fill(0x8a5a3a);
+  } else if (t === 3) {
+    // raspberry: dark red drupelet cluster
+    g.circle(-0.18, 0.05, 0.16 * k).fill(0xa8324a);
+    g.circle(0.15, 0.1, 0.15 * k).fill(0x9a2a42);
+    g.circle(0, -0.12, 0.17 * k).fill(0xb23a52);
+  } else if (t === 4) {
+    // strawberry: red body + green leaf
+    g.ellipse(0, 0.05, 0.28 * k, 0.22 * k).fill(0xd94a5a);
+    g.ellipse(0, -0.18, 0.16 * k, 0.08 * k).fill(0x4a8a4a);
+  } else if (t === 5) {
+    // cockroach: dark oval + antennae
+    g.ellipse(0, 0, 0.34 * k, 0.18 * k).fill(0x4a3b2a);
+    g.moveTo(-0.3, -0.1).lineTo(-0.5, -0.25).stroke({ width: 0.05, color: 0x4a3b2a });
+    g.moveTo(-0.3, -0.05).lineTo(-0.52, -0.1).stroke({ width: 0.05, color: 0x4a3b2a });
+  } else {
+    // caterpillar: green segments
+    for (let i = 0; i < 4; i++) {
+      g.circle(-0.3 + i * 0.2, 0, (0.16 - i * 0.01) * (0.6 + 0.4 * k)).fill(0x7aa832);
+    }
   }
 }
 
@@ -282,17 +337,21 @@ export class Renderer {
       g.ellipse(0, 0, 0.34, 0.24).fill(pal[2]);
       g.circle(0, -0.26, 0.14).fill(pal[3]);
       if (s.extra > 0.5) {
-        g.circle(0.2, 0.05, 0.13).fill(s.aux > 0.5 ? 0x4a7fd9 : 0x3fa34d);
+        g.circle(0.2, 0.05, 0.13).fill(RES_COLORS[Math.round(s.aux)] ?? 0x3fa34d);
       }
     } else if (s.kind === 5) {
       g.ellipse(0, 0, 0.4, 0.3).fill(pal[4]);
       g.circle(0, -0.32, 0.18).fill(pal[5]);
       if (s.extra > 0.5) {
-        g.circle(0.24, 0.06, 0.14).fill(s.aux > 0.5 ? 0x4a7fd9 : 0x3fa34d);
+        g.circle(0.24, 0.06, 0.14).fill(RES_COLORS[Math.round(s.aux)] ?? 0x3fa34d);
       }
     } else if (s.kind === 2) {
-      const r = 0.18 + 0.14 * Math.min(1, s.extra / 45);
-      g.circle(0, 0, r).fill(s.aux > 0.5 ? 0x4a7fd9 : 0x3fa34d);
+      if (s.state === 2) {
+        drawSource(g, s);
+      } else {
+        const r = 0.18 + 0.1 * Math.min(1, s.extra / 6);
+        g.circle(0, 0, r).fill(RES_COLORS[Math.round(s.aux)] ?? 0x3fa34d);
+      }
     } else if (s.kind === 3) {
       const soldier = s.aux > 0.5;
       g.ellipse(0, 0, soldier ? 0.19 : 0.16, soldier ? 0.28 : 0.24).fill(soldier ? 0xbfd0e8 : 0xe8dcc8);
@@ -306,7 +365,7 @@ export class Renderer {
       g.circle(-0.08, -0.32, 0.05).fill(0xb03a3a);
       g.circle(0.08, -0.32, 0.05).fill(0xb03a3a);
     }
-    if (s.aux >= 2.5) {
+    if (s.aux >= 2.5 && s.aux < 3.5) {
       // carried egg rides along
       g.circle(0.3, 0.14, 0.12).fill(0xe8dcc8);
     }
@@ -333,7 +392,7 @@ export class Renderer {
         const t = makeLabel(labelText(s));
         t.position.set(0, -0.85);
         c.addChild(g, t);
-        e = { c, g, t, kind: -1, carrying: false, hpBucket: -1, label: '', flying: false, dirt: false, egg: false, team: -1 };
+        e = { c, g, t, kind: -1, carrying: false, hpBucket: -1, label: '', flying: false, haul: 0, team: -1 };
         this.sprites.set(s.id, e);
         this.entities.addChild(c);
       }
@@ -346,24 +405,23 @@ export class Renderer {
       const hpBucket = Math.floor(s.hp * 8);
       const label = labelText(s);
       const flying = s.state === 4;
-      const dirt = s.aux > 1.5 && s.aux < 2.5;
-      const egg = s.aux >= 2.5;
+      // food units carry by aux kind; dirt/egg ride as flags 2/3
+      const haul =
+        s.aux > 1.5 || carrying ? Math.round(s.aux) : 0;
       const team = this.sim.team();
       if (
         e.kind !== s.kind ||
         e.carrying !== carrying ||
         e.hpBucket !== hpBucket ||
         e.flying !== flying ||
-        e.dirt !== dirt ||
-        e.egg !== egg ||
+        e.haul !== haul ||
         e.team !== team
       ) {
         e.kind = s.kind;
         e.carrying = carrying;
         e.hpBucket = hpBucket;
         e.flying = flying;
-        e.dirt = dirt;
-        e.egg = egg;
+        e.haul = haul;
         e.team = team;
         this.drawEntity(e.g, s, team);
       }
