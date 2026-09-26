@@ -497,7 +497,7 @@ impl Sim {
 
     pub(crate) fn pick_dig_target(&self) -> Option<(u32, u32)> {
         let (qx, qy) = self.queen_tile();
-        for r in 1u32..=3 {
+        for r in 1u32..=DIG_EXPAND_RADIUS {
             for dy in -(r as i32)..=(r as i32) {
                 for dx in -(r as i32)..=(r as i32) {
                     if dx.abs() != r as i32 && dy.abs() != r as i32 {

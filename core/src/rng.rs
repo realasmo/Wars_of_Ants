@@ -27,8 +27,14 @@ impl Rng {
         lo + self.f64() * (hi - lo)
     }
 
+    /// Uniform integer in the INCLUSIVE range [lo, hi]. Single-value ranges
+    /// (lo == hi) consume no entropy and return lo.
     pub fn irange(&mut self, lo: u32, hi: u32) -> u32 {
-        lo + self.next_u32() % (hi - lo)
+        debug_assert!(hi >= lo, "irange({lo}, {hi}): empty range");
+        if hi <= lo {
+            return lo;
+        }
+        lo + self.next_u32() % (hi - lo + 1)
     }
 }
 
@@ -43,5 +49,20 @@ mod tests {
         for _ in 0..100 {
             assert_eq!(a.next_u32(), b.next_u32());
         }
+    }
+
+    #[test]
+    fn irange_is_inclusive_and_bounded() {
+        let mut r = Rng::new(11);
+        let mut seen_min = false;
+        let mut seen_max = false;
+        for _ in 0..500 {
+            let v = r.irange(3, 6);
+            assert!((3..=6).contains(&v));
+            seen_min |= v == 3;
+            seen_max |= v == 6;
+        }
+        assert!(seen_min && seen_max, "both endpoints must be reachable");
+        assert_eq!(r.irange(5, 5), 5);
     }
 }

@@ -128,6 +128,10 @@ pub const SPOIL_TIME: f64 = 300.0;
 // --- economy / world constants ---
 
 pub const DIG_TIME: f64 = 1.2;
+/// How far from the queen AI nest-expansion searches for the next soft block
+/// to dig. Radius 3 deadlocks: once that zone is dug out, the pantry stays
+/// full, deliveries halt, and the colony starves beside surface food.
+pub const DIG_EXPAND_RADIUS: u32 = 8;
 pub const EAT_PERIOD: f64 = 25.0;
 pub const EGG_COST: u32 = 5;
 pub const EGG_TIME: f64 = 45.0;

@@ -19,7 +19,14 @@ fn deterministic_same_seed() {
 
 #[test]
 fn colony_grows() {
-    let mut s = Sim::new(7, Config::default());
+    // 12 clusters: enough finite food that survival at the 30k-tick horizon is
+    // guaranteed, not seed luck (every legacy world starves once its piles
+    // run out — the queen alone eats ~1200 carbs in 30k ticks)
+    let cfg = Config {
+        food_clusters: 12,
+        ..Config::default()
+    };
+    let mut s = Sim::new(7, cfg);
     for _ in 0..30_000 {
         s.tick();
     }
