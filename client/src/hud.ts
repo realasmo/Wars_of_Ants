@@ -23,18 +23,8 @@ export class Hud {
   private helpText = '';
 
   update(sim: Sim, playerAnt: number | null, layer: number): void {
-    const snap = playerAnt !== null ? sim.cur.get(playerAnt) : undefined;
-    const state = snap
-      ? snap.state === 1
-        ? 'moving'
-        : snap.state === 2
-          ? 'digging'
-          : snap.state === 3
-            ? 'fighting'
-            : snap.state === 4
-              ? 'flying'
-              : 'idle'
-      : '';
+    const snap = playerAnt !== null ? sim.ant(playerAnt) : undefined;
+    const state = snap ? snap.activity : '';
     const counts = sim.casteCounts();
     el('stat-protein').textContent = String(sim.storeProtein());
     el('stat-carbs').textContent = String(sim.storeCarbs());
@@ -58,7 +48,7 @@ export class Hud {
               : 'colony'
       : 'colony';
     el('ctrl-ant').textContent = snap
-      ? snap.kind === 0
+      ? snap.kind === 'queen'
         ? `queen (${state})`
         : `ant #${playerAnt} (${state})`
       : 'spectating';

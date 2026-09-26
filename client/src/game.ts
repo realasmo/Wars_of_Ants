@@ -1,8 +1,8 @@
 import { Renderer } from './render';
 import { Input } from './input';
 import { Hud } from './hud';
-import { Sim, TPS, lerpPos } from './sim';
-import type { Snap } from './sim';
+import { Sim, TPS, lerpPos, isAnt, carryLabel } from './sim';
+import type { AntEnt, Ent, SpiderEnt } from './sim';
 import { InputLog, r2 } from './inputlog';
 import { coreVersion } from './wasm';
 import { DevPanel } from './devpanel';
@@ -267,7 +267,7 @@ export class Game {
     if (this.sim.dead || this.replay !== null) return;
     let count = 0;
     for (const s of [...this.sim.cur.values()]) {
-      if (s.kind === 4 && this.sim.devKill(s.id)) count++;
+      if (s.kind === 'spider' && this.sim.devKill(s.id)) count++;
     }
     this.log.push({ type: 'cmd', act: 'dev-kill-spiders', count });
   }
@@ -311,16 +311,15 @@ export class Game {
     const spiders: Record<string, unknown>[] = [];
     const ants: Record<string, unknown>[] = [];
     for (const s of this.sim.cur.values()) {
-      if (s.kind === 4) {
+      if (s.kind === 'spider') {
         spiders.push({ id: s.id, x: +s.x.toFixed(2), y: +s.y.toFixed(2), hp: +s.hp.toFixed(2), layer: s.layer });
-      } else if (s.kind === 1 || s.kind === 5) {
-        ants.push({ id: s.id, kind: s.kind === 5 ? 'soldier' : 'worker', x: +s.x.toFixed(2), y: +s.y.toFixed(2), hp: +s.hp.toFixed(2), state: s.state, carrying: s.extra, layer: s.layer === 0 ? 'S' : 'U' });
+      } else if (isAnt(s) && s.kind !== 'queen') {
+        ants.push({ id: s.id, kind: s.kind, x: +s.x.toFixed(2), y: +s.y.toFixed(2), hp: +s.hp.toFixed(2), activity: s.activity, carrying: carryLabel(s.carry), layer: s.layer === 0 ? 'S' : 'U' });
       }
     }
     let foods = 0;
-    for (const s of this.sim.cur.values()) if (s.kind === 2) foods++;
-    const qid = this.sim.queenId();
-    const qs = qid !== null ? this.sim.cur.get(qid) : undefined;
+    for (const s of this.sim.cur.values()) if (s.kind === 'food' || s.kind === 'source') foods++;
+    const qs = this.sim.ant(this.sim.queenId() ?? -1);
     return {
       tick: this.sim.tickCount,
       dead: this.sim.dead,
@@ -342,8 +341,8 @@ export class Game {
             x: +qs.x.toFixed(2),
             y: +qs.y.toFixed(2),
             layer: qs.layer === 0 ? 'S' : 'U',
-            state: qs.state,
-            aux: +qs.aux.toFixed(2),
+            activity: qs.activity,
+            carry: carryLabel(qs.carry),
           }
         : null,
       entrance: this.sim.entrance,
@@ -393,7 +392,7 @@ export class Game {
     if (this.replay !== null) return false;
     if (this.playerAnt === null) return false;
     const pick = this.pickEntity(x, y);
-    if (pick && pick.kind === 4) {
+    if (pick && pick.kind === 'spider') {
       this.log.push({ type: 'cmd', act: 'attack', ant: this.playerAnt, target: pick.id });
       this.sim.attack(this.playerAnt, pick.id);
       this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
@@ -401,7 +400,7 @@ export class Game {
     }
     // selecting the already-controlled ant must not consume the press —
     // steering starts with LMB down and the controlled ant sits at center
-    if (pick && (pick.kind === 0 || pick.kind === 1 || pick.kind === 5) && pick.id !== this.playerAnt) {
+    if (pick && pick.id !== this.playerAnt) {
       this.playerAnt = pick.id;
       this.lastPlayerLayer = null;
       this.log.push({ type: 'cmd', act: 'select', ant: pick.id });
@@ -467,13 +466,14 @@ export class Game {
   /** Nearest interactive entity (queen/worker/soldier/spider) within pick
    * radius on the active layer. Food and eggs are not pickable — a crumb
    * next to a spider must never shadow the spider. */
-  private pickEntity(x: number, y: number): Snap | null {
+  private pickEntity(x: number, y: number): AntEnt | SpiderEnt | null {
     const layer = this.renderer.activeLayer;
-    let best: Snap | null = null;
+    let best: AntEnt | SpiderEnt | null = null;
     let bestD = 0.6 * 0.6;
     for (const s of this.sim.cur.values()) {
       if (s.layer !== layer) continue;
-      if (s.kind !== 0 && s.kind !== 1 && s.kind !== 4 && s.kind !== 5) continue;
+      if (s.kind !== 'queen' && s.kind !== 'worker' && s.kind !== 'soldier' && s.kind !== 'spider')
+        continue;
       const d = (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y);
       if (d < bestD) {
         bestD = d;
@@ -495,14 +495,14 @@ export class Game {
     if (this.playerAnt === null) return;
     if (this.replay !== null) return; // replay is watch-only: camera/view stay live, sim commands don't
     const pick = this.pickEntity(x, y);
-    if (pick && pick.kind === 4) {
+    if (pick && pick.kind === 'spider') {
       this.log.push({ type: 'cmd', act: 'attack', ant: this.playerAnt, target: pick.id });
       this.sim.attack(this.playerAnt, pick.id);
       this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
       return;
     }
     if (button === 0) {
-      if (pick && (pick.kind === 0 || pick.kind === 1 || pick.kind === 5) && pick.id !== this.playerAnt) {
+      if (pick && pick.id !== this.playerAnt) {
         this.playerAnt = pick.id;
         this.lastPlayerLayer = null; // re-baseline the follow camera on the new ant
         this.log.push({ type: 'cmd', act: 'select', ant: pick.id });
@@ -512,11 +512,11 @@ export class Game {
       }
     } else if (button === 2) {
       const layer = this.renderer.activeLayer;
-      const me = this.sim.cur.get(this.playerAnt);
+      const me = this.sim.ant(this.playerAnt);
       const tx = Math.floor(x);
       const ty = Math.floor(y);
       // founding queen context actions (flight → land, grounded → found nest)
-      if (me !== undefined && me.kind === 0) {
+      if (me !== undefined && me.kind === 'queen') {
         const phase = this.sim.phase();
         if (phase === 0) {
           // right-click: fly to the destination and land there
@@ -555,9 +555,7 @@ export class Game {
         return;
       }
       // carrying something → place/drop it (egg, dirt, resources)
-      // aux codes: 2 dirt, 3 egg, 4 protein, 5 carbs, 6 water — resource
-      // units (4–6) are NOT placements, they take the drop branch below
-      if (me !== undefined && me.aux >= 2.5 && me.aux < 3.5) {
+      if (me !== undefined && me.carry.t === 'egg') {
         // egg: place on the empty target cell — the ant walks there first
         {
           const kind = this.sim.tileAt(me.layer, tx, ty);
@@ -568,7 +566,7 @@ export class Game {
           }
         }
       }
-      if (me !== undefined && me.aux > 1.5 && me.aux < 2.5) {
+      if (me !== undefined && me.carry.t === 'dirt') {
         if (me.layer === 1) {
           // dirt: fill the fully-empty adjacent 2×2 block — but never the
           // entrance hole: clicking near it while hauling means "carry it out"
@@ -597,10 +595,12 @@ export class Game {
         }
         // invalid placement → fall through (walk / entrance / dig-refused)
       }
-      if (me !== undefined && me.extra > 0.5 && me.kind !== 0 && me.aux < 2.5) {
+      if (me !== undefined && me.carry.t === 'food') {
         // resource unit: drop it on the empty target cell (spoils off
         // silver) — but clicking the nest hole while hauling means "bring it
-        // home": skip so the entrance crossing below takes it
+        // home": skip so the entrance crossing below takes it.
+        // (Named carries fix the old `aux < 2.5` test that silently
+        // excluded protein/carbs/water units from manual drops.)
         const entR = this.sim.entrance;
         const nearHole =
           entR !== null &&
@@ -613,11 +613,11 @@ export class Game {
         }
       }
       // empty hands + adjacent egg under the cursor → pick it up
-      if (me !== undefined && me.extra <= 0.5 && me.aux <= 1.5) {
-        let egg: Snap | null = null;
+      if (me !== undefined && me.carry.t === 'none') {
+        let egg: Ent | null = null;
         let bestD = 0.8 * 0.8;
         for (const s of this.sim.cur.values()) {
-          if (s.kind !== 3 || s.layer !== layer || s.state === 1) continue;
+          if (s.kind !== 'egg' || s.layer !== layer || s.carried) continue;
           const d = (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y);
           if (d < bestD) {
             bestD = d;
@@ -761,7 +761,7 @@ export class Game {
       else if (c.act === 'dev-food') this.sim.devSetFood(Number(c.n ?? 0));
       else if (c.act === 'dev-super') this.sim.devSetSuper(Number(c.n ?? 0));
       else if (c.act === 'dev-kill-spiders') {
-        for (const s of [...this.sim.cur.values()]) if (s.kind === 4) this.sim.devKill(s.id);
+        for (const s of [...this.sim.cur.values()]) if (s.kind === 'spider') this.sim.devKill(s.id);
       } else if (c.act === 'dev-kill') this.sim.devKill(Number(c.target ?? 0));
       else if (c.act === 'dev-water') this.sim.devSetWater(Number(c.n ?? 0));
       else if (c.act === 'dev-soil')

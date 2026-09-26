@@ -1,6 +1,6 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
-import type { Sim, Snap } from './sim';
-import { lerpPos } from './sim';
+import type { Sim, Ent } from './sim';
+import { isAnt, lerpPos } from './sim';
 
 const SURFACE_COLORS: Record<number, number> = {
   0: 0x4a6741,
@@ -30,13 +30,13 @@ interface EntityGfx {
   c: Container;
   g: Graphics;
   t: Text;
-  kind: number;
+  kind: string;
   carrying: boolean;
   hpBucket: number;
   label: string;
   flying: boolean;
-  /** Carried kind code (0 none, 2 dirt, 3 egg, 4 protein, 5 carbs, 6 water). */
-  haul: number;
+  /** Short carry label ('none' | 'dirt×n' | 'egg' | food name). */
+  haul: string;
   team: number;
 }
 
@@ -49,40 +49,55 @@ const SOURCE_NAMES: Record<number, string> = {
   6: 'caterpillar',
 };
 
-/** Unit / carried-dot colors per resource kind code (aux). */
-const RES_COLORS: Record<number, number> = {
-  0: 0x3fa34d, // green (legacy)
-  1: 0x4a7fd9, // super (legacy)
-  4: 0xc05a5a, // protein
-  5: 0xd4a832, // carbs
-  6: 0x4a9fd9, // water
+/** Unit / carried-dot colors per resource kind. */
+const RES_COLORS: Record<string, number> = {
+  green: 0x3fa34d,
+  super: 0x4a7fd9,
+  protein: 0xc05a5a,
+  carbs: 0xd4a832,
+  water: 0x4a9fd9,
 };
 
-function labelText(s: Snap): string {
+function labelText(s: Ent): string {
   switch (s.kind) {
-    case 0:
+    case 'queen':
       return 'QUEEN';
-    case 1:
+    case 'worker':
       return 'worker';
-    case 5:
+    case 'soldier':
       return 'soldier';
-    case 4:
+    case 'spider':
       return 'SPIDER';
-    case 3:
-      return s.aux > 0.5 ? 'egg(S)' : 'egg';
-    case 2:
-      if (s.state === 2) return SOURCE_NAMES[Math.round(s.hp)] ?? 'source';
-      return s.aux > 4.5 ? 'protein' : s.aux > 5.5 ? 'water' : s.aux > 0.5 && s.aux < 4.5 ? (s.aux > 1.5 ? 'carbs' : 'SUPER') : 'food';
+    case 'egg':
+      return s.caste === 'soldier' ? 'egg(S)' : 'egg';
+    case 'source':
+      return SOURCE_NAMES[s.src] ?? 'source';
+    case 'food':
+      return s.food === 'super' ? 'SUPER' : s.food;
     default:
       return '?';
   }
 }
 
+/** Short carry tag for the redraw change-check ('none' | 'dirt' | 'egg' | food). */
+function haulLabel(c: { t: 'none' } | { t: 'dirt'; blocks: number } | { t: 'egg' } | { t: 'food'; food: string }): string {
+  switch (c.t) {
+    case 'none':
+      return 'none';
+    case 'dirt':
+      return `dirt×${c.blocks}`;
+    case 'egg':
+      return 'egg';
+    case 'food':
+      return c.food;
+  }
+}
+
 /** Placeholder visuals for the six finite map sources; size follows the
  * remaining amount. */
-function drawSource(g: Graphics, s: Snap) {
-  const t = Math.round(s.hp);
-  const k = Math.max(0.25, Math.min(1, s.extra / 40));
+function drawSource(g: Graphics, s: Extract<Ent, { kind: 'source' }>) {
+  const t = s.src;
+  const k = Math.max(0.25, Math.min(1, s.amount / 40));
   if (t === 1) {
     // moss: low green tufts
     g.circle(-0.2 * k, 0.1, 0.22 * k).fill(0x4a7a4a);
@@ -318,44 +333,42 @@ export class Renderer {
     this.world.position.set(screen.width / 2 - this.cam.x * s, screen.height / 2 - this.cam.y * s);
   }
 
-  private drawEntity(g: Graphics, s: Snap, team: number): void {
+  private drawEntity(g: Graphics, s: Ent, team: number): void {
     const pal = TEAM_COLORS[team] ?? TEAM_COLORS[0];
     g.clear();
-    if (s.kind === 0) {
-      if (s.state === 4) {
+    if (s.kind === 'queen') {
+      if (s.activity === 'flying') {
         // wings while the founding queen is airborne
         g.moveTo(-0.1, -0.1).lineTo(-0.55, -0.5).stroke({ width: 0.09, color: 0xd8cfc0, alpha: 0.55 });
         g.moveTo(0.1, -0.1).lineTo(0.55, -0.5).stroke({ width: 0.09, color: 0xd8cfc0, alpha: 0.55 });
       }
       g.circle(0, 0, 0.5).fill(pal[0]);
       g.circle(0, -0.45, 0.22).fill(pal[1]);
-      if (s.aux > 1.5) {
+      if (s.carry.t === 'dirt') {
         // excavated dirt hauled by the founding queen
         g.circle(0.3, 0.12, 0.13).fill(0x8a6d4a);
       }
-    } else if (s.kind === 1) {
+    } else if (s.kind === 'worker') {
       g.ellipse(0, 0, 0.34, 0.24).fill(pal[2]);
       g.circle(0, -0.26, 0.14).fill(pal[3]);
-      if (s.extra > 0.5) {
-        g.circle(0.2, 0.05, 0.13).fill(RES_COLORS[Math.round(s.aux)] ?? 0x3fa34d);
+      if (s.carry.t === 'food') {
+        g.circle(0.2, 0.05, 0.13).fill(RES_COLORS[s.carry.food] ?? 0x3fa34d);
       }
-    } else if (s.kind === 5) {
+    } else if (s.kind === 'soldier') {
       g.ellipse(0, 0, 0.4, 0.3).fill(pal[4]);
       g.circle(0, -0.32, 0.18).fill(pal[5]);
-      if (s.extra > 0.5) {
-        g.circle(0.24, 0.06, 0.14).fill(RES_COLORS[Math.round(s.aux)] ?? 0x3fa34d);
+      if (s.carry.t === 'food') {
+        g.circle(0.24, 0.06, 0.14).fill(RES_COLORS[s.carry.food] ?? 0x3fa34d);
       }
-    } else if (s.kind === 2) {
-      if (s.state === 2) {
-        drawSource(g, s);
-      } else {
-        const r = 0.18 + 0.1 * Math.min(1, s.extra / 6);
-        g.circle(0, 0, r).fill(RES_COLORS[Math.round(s.aux)] ?? 0x3fa34d);
-      }
-    } else if (s.kind === 3) {
-      const soldier = s.aux > 0.5;
+    } else if (s.kind === 'food') {
+      const r = 0.18 + 0.1 * Math.min(1, s.amount / 6);
+      g.circle(0, 0, r).fill(RES_COLORS[s.food] ?? 0x3fa34d);
+    } else if (s.kind === 'source') {
+      drawSource(g, s);
+    } else if (s.kind === 'egg') {
+      const soldier = s.caste === 'soldier';
       g.ellipse(0, 0, soldier ? 0.19 : 0.16, soldier ? 0.28 : 0.24).fill(soldier ? 0xbfd0e8 : 0xe8dcc8);
-    } else if (s.kind === 4) {
+    } else if (s.kind === 'spider') {
       g.moveTo(-0.35, -0.1).lineTo(-0.85, -0.4).stroke({ width: 0.07, color: 0x23232e });
       g.moveTo(-0.32, 0.12).lineTo(-0.8, 0.45).stroke({ width: 0.07, color: 0x23232e });
       g.moveTo(0.35, -0.1).lineTo(0.85, -0.4).stroke({ width: 0.07, color: 0x23232e });
@@ -365,11 +378,11 @@ export class Renderer {
       g.circle(-0.08, -0.32, 0.05).fill(0xb03a3a);
       g.circle(0.08, -0.32, 0.05).fill(0xb03a3a);
     }
-    if (s.aux >= 2.5 && s.aux < 3.5) {
+    if (isAnt(s) && s.carry.t === 'egg') {
       // carried egg rides along
       g.circle(0.3, 0.14, 0.12).fill(0xe8dcc8);
     }
-    if (s.hp < 0.98 && s.kind !== 2 && s.kind !== 3) {
+    if ((isAnt(s) || s.kind === 'spider') && s.hp < 0.98) {
       g.rect(-0.4, -0.62, 0.8, 0.1).fill(0x30100e);
       g.rect(-0.4, -0.62, 0.8 * Math.max(0, s.hp), 0.1).fill(0x3fbf4f);
     }
@@ -392,22 +405,20 @@ export class Renderer {
         const t = makeLabel(labelText(s));
         t.position.set(0, -0.85);
         c.addChild(g, t);
-        e = { c, g, t, kind: -1, carrying: false, hpBucket: -1, label: '', flying: false, haul: 0, team: -1 };
+        e = { c, g, t, kind: '', carrying: false, hpBucket: -1, label: '', flying: false, haul: 'none', team: -1 };
         this.sprites.set(s.id, e);
         this.entities.addChild(c);
       }
       // carried eggs ride their carrier — draw the dot there instead
-      if (s.kind === 3 && s.state === 1) {
+      if (s.kind === 'egg' && s.carried) {
         e.c.visible = false;
         continue;
       }
-      const carrying = s.extra > 0.5;
-      const hpBucket = Math.floor(s.hp * 8);
+      const carrying = isAnt(s) && s.carry.t !== 'none';
+      const hpBucket = Math.floor((isAnt(s) || s.kind === 'spider' ? s.hp : 1) * 8);
       const label = labelText(s);
-      const flying = s.state === 4;
-      // food units carry by aux kind; dirt/egg ride as flags 2/3
-      const haul =
-        s.aux > 1.5 || carrying ? Math.round(s.aux) : 0;
+      const flying = isAnt(s) && s.activity === 'flying';
+      const haul = isAnt(s) ? haulLabel(s.carry) : 'none';
       const team = this.sim.team();
       if (
         e.kind !== s.kind ||
@@ -433,7 +444,7 @@ export class Renderer {
       const pos = lerpPos(p, s, Math.min(1, Math.max(0, alpha)));
       e.c.position.set(pos.x, pos.y);
       e.c.visible = s.layer === layer;
-      if (s.kind === 1 && s.state === 2) {
+      if (s.kind === 'worker' && s.activity === 'digging') {
         e.g.rotation = Math.sin(s.x * 7 + s.y * 3) * 0.4;
       } else {
         e.g.rotation = 0;

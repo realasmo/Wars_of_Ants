@@ -1,16 +1,9 @@
 import { WoaSim } from './wasm';
+import { decodeSnapshot } from './decode';
+import type { AntEnt, Ent } from './decode';
 
-export interface Snap {
-  id: number;
-  kind: number;
-  layer: number;
-  x: number;
-  y: number;
-  state: number;
-  extra: number;
-  hp: number;
-  aux: number;
-}
+export type { AntEnt, EggEnt, Ent, SourceEnt, SpiderEnt, FoodEnt, Carry, FoodName, ActivityName } from './decode';
+export type Snap = Ent;
 
 export const TPS = 20;
 
@@ -18,7 +11,7 @@ export const TPS = 20;
  * fixed ticks. Snaps instead of lerps when the prev→cur jump can't be motion —
  * a layer change (entrance crossing teleports to the entrance tile) or a hop
  * larger than 2 tiles (max real per-tick motion is ~0.25 tiles in flight). */
-export function lerpPos(p: Snap, s: Snap, t: number): { x: number; y: number } {
+export function lerpPos(p: Ent, s: Ent, t: number): { x: number; y: number } {
   if (p.layer !== s.layer || (s.x - p.x) ** 2 + (s.y - p.y) ** 2 > 4) return { x: s.x, y: s.y };
   return { x: p.x + (s.x - p.x) * t, y: p.y + (s.y - p.y) * t };
 }
@@ -44,13 +37,15 @@ export class Sim {
   /** Nest hole; null until the founding queen creates the nest. Polled per tick. */
   entrance: [number, number] | null = null;
   readonly foundingMode: boolean;
-  prev = new Map<number, Snap>();
-  cur = new Map<number, Snap>();
+  prev = new Map<number, Ent>();
+  cur = new Map<number, Ent>();
   tickCount = 0;
   dead = false;
-  food = 0;
+  carbs = 0;
   private tilesCache: (Uint8Array | null)[] = [null, null];
   private tilesDirtyFlag = [true, true];
+  private tilesEpoch = -1n;
+  private soilEpoch = -1n;
   /** Per-tile soil quality (0 none, 1 orange, 2 silver) per layer. */
   soil: Uint8Array[] = [new Uint8Array(0), new Uint8Array(0)];
 
@@ -69,9 +64,12 @@ export class Sim {
     this.refreshSoil();
   }
 
-  /** Refetch soil grids (they change only at worldgen, founding grants and
-   * dev soil ops). */
+  /** Re-pull soil grids when the core bumped its soil epoch (founding grants,
+   * dev painting); cheap no-op otherwise. */
   refreshSoil(): void {
+    const epoch = this.sim.soil_epoch();
+    if (epoch === this.soilEpoch) return;
+    this.soilEpoch = epoch;
     this.soil[0] = new Uint8Array(this.sim.soil_surface());
     this.soil[1] = new Uint8Array(this.sim.soil_underground());
   }
@@ -209,9 +207,11 @@ export class Sim {
     return d;
   }
 
+  /** Worker + soldier ids, ascending. */
   workers(): number[] {
     const out: number[] = [];
-    for (const s of this.cur.values()) if (s.kind === 1 || s.kind === 5) out.push(s.id);
+    for (const s of this.cur.values())
+      if (s.kind === 'worker' || s.kind === 'soldier') out.push(s.id);
     return out.sort((a, b) => a - b);
   }
 
@@ -219,75 +219,71 @@ export class Sim {
     let workers = 0;
     let soldiers = 0;
     for (const s of this.cur.values()) {
-      if (s.kind === 1) workers++;
-      else if (s.kind === 5) soldiers++;
+      if (s.kind === 'worker') workers++;
+      else if (s.kind === 'soldier') soldiers++;
     }
     return { workers, soldiers };
   }
 
   queenId(): number | null {
-    for (const s of this.cur.values()) if (s.kind === 0) return s.id;
+    for (const s of this.cur.values()) if (s.kind === 'queen') return s.id;
     return null;
+  }
+
+  ant(id: number): AntEnt | undefined {
+    const s = this.cur.get(id);
+    return s !== undefined && isAnt(s) ? s : undefined;
   }
 
   eggCount(): number {
     let n = 0;
-    for (const s of this.cur.values()) if (s.kind === 3) n++;
+    for (const s of this.cur.values()) if (s.kind === 'egg') n++;
     return n;
   }
 
+  /** Re-pull tile grids only when the core bumped its epoch (dig, carve,
+   * refill) — replaces the old per-tick 2×9KB copy + byte-compare. */
   private pollTiles(): void {
-    for (const layer of [0, 1]) {
-      const fresh = new Uint8Array(
-        layer === 0 ? this.sim.tiles_surface() : this.sim.tiles_underground(),
-      );
-      const old = this.tilesCache[layer];
-      if (!old || old.length !== fresh.length) {
-        this.tilesCache[layer] = fresh;
-        this.tilesDirtyFlag[layer] = true;
-        continue;
-      }
-      let same = true;
-      for (let i = 0; i < fresh.length; i++) {
-        if (fresh[i] !== old[i]) {
-          same = false;
-          break;
-        }
-      }
-      if (!same) {
-        this.tilesCache[layer] = fresh;
-        this.tilesDirtyFlag[layer] = true;
-      }
-    }
+    const epoch = this.sim.tiles_epoch();
+    if (epoch === this.tilesEpoch) return;
+    this.tilesEpoch = epoch;
+    this.tilesCache[0] = new Uint8Array(this.sim.tiles_surface());
+    this.tilesCache[1] = new Uint8Array(this.sim.tiles_underground());
+    this.tilesDirtyFlag = [true, true];
   }
 
   private pull(): void {
-    const raw = this.sim.snapshot();
-    this.tickCount = Number(this.sim.tick_count());
-    this.dead = this.sim.colony_dead();
-    this.food = this.sim.store_carbs(); // legacy field name: carbs
+    const snap = decodeSnapshot(this.sim);
+    this.tickCount = snap.tick;
+    this.dead = snap.dead;
+    this.carbs = snap.carbs;
     const e = this.sim.entrance();
     this.entrance = e.length === 2 ? [e[0], e[1]] : null;
     const prev = this.cur;
-    const cur = new Map<number, Snap>();
-    const n = raw[3];
-    for (let i = 0; i < n; i++) {
-      const o = 4 + i * 9;
-      const s: Snap = {
-        id: raw[o],
-        kind: raw[o + 1],
-        layer: raw[o + 2],
-        x: raw[o + 3],
-        y: raw[o + 4],
-        state: raw[o + 5],
-        extra: raw[o + 6],
-        hp: raw[o + 7],
-        aux: raw[o + 8],
-      };
+    const cur = new Map<number, Ent>();
+    for (const s of snap.ents) {
       if (!prev.has(s.id)) prev.set(s.id, s);
       cur.set(s.id, s);
     }
     this.prev = prev;
     this.cur = cur;
+  }
+}
+
+export function isAnt(s: Ent): s is AntEnt {
+  return s.kind === 'queen' || s.kind === 'worker' || s.kind === 'soldier';
+}
+
+/** Short carry description for logs/console ("dirt×2", "egg", "protein"). */
+export function carryLabel(c: AntEnt['carry']): string {
+  switch (c.t) {
+    case 'none':
+      return 'none';
+    case 'dirt':
+      return `dirt×${c.blocks}`;
+    case 'egg':
+      return 'egg';
+    case 'food':
+      return c.food;
   }
 }

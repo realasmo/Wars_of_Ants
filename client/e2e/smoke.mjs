@@ -76,7 +76,7 @@ try {
   console.log('start:', JSON.stringify({ tick: s.tick, phase: s.phase, team: s.team, queen: s.queen }));
   if (s.phase !== 0) failures.push(`expected flight phase, got ${s.phase}`);
   if (s.team !== 0) failures.push(`expected red team, got ${s.team}`);
-  if (s.queen === null || s.queen.layer !== 'S' || s.queen.state !== 4) {
+  if (s.queen === null || s.queen.layer !== 'S' || s.queen.activity !== 'flying') {
     failures.push(`queen not flying on surface: ${JSON.stringify(s.queen)}`);
   }
   if (s.ants.length !== 0) failures.push(`expected no ants at start, got ${s.ants.length}`);
@@ -148,15 +148,15 @@ try {
     const dugEmpty = await tile(1, wall.wx, wall.wy);
     if (dugEmpty !== 0) failures.push(`walk-to-dig did not clear the block (kind ${dugEmpty})`);
     s = await state();
-    if (s.queen.aux !== 2) failures.push(`queen not hauling dirt after dig (aux ${s.queen.aux})`);
+    if (s.queen.carry !== 'dirt×1') failures.push(`queen not hauling dirt after dig (carry ${s.queen.carry})`);
     // refill the whole block
     await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: wall.wx, y: wall.wy });
     await page.evaluate(() => window.__woa.step(3)); // force a snapshot pull
     s = await state();
     const refilled = await tile(1, wall.wx, wall.wy);
-    console.log('dirt:', JSON.stringify({ aux: s.queen.aux, refilled }));
+    console.log('dirt:', JSON.stringify({ carry: s.queen.carry, refilled }));
     if (refilled < 1 || refilled > 3) failures.push(`dump did not refill the block (kind ${refilled})`);
-    if (s.queen.aux !== 0) failures.push(`queen still hauling after dump (aux ${s.queen.aux})`);
+    if (s.queen.carry !== 'none') failures.push(`queen still hauling after dump (carry ${s.queen.carry})`);
     // dig again and haul it out through the entrance
     await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: wall.wx, y: wall.wy });
     await page.evaluate(() => window.__woa.step(140));
@@ -167,12 +167,12 @@ try {
     await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: s.queen.x + 3, y: s.queen.y });
     await page.evaluate(() => window.__woa.step(3)); // force a snapshot pull
     s = await state();
-    if (s.queen.aux !== 0) failures.push(`surface dump did not discard the dirt (aux ${s.queen.aux})`);
+    if (s.queen.carry !== 'none') failures.push(`surface dump did not discard the dirt (carry ${s.queen.carry})`);
     // back into the nest — the founding queen must not linger among spiders
     await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: ex, y: ey });
     await page.evaluate(() => window.__woa.step(120));
     s = await state();
-    console.log('haul:', JSON.stringify({ layer: s.queen.layer, aux: s.queen.aux, dead: s.dead }));
+    console.log('haul:', JSON.stringify({ layer: s.queen.layer, carry: s.queen.carry, dead: s.dead }));
     if (s.queen.layer !== 'U') failures.push('queen did not return into the nest after hauling');
     if (s.dead) failures.push('colony died during the founding haul');
   }
@@ -217,13 +217,13 @@ try {
     await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: eg.x + 1, y: eg.y });
     await page.evaluate(() => window.__woa.step(3));
     s = await state();
-    if (s.queen.aux !== 3) failures.push(`queen not marked as egg-carrier (aux ${s.queen.aux})`);
+    if (s.queen.carry !== 'egg') failures.push(`queen not marked as egg-carrier (carry ${s.queen.carry})`);
     // place it back on an adjacent empty cell
     const qn = s.queen;
     await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: qn.x + 1, y: qn.y });
     await page.evaluate(() => window.__woa.step(3));
     s = await state();
-    if (s.queen.aux !== 0) failures.push(`egg not placed (aux ${s.queen.aux})`);
+    if (s.queen.carry !== 'none') failures.push(`egg not placed (carry ${s.queen.carry})`);
     const log2 = await page.evaluate(() => window.__woa.log());
     const acts2 = [...new Set(log2.events.filter((e) => e.type === 'cmd').map((e) => e.act))];
     if (!acts2.includes('pick-egg')) failures.push('right-click did not pick up an adjacent egg');
@@ -304,7 +304,7 @@ try {
   await page.evaluate(() => window.__woa.step(3000));
   await page.waitForTimeout(400);
   s = await dump('s06-late');
-  console.log('late:', JSON.stringify({ tick: s.tick, workers: s.workers, food: s.food, dead: s.dead }));
+  console.log('late:', JSON.stringify({ tick: s.tick, workers: s.workers, carbs: s.carbs, dead: s.dead }));
   if (s.dead) failures.push('colony died during the late window');
 
   const ilog = await page.evaluate(() => window.__woa.log());
