@@ -146,6 +146,16 @@ impl WoaSim {
         self.inner.tiles_dug()
     }
 
+    /// Retained game events (capped), oldest first. Observational only.
+    pub fn events(&self) -> Vec<String> {
+        self.inner.event_lines().to_vec()
+    }
+
+    /// Total events ever emitted (for cheap change polling).
+    pub fn event_total(&self) -> u64 {
+        self.inner.event_total()
+    }
+
     pub fn canonical(&self) -> String {
         self.inner.canonical_state()
     }

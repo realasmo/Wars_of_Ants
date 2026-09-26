@@ -110,6 +110,9 @@ export class Input {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     window.addEventListener('keydown', (e) => {
+      if (document.getElementById('console')?.classList.contains('hidden') === false) {
+        return; // dev console is open: game keys (except `) are captured there
+      }
       if (e.repeat) return;
       this.keys.add(e.code);
       this.log?.push({ type: 'key', code: e.code });

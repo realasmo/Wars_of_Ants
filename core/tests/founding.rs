@@ -908,3 +908,46 @@ fn spider_drops_protein_and_low_carbs_slow_the_colony() {
         "well-fed ants outpace starving ones ({fed:.2} vs {starved:.2})"
     );
 }
+
+#[test]
+fn event_log_records_causes_and_discoveries() {
+    let mut s = Sim::new_founding(42, Team::Red);
+    // run a founding flow and check the story reads back
+    let q = queen(&s);
+    s.issue(Command::Land { ant: q.id, x: q.x, y: q.y });
+    s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y });
+    // through founding (60s) + the full brood timer (180s): eggs go ready
+    for _ in 0..4900 {
+        s.tick();
+    }
+    let log = s.event_lines().join("\n");
+    assert!(log.contains("queen landed"), "landed event: {log}");
+    assert!(log.contains("nest founded"), "founded event: {log}");
+    assert!(log.contains("brood laid"), "brood event: {log}");
+    assert!(log.contains("egg #"), "egg laid events: {log}");
+    // egg ready + waiting for orange (no nursery in this flow)
+    assert!(log.contains("waiting for orange"), "waiting event: {log}");
+    // death with cause: kill the queen via dev
+    let total_before = s.event_total();
+    s.dev_kill(s.colony.queen_id);
+    for _ in 0..5 {
+        s.tick();
+    }
+    let log2 = s.event_lines().join("\n");
+    assert!(log2.contains("COLONY DIED"), "colony death event: {log2}");
+    assert!(log2.contains("(dev)"), "death cause recorded: {log2}");
+    assert!(s.event_total() > total_before);
+    // combat cause: found a sim, spawn a spider on the grounded queen
+    let mut c = Sim::new_founding(42, Team::Red);
+    let q2 = queen(&c);
+    c.issue(Command::Land { ant: q2.id, x: q2.x, y: q2.y });
+    c.dev_spawn(DevSpawn::Spider, queen(&c).x, queen(&c).y);
+    for _ in 0..600 {
+        c.tick();
+    }
+    let log3 = c.event_lines().join("\n");
+    assert!(
+        log3.contains("COLONY DIED") && log3.contains("(combat)"),
+        "combat cause recorded: {log3}"
+    );
+}

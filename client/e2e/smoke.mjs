@@ -340,6 +340,7 @@ try {
   await page.keyboard.press('F2');
   const panelVisible = await page.evaluate(() => !document.getElementById('devpanel').classList.contains('hidden'));
   if (!panelVisible) failures.push('F2 did not open the dev panel');
+  await page.click('#dev-spawn-open');
   await page.click('button[data-spawn="moss"]');
   await page.mouse.click(640, 420);
   await page.evaluate(() => window.__woa.step(3));
@@ -347,6 +348,24 @@ try {
   // one dev food pile = 45 units spread across cells at the 6/cell cap
   if (s.foods <= foodsBefore) failures.push(`panel food placement failed: ${s.foods} vs ${foodsBefore}`);
   await page.keyboard.press('F2');
+
+  // --- tilde console: roll-down, commands, live feed ---
+  await page.keyboard.press('Backquote');
+  const consoleVisible = await page.evaluate(() => !document.getElementById('console').classList.contains('hidden'));
+  if (!consoleVisible) failures.push('Backquote did not open the console');
+  await page.keyboard.type('setwater 7');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('help');
+  await page.keyboard.press('Enter');
+  const consoleText = await page.evaluate(() => document.getElementById('console-out').textContent);
+  if (!consoleText || !consoleText.includes('spawn <kind>')) {
+    failures.push(`console help response missing: ${consoleText && consoleText.slice(0, 80)}`);
+  }
+  s = await state();
+  if (s.water !== 7) failures.push(`console setwater failed (water ${s.water})`);
+  await page.keyboard.press('Backquote');
+  const consoleClosed = await page.evaluate(() => document.getElementById('console').classList.contains('hidden'));
+  if (!consoleClosed) failures.push('Backquote did not close the console');
 
   await page.keyboard.press('F3');
   await page.waitForTimeout(700);

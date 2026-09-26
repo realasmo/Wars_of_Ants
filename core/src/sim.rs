@@ -162,7 +162,12 @@ pub struct Colony {
     pub founding: bool,
     /// Source ids discovered by the colony (within sight of any ant).
     pub known: std::collections::BTreeSet<u32>,
+    /// Last carb-slow state (for on/off events).
+    pub slowed: bool,
 }
+
+/// Cap of retained game events (drop-oldest ring via Vec drain).
+pub const EVENT_CAP: usize = 400;
 
 pub struct Sim {
     pub world: World,
@@ -171,6 +176,10 @@ pub struct Sim {
     pub colony: Colony,
     pub config: Config,
     pub tick: u64,
+    /// Capped sim-side event log: everything the game did, newest last.
+    pub events: Vec<String>,
+    /// Total events ever emitted (retained = events.len()).
+    pub event_total: u64,
     /// Surface dust patches (founding mode): founding inside one grants its
     /// soil color near the nest.
     pub patches: Vec<Patch>,
@@ -320,9 +329,12 @@ impl Sim {
                 team,
                 founding,
                 known: std::collections::BTreeSet::new(),
+                slowed: false,
             },
             config,
             tick: 0,
+            events: Vec::new(),
+            event_total: 0,
             patches,
             ids: BTreeMap::new(),
             next_id: 0,
@@ -419,6 +431,25 @@ impl Sim {
         self.apply_command(cmd)
     }
 
+    /// Record a game event (drop-oldest cap). Purely observational — never
+    /// part of sim state, replays, or canonical output.
+    fn ev(&mut self, text: String) {
+        if self.events.len() >= EVENT_CAP {
+            self.events.remove(0);
+        }
+        self.events.push(format!("[{}] {}", self.tick, text));
+        self.event_total += 1;
+    }
+
+    /// Retained events, oldest first (capped at EVENT_CAP).
+    pub fn event_lines(&self) -> &[String] {
+        &self.events
+    }
+
+    pub fn event_total(&self) -> u64 {
+        self.event_total
+    }
+
     /// Dev/test operations. They mutate the sim directly (no command gating)
     /// and are recorded with ticks by the client, so a dev action stream is
     /// as replayable as any other command stream.
@@ -477,12 +508,7 @@ impl Sim {
         if !self.ids.contains_key(&id) {
             return false;
         }
-        if id == self.colony.queen_id {
-            // the colony system dereferences queen_id every tick — killing
-            // the queen outside starvation must flag the colony dead too
-            self.colony.dead = true;
-        }
-        self.kill(id);
+        self.kill_cause(id, "dev");
         true
     }
 
@@ -603,6 +629,7 @@ impl Sim {
                 self.set_job(ant, Job::Manual);
                 if self.ant_tile(ant) == (tx, ty) {
                     self.colony.phase = Phase::Grounded;
+                    self.ev(format!("queen landed at ({tx},{ty})"));
                     return true;
                 }
                 // fly to the destination, land on arrival
@@ -685,6 +712,7 @@ impl Sim {
                     }
                     return true;
                 }
+                self.ev(format!("ant #{ant} picked up egg #{egg}"));
                 if let Ok(mut q) = self.ecs.get::<&mut Egg>(eent) {
                     q.carried_by = Some(ant);
                 }
@@ -773,6 +801,7 @@ impl Sim {
             }
         self.colony.phase = Phase::Founding;
         self.colony.phase_t = FOUNDING_TIME;
+        self.ev(format!("nest founded at ({bx},{by}) — 60s excavation"));
         true
     }
 
@@ -924,6 +953,11 @@ impl Sim {
             .get::<&Pos>(ent)
             .map(|q| q.layer)
             .unwrap_or(Layer::Underground)
+    }
+
+    fn ant_pos(&self, id: u32) -> Vec2 {
+        let ent = self.ids[&id];
+        self.ecs.get::<&Pos>(ent).map(|q| q.p).unwrap_or_default()
     }
 
     fn ant_tile(&self, id: u32) -> (u32, u32) {
@@ -1154,6 +1188,14 @@ impl Sim {
         ));
         self.ids.insert(id, ent);
         self.colony.ant_count += 1;
+        if self.tick > 0 {
+            let name = match caste {
+                Caste::Queen => "queen",
+                Caste::Worker => "worker",
+                Caste::Soldier => "soldier",
+            };
+            self.ev(format!("{name} #{id} born"));
+        }
         id
     }
 
@@ -1324,6 +1366,13 @@ impl Sim {
             _ => {}
         }
         self.colony.delivered += 1;
+        let rname = match kind {
+            FoodKind::Water => "water",
+            FoodKind::Carbs | FoodKind::Green => "carbs",
+            FoodKind::Protein | FoodKind::Super => "protein",
+            _ => "?",
+        };
+        self.ev(format!("ant #{ant} banked 1 {rname} at ({},{})", tile.0, tile.1));
         self.spawn_unit_food(Layer::Underground, tile, kind, None);
         // pantry piles never spoil and are not forage targets
         for fid in self.food_ids() {
@@ -1347,6 +1396,9 @@ impl Sim {
 
     fn spawn_egg(&mut self, p: Vec2, caste: Caste, total: f64) -> u32 {
         let id = self.fresh_id();
+        if self.tick > 0 {
+            self.ev(format!("egg #{id} laid at ({:.0},{:.0})", p.x, p.y));
+        }
         let ent = self.ecs.spawn((
             Egg {
                 hatch: total,
@@ -1389,6 +1441,10 @@ impl Sim {
     }
 
     fn kill(&mut self, id: u32) {
+        self.kill_cause(id, "?");
+    }
+
+    fn kill_cause(&mut self, id: u32, cause: &str) {
         if let Some(ent) = self.ids.remove(&id) {
             let was_ant = self.ecs.get::<&Ant>(ent).is_ok();
             let _ = self.ecs.despawn(ent);
@@ -1398,6 +1454,9 @@ impl Sim {
                 // colony — the systems below dereference queen_id every tick
                 if id == self.colony.queen_id {
                     self.colony.dead = true;
+                    self.ev(format!("COLONY DIED — queen #{id} ({cause})"));
+                } else {
+                    self.ev(format!("ant #{id} died ({cause})"));
                 }
             }
         }
@@ -1621,6 +1680,7 @@ impl Sim {
                         q.1.layer = layer;
                     }
                     placed = true;
+                    self.ev(format!("egg #{eid} placed at ({tx},{ty})"));
                     break;
                 }
                 if placed {
@@ -1789,6 +1849,8 @@ impl Sim {
                     // the flight reached its destination: touch down
                     self.set_land_after(id, false);
                     self.colony.phase = Phase::Grounded;
+                    let p = self.ant_pos(id);
+                    self.ev(format!("queen landed at ({:.0},{:.0})", p.x, p.y));
                     continue;
                 }
                 if let Some((tx, ty)) = found_after {
@@ -1982,6 +2044,7 @@ impl Sim {
                             Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
                             None => {
                                 // pantry full: dig out more nest, then deliver
+                                self.ev(format!("pantry full — ant #{id} digs expansion"));
                                 match self.pick_dig_target() {
                                     Some(t) => self.set_job(id, Job::DigTile(t.0, t.1)),
                                     None => self.set_retry(id, 100),
@@ -2066,6 +2129,7 @@ impl Sim {
                                         Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
                                         None => {
                                             // pantry full: dig out more nest first
+                                            self.ev(format!("pantry full — ant #{id} digs expansion"));
                                             match self.pick_dig_target() {
                                                 Some(t) => self.set_job(id, Job::DigTile(t.0, t.1)),
                                                 None => self.set_retry(id, 100),
@@ -2147,6 +2211,19 @@ impl Sim {
         }
         for fid in found {
             self.colony.known.insert(fid);
+            if let Some(&ent) = self.ids.get(&fid) {
+                let info = self
+                    .ecs
+                    .query_one::<(&Food, &Pos)>(ent)
+                    .ok()
+                    .and_then(|mut q| q.get().map(|(f, p)| (f.src, f.amount, tile_of(p.p))));
+                if let Some((src, amount, tile)) = info {
+                    self.ev(format!(
+                        "source discovered: {} #{} — {} units at ({},{})",
+                        source_name(src), fid, amount, tile.0, tile.1
+                    ));
+                }
+            }
         }
     }
 
@@ -2568,7 +2645,7 @@ impl Sim {
             })
             .collect();
         for id in dead_ants {
-            self.kill(id);
+            self.kill_cause(id, "combat");
         }
         let dead_predators: Vec<u32> = self
             .ids
@@ -2584,6 +2661,7 @@ impl Sim {
         for pid in dead_predators {
             let ent = self.ids[&pid];
             let p = self.ecs.get::<&Pos>(ent).map(|q| q.p).unwrap_or_default();
+            self.ev(format!("spider #{pid} died → {PROTEIN_PER_SPIDER} protein"));
             self.kill(pid);
             self.spawn_food(p, PROTEIN_PER_SPIDER, FoodKind::Protein);
         }
@@ -2615,6 +2693,7 @@ impl Sim {
             if self.colony.phase_t <= 0.0 {
                 self.colony.phase = Phase::Brood;
                 self.colony.phase_t = 0.0;
+                self.ev("founding time over — brood laid".to_string());
                 for _ in 0..FOUNDING_EGGS {
                     let Some(tile) = self.free_egg_tile() else {
                         break;
@@ -2623,6 +2702,15 @@ impl Sim {
                     self.spawn_egg(tile_center(tile.0, tile.1), Caste::Worker, FOUNDING_EGG_HATCH);
                 }
             }
+        }
+        let slow_now = self.colony.founding && self.colony.carbs < CARB_LOW;
+        if slow_now != self.colony.slowed {
+            self.colony.slowed = slow_now;
+            self.ev(format!(
+                "colony {} (carbs {})",
+                if slow_now { "SLOWED — 60% speed" } else { "back to full speed" },
+                self.colony.carbs
+            ));
         }
         self.colony.lay_cooldown -= DT;
         if self.colony.carbs > 0 {
@@ -2642,7 +2730,7 @@ impl Sim {
                 if self.colony.starve_t >= STARVE_TIME {
                     self.colony.dead = true;
                     let q = self.colony.queen_id;
-                    self.kill(q);
+                    self.kill_cause(q, "starvation");
                     return;
                 }
             }
@@ -2814,6 +2902,7 @@ impl Sim {
                 Some(q) => (q.0.hatch, q.0.caste, q.0.carried_by, *q.1),
                 None => continue,
             };
+            let hatch_prev = hatch;
             let hatch = hatch - DT;
             // transformation happens only on an empty orange cell — ready
             // eggs wait wherever they are until moved to one. (The legacy
@@ -2831,12 +2920,19 @@ impl Sim {
                 && self.colony.ant_count < self.config.max_ants
             {
                 let p = pos.p;
+                self.ev(format!("egg #{id} hatched on orange at ({:.0},{:.0})", p.x, p.y));
                 self.kill(id);
                 self.spawn_ant(caste, p, Layer::Underground);
                 // the first hatched worker ends the founding script
                 if self.colony.phase == Phase::Brood && self.caste_counts().0 > 0 {
                     self.colony.phase = Phase::Colony;
+                    self.ev("first worker hatched — colony phase".to_string());
                 }
+            } else if hatch <= 0.0 && hatch_prev > 0.0 && carried.is_none() && !on_orange {
+                if let Ok(mut q) = self.ecs.get::<&mut Egg>(ent) {
+                    q.hatch = 0.0;
+                }
+                self.ev(format!("egg #{id} ready — waiting for orange soil"));
             } else if let Ok(mut q) = self.ecs.get::<&mut Egg>(ent) {
                 q.hatch = hatch.max(0.0);
             }
@@ -2847,17 +2943,20 @@ impl Sim {
         let ids = self.food_ids();
         for id in ids {
             let ent = self.ids[&id];
-            let (amount, spoil, pos) = match self
+            let (amount, spoil, pos, harvest_t, src) = match self
                 .ecs
                 .query_one::<(&Food, &Pos)>(ent)
                 .unwrap()
                 .get()
             {
-                Some(q) => (q.0.amount, q.0.spoil, *q.1),
+                Some(q) => (q.0.amount, q.0.spoil, *q.1, q.0.harvest_t, q.0.src),
                 None => continue,
             };
             if amount == 0 {
                 self.colony.known.remove(&id);
+                if harvest_t > 0.0 {
+                    self.ev(format!("source depleted: {} #{}", source_name(src), id));
+                }
                 self.kill(id);
                 continue;
             }
@@ -2874,6 +2973,7 @@ impl Sim {
                 t -= DT;
                 if t <= 0.0 {
                     self.colony.known.remove(&id);
+                    self.ev(format!("food #{id} spoiled ({} units lost)", amount));
                     self.kill(id);
                 } else if let Ok(mut q) = self.ecs.get::<&mut Food>(ent) {
                     q.spoil = Some(t);
@@ -3034,5 +3134,17 @@ impl Sim {
         }
         v.sort_by_key(|s| s.id);
         v
+    }
+}
+
+fn source_name(src: u8) -> &'static str {
+    match src {
+        1 => "moss",
+        2 => "mushroom",
+        3 => "raspberry",
+        4 => "strawberry",
+        5 => "cockroach",
+        6 => "caterpillar",
+        _ => "source",
     }
 }

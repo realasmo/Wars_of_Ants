@@ -58,32 +58,53 @@
     <pre id="inputlog" hidden></pre>
     <div id="replay-badge" class="hidden">REPLAY</div>
     <div id="devpanel" class="hidden">
-      <div class="dev-title">DEV (F2)</div>
-      <div class="dev-hint">pick an entity, then click the map</div>
-      <div class="dev-row">
-        <button data-spawn="worker">worker</button>
-        <button data-spawn="soldier">soldier</button>
-        <button data-spawn="egg">egg</button>
-        <button data-spawn="spider">spider</button>
-        <button data-spawn="moss">moss</button>
-        <button data-spawn="raspberry">raspberry</button>
+      <div class="dev-title">DEV (F2) · console (`)</div>
+      <div id="dev-main">
+        <div class="dev-row">
+          <button id="dev-spawn-open">Spawn…</button>
+          <button id="dev-coords">coords</button>
+        </div>
+        <div class="dev-row">
+          <button id="dev-food">carbs = 50</button>
+          <button id="dev-super">protein = 5</button>
+          <button id="dev-kill-spiders">kill spiders</button>
+        </div>
+        <div class="dev-row">
+          <button id="dev-pause">pause</button>
+          <button id="dev-ff">+10s</button>
+        </div>
+        <div class="dev-hint">dev actions are recorded (replayable) · ` opens the console</div>
       </div>
-      <div class="dev-row">
-        <button data-spawn="strawberry">strawberry</button>
-        <button data-spawn="mushroom">mushroom</button>
-        <button data-spawn="cockroach">cockroach</button>
-        <button data-spawn="caterpillar">caterpillar</button>
+      <div id="dev-spawn-view" class="hidden">
+        <div class="dev-row">
+          <button data-spawn="worker">worker</button>
+          <button data-spawn="soldier">soldier</button>
+          <button data-spawn="egg">egg</button>
+          <button data-spawn="spider">spider</button>
+        </div>
+        <div class="dev-row">
+          <button data-spawn="moss">moss</button>
+          <button data-spawn="mushroom">mushroom</button>
+          <button data-spawn="raspberry">raspberry</button>
+        </div>
+        <div class="dev-row">
+          <button data-spawn="strawberry">strawberry</button>
+          <button data-spawn="cockroach">cockroach</button>
+          <button data-spawn="caterpillar">caterpillar</button>
+        </div>
+        <div class="dev-row">
+          <button id="dev-spawn-back">← back</button>
+        </div>
+        <div class="dev-hint">ants/eggs spawn underground · spiders/sources on surface</div>
       </div>
-      <div class="dev-row">
-        <button id="dev-food">carbs = 50</button>
-        <button id="dev-super">protein = 5</button>
-        <button id="dev-kill-spiders">kill spiders</button>
+    </div>
+    <div id="coords" class="hidden"></div>
+    <div id="console" class="hidden">
+      <div id="console-out"></div>
+      <div id="console-line">
+        <span>&gt;</span>
+        <input id="console-in" autocomplete="off" spellcheck="false" />
       </div>
-      <div class="dev-row">
-        <button id="dev-pause">pause</button>
-        <button id="dev-ff">+10s</button>
-      </div>
-      <div class="dev-hint">ants/eggs spawn underground · spiders/food on surface · dev actions are recorded (replayable)</div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

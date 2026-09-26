@@ -185,6 +185,15 @@ export class Sim {
     return this.sim.canonical();
   }
 
+  /** Retained game events, oldest first (capped, observational only). */
+  eventLines(): string[] {
+    return this.sim.events();
+  }
+
+  eventTotal(): number {
+    return Number(this.sim.event_total());
+  }
+
   tileAt(layer: number, x: number, y: number): number {
     if (x < 0 || y < 0 || x >= this.w || y >= this.h) return 4;
     return (this.tilesCache[layer] as Uint8Array)[y * this.w + x];

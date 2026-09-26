@@ -4,6 +4,7 @@ import { Game } from './game';
 import { loadReplay } from './replay';
 import type { Replay } from './replay';
 import { chooseTeam } from './menu';
+import { bindConsole } from './console';
 
 declare global {
   interface Window {
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
     game = await Game.create(host, seed, null, team);
   }
   game.start();
+  bindConsole(game);
   if (params.get('perf') !== null) game.togglePerf();
   // death overlay → team menu → brand-new founding game
   game.onToMenu = () => {

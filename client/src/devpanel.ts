@@ -9,6 +9,7 @@ export interface DevHooks {
   onPause: () => void;
   onFF: () => void;
   onPauseState: () => boolean;
+  onCoords: () => boolean;
 }
 
 export class DevPanel {
@@ -22,10 +23,16 @@ export class DevPanel {
     this.el.querySelectorAll<HTMLButtonElement>('button[data-spawn]').forEach((b) => {
       b.addEventListener('click', () => this.setPlacement(this.kind === b.dataset.spawn ? null : (b.dataset.spawn ?? null)));
     });
+    this.el.querySelector('#dev-spawn-open')?.addEventListener('click', () => this.showView('spawn'));
+    this.el.querySelector('#dev-spawn-back')?.addEventListener('click', () => this.showView('main'));
     this.el.querySelector('#dev-food')?.addEventListener('click', () => hooks.onFood());
     this.el.querySelector('#dev-super')?.addEventListener('click', () => hooks.onSuper());
     this.el.querySelector('#dev-kill-spiders')?.addEventListener('click', () => hooks.onKillSpiders());
     this.el.querySelector('#dev-ff')?.addEventListener('click', () => hooks.onFF());
+    this.el.querySelector('#dev-coords')?.addEventListener('click', () => {
+      const on = hooks.onCoords();
+      (this.el.querySelector('#dev-coords') as HTMLButtonElement).classList.toggle('active', on);
+    });
     this.el.querySelector('#dev-pause')?.addEventListener('click', () => {
       hooks.onPause();
       this.syncPause();
@@ -46,6 +53,11 @@ export class DevPanel {
     this.el.querySelectorAll<HTMLButtonElement>('button[data-spawn]').forEach((b) => {
       b.classList.toggle('active', b.dataset.spawn === kind);
     });
+  }
+
+  private showView(view: 'main' | 'spawn'): void {
+    this.el.querySelector('#dev-main')?.classList.toggle('hidden', view !== 'main');
+    this.el.querySelector('#dev-spawn-view')?.classList.toggle('hidden', view !== 'spawn');
   }
 
   private syncPause(): void {

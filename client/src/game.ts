@@ -6,6 +6,7 @@ import type { Snap } from './sim';
 import { InputLog, r2 } from './inputlog';
 import { coreVersion } from './wasm';
 import { DevPanel } from './devpanel';
+import { consoleOpen, pollEvents } from './console';
 import type { Replay } from './replay';
 
 export class Game {
@@ -14,7 +15,7 @@ export class Game {
   private input: Input;
   private hud = new Hud();
   private dev: DevPanel;
-  private paused = false;
+  paused = false; // public for the dev console
   private readonly log = new InputLog();
   private playerAnt: number | null = null;
   private seed: number;
@@ -62,6 +63,7 @@ export class Game {
       onPause: () => this.togglePause(),
       onFF: () => this.debugStep(200),
       onPauseState: () => this.paused,
+      onCoords: () => this.toggleCoords(),
     });
     this.playerAnt = this.initialAnt();
     this.log.push({ type: 'start', seed, workers: sim.workers().length });
@@ -128,6 +130,62 @@ export class Game {
 
   debugMark(label: string): void {
     this.log.push({ type: 'mark', label });
+  }
+
+  seedValue(): number {
+    return this.seed;
+  }
+
+  /** Console-friendly spawn: kind + optional position (defaults: nest
+   * entrance, or the queen when no nest exists). */
+  debugSpawnAt(kind: string, x?: number, y?: number): boolean {
+    if (this.sim.dead || this.replay !== null) return false;
+    let px = x;
+    let py = y;
+    if (px === undefined || py === undefined) {
+      const ent = this.sim.entrance;
+      const qid = this.sim.queenId();
+      const q = qid !== null ? this.sim.cur.get(qid) : undefined;
+      px = ent !== null ? ent[0] + 1 : (q ? q.x : this.sim.w / 2);
+      py = ent !== null ? ent[1] + 3 : (q ? q.y : this.sim.h / 2);
+    }
+    const id = this.sim.devSpawn(kind, px, py);
+    if (id === 4294967295) return false;
+    this.log.push({ type: 'cmd', act: 'dev-spawn', kind, x: r2(px), y: r2(py) });
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+    return true;
+  }
+
+  private coordsMode = false;
+
+  toggleCoords(): boolean {
+    this.coordsMode = !this.coordsMode;
+    const el = document.getElementById('coords');
+    if (el) el.classList.toggle('hidden', !this.coordsMode);
+    return this.coordsMode;
+  }
+
+  /** Clicked-world logging for the coords tool (called from handleClick). */
+  private logCoords(x: number, y: number): void {
+    if (!this.coordsMode) return;
+    const q = this.sim.queenId();
+    const qs = q !== null ? this.sim.cur.get(q) : undefined;
+    import('./console').then(({ pushLine }) => {
+      pushLine(`click @ ${x.toFixed(2)}, ${y.toFixed(2)} (tile ${Math.floor(x)},${Math.floor(y)})`, 'cmd');
+      if (qs) {
+        pushLine(`queen @ ${qs.x.toFixed(2)}, ${qs.y.toFixed(2)} (tile ${Math.floor(qs.x)},${Math.floor(qs.y)})`, 'cmd');
+      }
+    });
+  }
+
+  private updateCoordsHud(): void {
+    if (!this.coordsMode) return;
+    const el = document.getElementById('coords');
+    if (!el) return;
+    const me = this.playerAnt !== null ? this.sim.cur.get(this.playerAnt) : undefined;
+    if (me) {
+      el.textContent = `x ${me.x.toFixed(2)} y ${me.y.toFixed(2)} · tile ${Math.floor(me.x)},${Math.floor(me.y)}`;
+    }
   }
 
   debugStep(n: number): void {
@@ -426,6 +484,7 @@ export class Game {
   }
 
   private handleClick(x: number, y: number, button: number): void {
+    this.logCoords(x, y);
     if (this.sim.dead) return;
     const placing = this.dev.placement();
     if (placing !== null) {
@@ -652,6 +711,8 @@ export class Game {
       this.perfWorst = 0;
       this.perfTicks = 0;
     }
+    this.updateCoordsHud();
+    if (consoleOpen()) pollEvents();
     requestAnimationFrame(this.frame);
   };
 
