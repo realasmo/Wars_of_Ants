@@ -8,6 +8,26 @@ Design reference: AntWar.io (see `docs/BASED-ON.md`); world content draft: `docs
 - **Remote (origin):** `git@github.com:realasmo/Wars_of_Ants.git`
 - **SSH key:** `/root/.ssh/key_Wars_of_Ants` (configured via repo-local `core.sshCommand`)
 
+## Current status (2026-09-26)
+
+**Playable:** title → team select → flying queen → found nest → excavate
+(2×2 blocks, dirt hauling) → orange-soil nursery (egg transport) → first
+workers → scout and harvest finite sources (protein/carbs/water) → survive
+spiders. Engine: deterministic 20 tps core (native + WASM byte-identical),
+replays (v2), e2e playtest suite, in-game dev console (`` ` ``) with a live
+sim event log. Version 0.5.0.
+
+**Decided next (see TODO.md):** one code-quality wave — full audit +
+Option C typed snapshot layer (+ Option B field split) — before more
+content. Then Wave B (water healing + corpses + Medic), C (neutral
+creatures), D (aphid farming + honey ants), E (bosses); drafts and costs in
+`docs/WORLD-DESIGN.md`.
+
+**Open balance questions from playtesting:** sparse-source survival is sharp
+(90 s starvation, seed-dependent) — knobs: `SOURCES`, `CARB_LOW`,
+`EAT_PERIOD`; orange/silver density (3.5% each); founding lottery (natural
+orange in the starter chamber ~17% of seeds).
+
 ## Why this project exists
 
 AntWar.io is a great proof of concept, but it is not perfect and no longer maintained. This project is an independent alternative: same genre and core fantasy, rebuilt with a modern stack and room to fix the original's shortcomings.
