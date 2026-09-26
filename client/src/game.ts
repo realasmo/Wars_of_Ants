@@ -27,6 +27,11 @@ export class Game {
   private lastPlayerLayer: number | null = null;
   private steerTarget: { x: number; y: number } | null = null;
   private lastSteerTick = -1;
+  private perfStart = 0;
+  private perfFrames = 0;
+  private perfMs = 0;
+  private perfWorst = 0;
+  private perfTicks = 0;
 
   private constructor(sim: Sim, renderer: Renderer, seed: number, replay: Replay | null) {
     this.sim = sim;
@@ -45,6 +50,7 @@ export class Game {
     this.input.onCycleAnt = () => this.cycleAnt();
     this.input.onToggleLayer = () => this.toggleLayer();
     this.input.onToggleDev = () => this.dev.toggle();
+    this.input.onTogglePerf = () => this.hud.togglePerf();
     this.input.onEscape = () => this.dev.setPlacement(null);
     this.dev = new DevPanel({
       onFood: () => this.debugSetFood(50),
@@ -187,6 +193,10 @@ export class Game {
   togglePause(): void {
     this.paused = !this.paused;
     this.log.push({ type: 'mark', label: this.paused ? 'paused' : 'resumed' });
+  }
+
+  togglePerf(): void {
+    this.hud.togglePerf();
   }
 
   debugPixel(x: number, y: number): number[] {
@@ -399,8 +409,12 @@ export class Game {
   }
 
   private frame = (now: number): void => {
-    const dt = Math.min(0.25, (now - this.last) / 1000);
+    const rawMs = now - this.last;
+    const dt = Math.min(0.25, rawMs / 1000);
     this.last = now;
+    this.perfFrames++;
+    this.perfMs += rawMs;
+    if (rawMs > this.perfWorst) this.perfWorst = rawMs;
     if (!this.sim.dead && !this.paused) {
       this.acc += dt;
       const step = 1 / TPS;
@@ -435,11 +449,29 @@ export class Game {
       this.renderer.drawTiles(this.renderer.activeLayer);
     }
     this.renderer.renderEntities(this.acc * TPS, this.playerAnt);
+    if (this.perfStart === 0) this.perfStart = now;
+    if (now - this.perfStart >= 500) {
+      const secs = (now - this.perfStart) / 1000;
+      const layer = this.renderer.activeLayer;
+      let shown = 0;
+      for (const s of this.sim.cur.values()) if (s.layer === layer) shown++;
+      this.hud.setPerf(
+        `fps ${Math.round(this.perfFrames / secs)} · ${Math.round(this.perfMs / this.perfFrames)}ms avg · ${Math.round(this.perfWorst)}ms worst\n` +
+          `sim ${Math.round(this.perfTicks / secs)} tps · ${this.sim.cur.size} entities (${shown} shown)\n` +
+          `zoom ${this.renderer.cam.zoom.toFixed(2)} · tick ${this.sim.tickCount}`,
+      );
+      this.perfStart = now;
+      this.perfFrames = 0;
+      this.perfMs = 0;
+      this.perfWorst = 0;
+      this.perfTicks = 0;
+    }
     requestAnimationFrame(this.frame);
   };
 
   private tickWithReplay(): void {
     this.sim.tick();
+    this.perfTicks++;
     const rp = this.replay;
     if (!rp) return;
     let applied = false;

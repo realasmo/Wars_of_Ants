@@ -232,6 +232,14 @@ try {
   }
   await page.keyboard.press('F2'); // close panel
 
+  // F3 perf overlay shows live numbers
+  await page.keyboard.press('F3');
+  await page.waitForTimeout(700);
+  const perfText = await page.evaluate(() => document.getElementById('perf').textContent);
+  if (!perfText || !perfText.includes('fps')) failures.push(`perf overlay not reporting: ${perfText}`);
+  else console.log('perf:', perfText.split('\n')[0]);
+  await page.keyboard.press('F3');
+
   // --- cross-platform determinism: same replay on native and WASM ---
   const replayRel = 'client/public/replays/determinism.json';
   const nativeDump = await new Promise((resolve, reject) => {

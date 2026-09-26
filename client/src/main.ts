@@ -39,6 +39,7 @@ async function main(): Promise<void> {
   if (!host) throw new Error('#app element missing');
   const game = await Game.create(host, seed, replay);
   game.start();
+  if (params.get('perf') !== null) game.togglePerf();
   window.__woa = {
     click: (x, y, button) => game.debugClick(x, y, button),
     key: (code) => game.debugKey(code),

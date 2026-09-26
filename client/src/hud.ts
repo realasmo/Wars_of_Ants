@@ -48,4 +48,16 @@ export class Hud {
   setReplay(active: boolean): void {
     el('replay-badge').classList.toggle('hidden', !active);
   }
+
+  private perfVisible = false;
+
+  togglePerf(): boolean {
+    this.perfVisible = !this.perfVisible;
+    el('perf').classList.toggle('hidden', !this.perfVisible);
+    return this.perfVisible;
+  }
+
+  setPerf(text: string): void {
+    if (this.perfVisible) el('perf').textContent = text;
+  }
 }

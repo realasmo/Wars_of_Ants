@@ -144,6 +144,24 @@ body {
   display: none;
 }
 
+#perf {
+  position: absolute;
+  bottom: 10px;
+  left: 12px;
+  background: rgba(15, 13, 10, 0.82);
+  border: 1px solid #3d342a;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  color: #a8d8a0;
+}
+
+#perf.hidden {
+  display: none;
+}
+
 #devpanel {
   position: absolute;
   top: 12px;

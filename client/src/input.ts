@@ -18,6 +18,7 @@ export class Input {
   onCycleAnt: () => void = () => {};
   onToggleLayer: () => void = () => {};
   onToggleDev: () => void = () => {};
+  onTogglePerf: () => void = () => {};
   onEscape: () => void = () => {};
   /** Wheel zoom; anchored at the followed ant while controlling. */
   onZoom: (factor: number, sx: number, sy: number) => void = () => {};
@@ -120,6 +121,9 @@ export class Input {
       } else if (e.code === 'F2') {
         e.preventDefault();
         this.onToggleDev();
+      } else if (e.code === 'F3') {
+        e.preventDefault();
+        this.onTogglePerf();
       } else if (e.code === 'Escape') {
         this.onEscape();
       }
