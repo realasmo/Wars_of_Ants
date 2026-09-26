@@ -15,13 +15,23 @@ Design reference: AntWar.io (see `docs/BASED-ON.md`); world content draft: `docs
 workers → scout and harvest finite sources (protein/carbs/water) → survive
 spiders. Engine: deterministic 20 tps core (native + WASM byte-identical),
 replays (v2), e2e playtest suite, in-game dev console (`` ` ``) with a live
-sim event log. Version 0.5.0.
+sim event log. Version 0.6.0.
 
-**Decided next (see TODO.md):** one code-quality wave — full audit +
-Option C typed snapshot layer (+ Option B field split) — before more
-content. Then Wave B (water healing + corpses + Medic), C (neutral
-creatures), D (aphid farming + honey ants), E (bosses); drafts and costs in
-`docs/WORLD-DESIGN.md`.
+**Code-quality wave shipped (see `docs/AUDIT.md`):** merciless audit of
+everything so far, then — `sim.rs` split into `sim/` modules (worldgen,
+commands, ai, systems, food, geom, snapshot); the snapshot is a typed layer
+(`Carry` enum in the core, named shapes + `decode.ts` boundary in the client,
+boot-time wire-spec assertion via `snapshot_spec()`); `canonical_state()` is
+a true full-state digest (soil grids, known sources, RNG state, AI intents);
+fixed: half-open `irange` mis-tuning every balance range, the
+pantry-saturation deadlock, the queen retry-freeze, dropped queen attack
+intents, friendly fire, underground chase routing, and the three shipped
+`aux`-overload client bugs. Perf: food-by-tile index (legacy test suite 10×
+faster), epoch-gated tile/soil re-pulls, event ring.
+
+**Decided next (see TODO.md):** Wave B — water healing + corpses + Medic —
+then C (neutral creatures), D (aphid farming + honey ants), E (bosses);
+drafts and costs in `docs/WORLD-DESIGN.md`.
 
 **Open balance questions from playtesting:** sparse-source survival is sharp
 (90 s starvation, seed-dependent) — knobs: `SOURCES`, `CARB_LOW`,
@@ -164,7 +174,7 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 - **Console API** (devtools, with the game open): `__woa.spawn('spider', x, y)` (omit x/y for the nest entrance), `__woa.setfood(n)`, `__woa.setsuper(n)`, `__woa.kill(id)`, `__woa.killspiders()`, `__woa.pause()`.
 - Dev operations live in the Rust core (`Sim::dev_spawn/dev_set_food/dev_set_super/dev_kill`) — so they are deterministic, recorded in the input log (act `dev-*`), and replayable like any command. Dev actions are blocked while a replay is running. Killing the queen via dev tools flags the colony dead (the sim dereferences the queen id every tick).
 - `__woa.state()` includes `foods` (food pile count) and `paused` for test assertions.
-- **F3 toggles the perf overlay** (`?perf=1` also enables it on load): fps, avg/worst frame ms (0.5s window), measured sim ticks/s, entity total vs shown-on-layer, zoom. Baseline headless (SwiftShader): ~31–36 fps with 40–60 entities and flat scaling — the fixed per-frame entity `Graphics` rebuild is the known cost center if optimization is ever needed; the sim holds 20 tps regardless.
+- **F3 toggles the perf overlay** (`?perf=1` also enables it on load): fps, avg/worst frame ms (0.5s window), measured sim ticks/s, entity total vs shown-on-layer, zoom. Baseline headless (SwiftShader): ~30–36 fps with ~50 entities and flat scaling (clean-probe reading after the typed-snapshot wave; entity redraws are change-guarded, tile redraws epoch-gated). The sim holds 20 tps regardless. Caveat: a perf sample taken right after a fast-forward batch (`step(n)`) reads low — the 0.5s window catches the batch tail.
 
 ## Undecided (vs. the original game)
 

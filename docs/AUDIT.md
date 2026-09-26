@@ -238,3 +238,34 @@ Design notes surfaced by the audit — for Wave B decisions, not refactor items:
   decoded at one typed boundary, which is the Phase-4 protocol seed).
 - Legacy economy semantics (see B3).
 - Determinism architecture, replay format v2, e2e harness — all healthy.
+
+---
+
+## Addendum — found while applying the fixes (2026-09-26)
+
+Three more defects surfaced during the fix wave, all fixed in the same commits:
+
+- **🔴 Pantry-saturation deadlock** (new A-number: A7). Once the physical pantry
+  (6 units/cell) fills the nest, carriers try to dig expansions — but
+  `pick_dig_target` only searched radius 3 around the queen. Past that zone the
+  colony starved beside uncollected surface food, with every carrier looping on
+  a 100-tick retry. The inclusive-`irange` worldgen shift exposed it on legacy
+  seed 7 (`delivered` froze at the identical pantry capacity across different
+  worlds — the tell). Search radius is now `DIG_EXPAND_RADIUS` (balance.rs, 8).
+- **🔴 The queen dropped attack orders on successful routes** (A8). Her attack
+  resolution cleared `attack_after` when the cross-layer route *succeeded*: she
+  surfaced, walked to where the spider had been, and stood idle until it killed
+  her. The intent now persists like the worker branch's and re-engages on
+  arrival (regression: `attack_intent_survives_a_routed_chase`).
+- **🟠 Underground combat could never start** (deepens A6). The AI only set
+  `Fighting` for surface/surface pairs — an underground attack order routed to
+  the target's tile forever without engaging; and had it engaged, the chase
+  moved in straight lines through walls. Engagement is now same-layer, chases
+  below ground pathfind, and `attack_after` persists through `Fighting` so
+  routed chases re-engage. (No underground hostile exists yet — Wave B
+  provides the live test.)
+
+Also observed, recorded for Wave B design (not code-fixed): the e2e perf
+sample right after a fast-forward batch reads low (the 0.5 s window catches
+the batch tail) — a perf-note hazard, not a regression; a clean-probe reading
+(30 fps live / 36 paused, 49 entities, SwiftShader) matches the old baseline.
