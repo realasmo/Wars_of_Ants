@@ -487,11 +487,9 @@ export class Game {
       // carrying something → place/drop it (egg, dirt, food)
       if (me !== undefined && me.aux > 1.5) {
         if (me.aux >= 2.5) {
-          // egg: place on the adjacent empty cell
+          // egg: place on the empty target cell — the ant walks there first
           const kind = this.sim.tileAt(me.layer, tx, ty);
-          const adjacent =
-            Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
-          if (kind === 0 && adjacent && this.sim.drop(this.playerAnt, tx, ty)) {
+          if (kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
             this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'egg' });
             this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
             return;
@@ -510,12 +508,7 @@ export class Game {
               if (this.sim.tileAt(1, bx + dx, by + dy) !== 0) emptyBlock = false;
             }
           }
-          if (
-            !isHoleBlock &&
-            emptyBlock &&
-            Math.max(Math.abs(me.x - bx - 1), Math.abs(me.y - by - 1)) <= 2 &&
-            this.sim.drop(this.playerAnt, tx, ty)
-          ) {
+          if (!isHoleBlock && emptyBlock && this.sim.drop(this.playerAnt, tx, ty)) {
             this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'dirt' });
             this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
             return;
@@ -529,11 +522,9 @@ export class Game {
         }
         // invalid placement → fall through (walk / entrance / dig-refused)
       } else if (me !== undefined && me.extra > 0.5 && me.kind !== 0) {
-        // food: drop one unit on the adjacent cell (spoils off silver)
+        // food: drop one unit on the empty target cell (spoils off silver)
         const kind = this.sim.tileAt(me.layer, tx, ty);
-        const adjacent =
-          Math.max(Math.abs(me.x - tx - 0.5), Math.abs(me.y - ty - 0.5)) <= 1.5;
-        if (kind === 0 && adjacent && this.sim.drop(this.playerAnt, tx, ty)) {
+        if (kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
           this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'food' });
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
@@ -551,17 +542,10 @@ export class Game {
             egg = s;
           }
         }
-        if (egg !== null) {
-          const adjacent =
-            Math.max(Math.abs(me.x - egg.x), Math.abs(me.y - egg.y)) <= 1.5;
-          if (adjacent && this.sim.pickEgg(this.playerAnt, egg.id)) {
-            this.log.push({ type: 'cmd', act: 'pick-egg', ant: this.playerAnt, target: egg.id });
-            this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
-            return;
-          }
-          // egg clicked but out of reach: walk to it instead
-          this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: r2(x), y: r2(y), note: 'to-egg' });
-          this.sim.move(this.playerAnt, x, y);
+        if (egg !== null && this.sim.pickEgg(this.playerAnt, egg.id)) {
+          // adjacent picks happen instantly; distant ones send the ant
+          // walking and it picks up on arrival (core intent)
+          this.log.push({ type: 'cmd', act: 'pick-egg', ant: this.playerAnt, target: egg.id });
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }

@@ -354,26 +354,16 @@ fn distant_dig_command_walks_there_and_digs() {
             if !soft {
                 continue;
             }
-            let mut touches_empty = false;
-            'n: for ny in (bx.saturating_sub(1))..=bx + 2 {
-                for nx in (by.saturating_sub(1))..=by + 2 {
-                    let _ = nx;
-                    let _ = ny;
-                    break 'n;
-                }
-            }
-            // adjacency to emptiness: any tile of the ring around the block
+            // frontier = fully-soft block with an ORTHOGONALLY empty
+            // neighbor tile (diagonal-only openings don't count anymore)
             let ring_empty = [
-                (bx.wrapping_sub(1), by), (bx + 2, by), (bx, by.wrapping_sub(1)), (bx, by + 2),
-                (bx.wrapping_sub(1), by.wrapping_sub(1)), (bx + 2, by.wrapping_sub(1)),
-                (bx.wrapping_sub(1), by + 2), (bx + 2, by + 2),
-                (bx.wrapping_sub(1), by + 1), (bx + 2, by + 1),
+                (bx.wrapping_sub(1), by), (bx.wrapping_sub(1), by + 1),
+                (bx + 2, by), (bx + 2, by + 1),
                 (bx, by.wrapping_sub(1)), (bx + 1, by.wrapping_sub(1)),
                 (bx, by + 2), (bx + 1, by + 2),
             ]
             .iter()
             .any(|&(x, y)| s.tile_at(Layer::Underground, x, y) == EMPTY);
-            let _ = touches_empty;
             if !ring_empty {
                 continue;
             }
@@ -559,4 +549,157 @@ fn queen_hauls_two_dirt_blocks_before_dumping() {
     }
     assert!(s.issue(Command::Drop { ant: q.id, tx: a_tx, ty: a_ty }));
     assert_eq!(queen(&s).aux, 0.0, "all dirt dumped");
+}
+
+#[test]
+fn diagonal_dig_requires_an_open_flank() {
+    // hunt a seed where the geometry exists: after digging one frontier
+    // block, one of its diagonal blocks is fully soft with both flank tiles
+    // still solid
+    for seed in [42u64, 7, 1, 99, 123] {
+        let mut s = founded(seed);
+        let q0 = queen(&s);
+        let (a_tx, a_ty) = walk_and_dig(&mut s, 60);
+        let (abx, aby) = (a_tx & !1, a_ty & !1); // the dug block
+        // stand the queen at a corner of the dug block
+        for (cx, cy) in [(abx + 1, aby + 1), (abx, aby + 1), (abx + 1, aby), (abx, aby)] {
+            let target = s.issue(Command::Move {
+                ant: q0.id,
+                x: cx as f64 + 0.5,
+                y: cy as f64 + 0.5,
+            });
+            if !target {
+                continue;
+            }
+            for _ in 0..80 {
+                s.tick();
+            }
+            let q = queen(&s);
+            if (q.x.floor() as u32, q.y.floor() as u32) != (cx, cy) {
+                continue;
+            }
+            // diagonal blocks from this corner
+            for (dx, dy) in [(-2i32, -2i32), (2, -2), (-2, 2), (2, 2)] {
+                let dbx = (cx as i32 + if dx > 0 { 1 } else { -2 }) as u32;
+                let dby = (cy as i32 + if dy > 0 { 1 } else { -2 }) as u32;
+                let mut soft = true;
+                for ddy in 0..2u32 {
+                    for ddx in 0..2u32 {
+                        let k = s.tile_at(Layer::Underground, dbx + ddx, dby + ddy);
+                        if !(1..=3).contains(&k) {
+                            soft = false;
+                        }
+                    }
+                }
+                if !soft {
+                    continue;
+                }
+                // flank tiles between this corner and the diagonal block
+                let f1x = cx as i32 + if dx > 0 { 1 } else { -1 };
+                let f2y = cy as i32 + if dy > 0 { 1 } else { -1 };
+                let f1 = s.tile_at(Layer::Underground, f1x as u32, cy);
+                let f2 = s.tile_at(Layer::Underground, cx, f2y as u32);
+                let solid = |k: u8| (1..=3).contains(&k);
+                if solid(f1) && solid(f2) {
+                    let q = queen(&s);
+                    assert!(
+                        !s.issue(Command::Dig { ant: q.id, tx: dbx, ty: dby }),
+                        "seed {seed}: corner-only dig must be refused (flanks {f1}/{f2})"
+                    );
+                    return; // geometry verified
+                }
+            }
+        }
+    }
+    // orthogonal digging still works regardless
+    let mut s = founded(42);
+    let ((sx, sy), (tx2, ty2)) = dig_site(&s);
+    let q = queen(&s);
+    assert!(s.issue(Command::Move { ant: q.id, x: sx as f64 + 0.5, y: sy as f64 + 0.5 }));
+    for _ in 0..80 {
+        s.tick();
+    }
+    assert!(s.issue(Command::Dig { ant: q.id, tx: tx2, ty: ty2 }));
+}
+
+#[test]
+fn soil_blocks_are_never_blocked_by_rocks() {
+    let s = Sim::new_founding(42, Team::Red);
+    let w = s.config.width;
+    for by in (1..s.config.height - 2).step_by(2) {
+        for bx in (1..w - 2).step_by(2) {
+            let soil = s.world.soil_underground[(by * w + bx) as usize];
+            if soil != 0 {
+                for dy in 0..2u32 {
+                    for dx in 0..2u32 {
+                        let k = s.tile_at(Layer::Underground, bx + dx, by + dy);
+                        assert_ne!(k, 4, "rock inside a special soil block at ({},{})", bx + dx, by + dy);
+                        assert!(k >= 1 && k <= 3, "soil block cell must stay diggable");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn distant_pick_and_drop_send_the_ant_walking() {
+    let mut s = founded(42);
+    for _ in 0..1220 {
+        s.tick();
+    }
+    // walk the queen to the chamber edge first, then target the farthest egg
+    let q = queen(&s);
+    let entrance = s.world.entrance.unwrap();
+    assert!(s.issue(Command::Move {
+        ant: q.id,
+        x: entrance.0 as f64 + 1.0,
+        y: entrance.1 as f64 + 1.0
+    }));
+    for _ in 0..200 {
+        s.tick();
+    }
+    let q = queen(&s);
+    let eggs_all: Vec<_> = s.snapshot().into_iter().filter(|e| e.kind == 3).collect();
+    let egg = eggs_all
+        .iter()
+        .max_by(|a, b| {
+            let da = (a.x - q.x).abs() + (a.y - q.y).abs();
+            let db = (b.x - q.x).abs() + (b.y - q.y).abs();
+            da.partial_cmp(&db).unwrap()
+        })
+        .unwrap();
+    let (ex, ey) = (egg.x.floor() as u32, egg.y.floor() as u32);
+    assert!((ex as f64 - q.x).abs() + (ey as f64 - q.y).abs() > 2.5, "test needs a distant egg");
+    assert!(s.issue(Command::PickEgg { ant: q.id, egg: egg.id }));
+    for _ in 0..300 {
+        s.tick();
+    }
+    assert_eq!(queen(&s).aux, 3.0, "queen should reach and pick up the egg");
+    // distant empty cell: Drop walks there and places it
+    let (qx, qy) = { let qq = queen(&s); (qq.x.floor() as u32, qq.y.floor() as u32) };
+    let mut spot = None;
+    'scan: for r in 3..12u32 {
+        for dy in -(r as i32)..=(r as i32) {
+            for dx in -(r as i32)..=(r as i32) {
+                if dx.abs() != r as i32 && dy.abs() != r as i32 { continue; }
+                let x = qx as i32 + dx;
+                let y = qy as i32 + dy;
+                if x < 2 || y < 2 { continue; }
+                if s.tile_at(Layer::Underground, x as u32, y as u32) == EMPTY {
+                    spot = Some((x as u32, y as u32));
+                    break 'scan;
+                }
+            }
+        }
+    }
+    let (sx, sy) = spot.expect("an empty cell a few tiles away");
+    assert!((sx.max(qx) - sx.min(qx)) + (sy.max(qy) - sy.min(qy)) > 2, "target must be distant");
+    assert!(s.issue(Command::Drop { ant: q.id, tx: sx, ty: sy }));
+    for _ in 0..400 {
+        s.tick();
+    }
+    assert_eq!(queen(&s).aux, 0.0, "egg should be placed after walking");
+    let placed = s.snapshot().into_iter().find(|e| e.id == egg.id).unwrap();
+    assert_eq!((placed.x.floor() as u32, placed.y.floor() as u32), (sx, sy));
 }

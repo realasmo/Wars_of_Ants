@@ -104,7 +104,7 @@ try {
   await page.evaluate((p) => window.__woa.click(p.x, p.y, 0), { x: s.queen.x + 4, y: s.queen.y });
   await page.evaluate(() => window.__woa.step(80));
   s = await state();
-  const nestTile = [Math.floor(s.queen.x), Math.floor(s.queen.y)];
+  const nestTile = [Math.floor(s.queen.x) & ~1, Math.floor(s.queen.y) & ~1]; // block origin
   await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: s.queen.x, y: s.queen.y });
   await page.evaluate(() => window.__woa.step(3));
   s = await state();

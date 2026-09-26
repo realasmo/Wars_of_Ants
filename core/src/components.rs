@@ -96,6 +96,11 @@ pub struct WorkerAi {
     /// Walk-to-dig intent (2×2 block origin): route to the block, dig on
     /// arrival — right-clicking distant dirt must send the ant there.
     pub dig_after: Option<(u32, u32)>,
+    /// Walk-to-drop intent (target tile): route there, drop the carried
+    /// item on arrival.
+    pub drop_after: Option<(u32, u32)>,
+    /// Walk-to-pick intent (egg id): route to the egg, pick it up there.
+    pub pick_after: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug)]

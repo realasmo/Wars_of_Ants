@@ -238,6 +238,9 @@ impl Sim {
                         for dy in 0..2 {
                             for dx in 0..2 {
                                 soil_underground[((by + dy) * w + bx + dx) as usize] = soil;
+                                // special soil must stay diggable: the rock
+                                // scatter may never land inside it
+                                underground.set(bx + dx, by + dy, DIRT);
                             }
                         }
                     }
@@ -613,103 +616,20 @@ impl Sim {
                 true
             }
             Command::Drop { ant, tx, ty } => {
-                let ent = match self.ids.get(&ant) {
-                    Some(&e) => e,
-                    None => return false,
-                };
-                let (carrying, layer) = match self.ecs.query_one::<(&Carrying, &Pos)>(ent)
-                    .unwrap()
-                    .get()
-                {
-                    Some(q) => (*q.0, q.1.layer),
-                    None => return false,
-                };
-                if carrying.amount == 0 {
+                if !self.is_ant(ant) {
                     return false;
                 }
-                match carrying.kind {
-                    FoodKind::Dirt => match layer {
-                        Layer::Surface => {
-                            // dumped above ground: all carried dirt disappears
-                            if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                                q.amount = 0;
-                            }
-                            true
-                        }
-                        Layer::Underground => {
-                            // dumped below: the dirt refills the fully-empty block
-                            let (bx, by) = block_of(tx, ty);
-                            if !self.block_in_bounds(bx, by)
-                                || !self.block_empty(bx, by)
-                                || !self.block_adjacent(ant, bx, by)
-                            {
-                                return false;
-                            }
-                            for dy in 0..2 {
-                                for dx in 0..2 {
-                                    self.world.underground.set(bx + dx, by + dy, DIRT);
-                                }
-                            }
-                            // one dump fills one block per carried unit
-                            if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                                q.amount = q.amount.saturating_sub(1);
-                            }
-                            true
-                        }
-                    },
-                    FoodKind::Egg => {
-                        // place the carried egg on the adjacent empty cell
-                        let grid_kind = self.grid_of(layer).get(tx, ty);
-                        if grid_kind != EMPTY || chebyshev(self.ant_tile(ant), (tx, ty)) > 1 {
-                            return false;
-                        }
-                        let mut placed = false;
-                        for eid in self.egg_ids() {
-                            let eent = self.ids[&eid];
-                            let mine = self
-                                .ecs
-                                .get::<&Egg>(eent)
-                                .map(|q| q.carried_by == Some(ant))
-                                .unwrap_or(false);
-                            if !mine {
-                                continue;
-                            }
-                            if let Some(q) = self
-                                .ecs
-                                .query_one::<(&mut Egg, &mut Pos)>(eent)
-                                .unwrap()
-                                .get()
-                            {
-                                q.0.carried_by = None;
-                                q.1.p = tile_center(tx, ty);
-                                q.1.layer = layer;
-                            }
-                            placed = true;
-                            break;
-                        }
-                        if placed {
-                            if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                                q.amount = 0;
-                            }
-                        }
-                        placed
-                    }
-                    FoodKind::Green | FoodKind::Super => {
-                        // drop one unit as loose (spoiling) food
-                        let tile = (tx, ty);
-                        if !self.grid_of(layer).in_bounds(tx, ty)
-                            || chebyshev(self.ant_tile(ant), tile) > 1
-                            || self.cell_food(layer, tile) >= FOOD_CELL_CAP
-                        {
-                            return false;
-                        }
-                        self.spawn_unit_food(layer, tile, carrying.kind, Some(SPOIL_TIME));
-                        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                            q.amount = 0;
-                        }
-                        true
-                    }
+                if self.drop_in_range(ant, tx, ty) {
+                    return self.try_drop(ant, tx, ty);
                 }
+                // walk to the target and drop on arrival
+                self.set_job(ant, Job::Manual);
+                self.set_drop_after(ant, Some((tx, ty)));
+                if !self.route_for_drop(ant, tx, ty) {
+                    self.set_drop_after(ant, None);
+                    return false;
+                }
+                true
             }
             Command::PickEgg { ant, egg } => {
                 if !self.is_ant(ant) {
@@ -718,13 +638,13 @@ impl Sim {
                 let Some(&eent) = self.ids.get(&egg) else {
                     return false;
                 };
-                let (egg_carried, etile) = match self
+                let (egg_carried, etile, elayer) = match self
                     .ecs
                     .query_one::<(&Egg, &Pos)>(eent)
                     .unwrap()
                     .get()
                 {
-                    Some(q) => (q.0.carried_by, tile_of(q.1.p)),
+                    Some(q) => (q.0.carried_by, tile_of(q.1.p), q.1.layer),
                     None => return false,
                 };
                 let aent = self.ids[&ant];
@@ -733,8 +653,18 @@ impl Sim {
                     .get::<&Carrying>(aent)
                     .map(|c| c.amount == 0)
                     .unwrap_or(false);
-                if egg_carried.is_some() || !hands_free || chebyshev(self.ant_tile(ant), etile) > 1 {
+                if egg_carried.is_some() || !hands_free {
                     return false;
+                }
+                if chebyshev(self.ant_tile(ant), etile) > 1 {
+                    // walk to the egg and pick it up on arrival
+                    self.set_job(ant, Job::Manual);
+                    self.set_pick_after(ant, Some(egg));
+                    if !self.route(ant, elayer, etile) {
+                        self.set_pick_after(ant, None);
+                        return false;
+                    }
+                    return true;
                 }
                 if let Ok(mut q) = self.ecs.get::<&mut Egg>(eent) {
                     q.carried_by = Some(ant);
@@ -934,6 +864,8 @@ impl Sim {
     }
 
     /// Chebyshev distance from the ant's tile to the 2×2 block, tile-granular.
+    /// Diagonal-only contact is NOT enough: like pathfinding's no-corner-cut
+    /// rule, one of the two tiles flanking the corner must be open.
     fn block_adjacent(&self, ant: u32, bx: u32, by: u32) -> bool {
         let (tx, ty) = self.ant_tile(ant);
         let dx = if tx < bx {
@@ -950,7 +882,19 @@ impl Sim {
         } else {
             0
         };
-        dx.max(dy) <= 1
+        if dx.max(dy) > 1 {
+            return false;
+        }
+        if dx > 0 && dy > 0 {
+            // corner-to-corner: the block column/row nearest the ant plus the
+            // ant's own row/column form the two flanking tiles
+            let fx = if tx < bx { bx } else { bx + 1 };
+            let fy = if ty < by { by } else { by + 1 };
+            let open_x = self.world.underground.get(fx, ty) == EMPTY;
+            let open_y = self.world.underground.get(tx, fy) == EMPTY;
+            return open_x || open_y;
+        }
+        true
     }
 
     fn soil_at(&self, layer: Layer, x: u32, y: u32) -> u8 {
@@ -1006,6 +950,18 @@ impl Sim {
                 }
                 if !is_worker && kind != EMPTY {
                     continue;
+                }
+                // diagonal-only stands obey the no-corner-cut rule too
+                let diag = (x as i32 + 1 == bx as i32 || x as i32 == bx as i32 + 2)
+                    && (y as i32 + 1 == by as i32 || y as i32 == by as i32 + 2);
+                if diag {
+                    let fx = if x < bx { bx } else { bx + 1 };
+                    let fy = if y < by { by } else { by + 1 };
+                    let open = self.world.underground.get(fx, y) == EMPTY
+                        || self.world.underground.get(x, fy) == EMPTY;
+                    if !open {
+                        continue;
+                    }
                 }
                 let d = (x.max(at.0) - x.min(at.0)) + (y.max(at.1) - y.min(at.1));
                 cands.push(((x, y), d));
@@ -1093,6 +1049,8 @@ impl Sim {
                 pending: None,
                 attack_after: None,
                 dig_after: None,
+                drop_after: None,
+                pick_after: None,
             },
         ));
         self.ids.insert(id, ent);
@@ -1341,6 +1299,212 @@ impl Sim {
         best.map(|(_, _, fid)| fid)
     }
 
+    fn set_drop_after(&mut self, id: u32, target: Option<(u32, u32)>) {
+        if let Some(&ent) = self.ids.get(&id) {
+            if let Ok(mut q) = self.ecs.get::<&mut WorkerAi>(ent) {
+                q.drop_after = target;
+            }
+        }
+    }
+
+    fn set_pick_after(&mut self, id: u32, egg: Option<u32>) {
+        if let Some(&ent) = self.ids.get(&id) {
+            if let Ok(mut q) = self.ecs.get::<&mut WorkerAi>(ent) {
+                q.pick_after = egg;
+            }
+        }
+    }
+
+    /// True when the ant stands where this drop can happen right now.
+    fn drop_in_range(&self, ant: u32, tx: u32, ty: u32) -> bool {
+        let Some(&ent) = self.ids.get(&ant) else {
+            return false;
+        };
+        let (carrying, layer) = match self.ecs.query_one::<(&Carrying, &Pos)>(ent)
+            .unwrap()
+            .get()
+        {
+            Some(q) => (*q.0, q.1.layer),
+            None => return false,
+        };
+        if carrying.amount == 0 {
+            return false;
+        }
+        match carrying.kind {
+            FoodKind::Dirt => match layer {
+                Layer::Surface => true,
+                Layer::Underground => {
+                    let (bx, by) = block_of(tx, ty);
+                    self.block_in_bounds(bx, by)
+                        && self.block_empty(bx, by)
+                        && self.block_adjacent(ant, bx, by)
+                }
+            },
+            _ => chebyshev(self.ant_tile(ant), (tx, ty)) <= 1,
+        }
+    }
+
+    /// Route toward a drop target: dirt refills walk to the block, other
+    /// carried items walk to the tile itself.
+    fn route_for_drop(&mut self, ant: u32, tx: u32, ty: u32) -> bool {
+        let layer = self.ant_layer(ant);
+        let dirt = self
+            .ids
+            .get(&ant)
+            .and_then(|&e| self.ecs.get::<&Carrying>(e).ok())
+            .map(|c| c.kind == FoodKind::Dirt && c.amount > 0)
+            .unwrap_or(false);
+        if layer == Layer::Underground && dirt {
+            let (bx, by) = block_of(tx, ty);
+            self.route_to_block(ant, bx, by)
+        } else {
+            self.route(ant, layer, (tx, ty))
+        }
+    }
+
+    /// Attempt the drop right now (callers check drop_in_range first).
+    fn try_drop(&mut self, ant: u32, tx: u32, ty: u32) -> bool {
+        let ent = match self.ids.get(&ant) {
+            Some(&e) => e,
+            None => return false,
+        };
+        let (carrying, layer) = match self.ecs.query_one::<(&Carrying, &Pos)>(ent)
+            .unwrap()
+            .get()
+        {
+            Some(q) => (*q.0, q.1.layer),
+            None => return false,
+        };
+        if carrying.amount == 0 {
+            return false;
+        }
+        match carrying.kind {
+            FoodKind::Dirt => match layer {
+                Layer::Surface => {
+                    // dumped above ground: all carried dirt disappears
+                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+                        q.amount = 0;
+                    }
+                    true
+                }
+                Layer::Underground => {
+                    // dumped below: the dirt refills the fully-empty block
+                    let (bx, by) = block_of(tx, ty);
+                    if !self.block_in_bounds(bx, by)
+                        || !self.block_empty(bx, by)
+                        || !self.block_adjacent(ant, bx, by)
+                    {
+                        return false;
+                    }
+                    for dy in 0..2 {
+                        for dx in 0..2 {
+                            self.world.underground.set(bx + dx, by + dy, DIRT);
+                        }
+                    }
+                    // one dump fills one block per carried unit
+                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+                        q.amount = q.amount.saturating_sub(1);
+                    }
+                    true
+                }
+            },
+            FoodKind::Egg => {
+                // place the carried egg on the adjacent empty cell
+                let grid_kind = self.grid_of(layer).get(tx, ty);
+                if grid_kind != EMPTY || chebyshev(self.ant_tile(ant), (tx, ty)) > 1 {
+                    return false;
+                }
+                let mut placed = false;
+                for eid in self.egg_ids() {
+                    let eent = self.ids[&eid];
+                    let mine = self
+                        .ecs
+                        .get::<&Egg>(eent)
+                        .map(|q| q.carried_by == Some(ant))
+                        .unwrap_or(false);
+                    if !mine {
+                        continue;
+                    }
+                    if let Some(q) = self
+                        .ecs
+                        .query_one::<(&mut Egg, &mut Pos)>(eent)
+                        .unwrap()
+                        .get()
+                    {
+                        q.0.carried_by = None;
+                        q.1.p = tile_center(tx, ty);
+                        q.1.layer = layer;
+                    }
+                    placed = true;
+                    break;
+                }
+                if placed {
+                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+                        q.amount = 0;
+                    }
+                }
+                placed
+            }
+            FoodKind::Green | FoodKind::Super => {
+                // drop one unit as loose (spoiling) food
+                let tile = (tx, ty);
+                if !self.grid_of(layer).in_bounds(tx, ty)
+                    || chebyshev(self.ant_tile(ant), tile) > 1
+                    || self.cell_food(layer, tile) >= FOOD_CELL_CAP
+                {
+                    return false;
+                }
+                self.spawn_unit_food(layer, tile, carrying.kind, Some(SPOIL_TIME));
+                if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
+                    q.amount = 0;
+                }
+                true
+            }
+        }
+    }
+
+    fn carried_amount(&self, id: u32) -> u32 {
+        self.ids
+            .get(&id)
+            .and_then(|&e| self.ecs.get::<&Carrying>(e).ok())
+            .map(|c| c.amount)
+            .unwrap_or(0)
+    }
+
+    /// Pick up the remembered egg once adjacent; drop the intent if the egg
+    /// vanished or hands filled up meanwhile.
+    fn resolve_pick_after(&mut self, id: u32, eid: u32) {
+        let Some(&eent) = self.ids.get(&eid) else {
+            self.set_pick_after(id, None);
+            return;
+        };
+        let valid = self
+            .ecs
+            .query_one::<(&Egg, &Pos)>(eent)
+            .ok()
+            .and_then(|mut q| q.get().map(|q| (q.0.carried_by.is_none(), tile_of(q.1.p), q.1.layer)))
+            .map(|(free, tile, _)| {
+                free && self.carried_amount(id) == 0 && chebyshev(self.ant_tile(id), tile) <= 1
+            })
+            .unwrap_or(false);
+        if !valid {
+            if !self.ids.contains_key(&eid) || self.carried_amount(id) > 0 {
+                self.set_pick_after(id, None);
+            }
+            return;
+        }
+        let aent = self.ids[&id];
+        if let Ok(mut q) = self.ecs.get::<&mut Egg>(eent) {
+            q.carried_by = Some(id);
+        }
+        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
+            q.amount = 1;
+            q.kind = FoodKind::Egg;
+        }
+        self.set_pick_after(id, None);
+        self.set_job(id, Job::Manual);
+    }
+
     /// The egg this ant is carrying, if any.
     fn egg_carried_by(&self, ant: u32) -> Option<u32> {
         for eid in self.egg_ids() {
@@ -1400,7 +1564,7 @@ impl Sim {
                 Some(&e) => e,
                 None => continue,
             };
-            let (caste, pos, state, carrying, job, pending, retry, attack_after, dig_after) = {
+            let (caste, pos, state, carrying, job, pending, retry, attack_after, dig_after, drop_after, pick_after) = {
                 let mut qo = match self
                     .ecs
                     .query_one::<(&Ant, &Pos, &AntState, &Carrying, &WorkerAi)>(ent)
@@ -1422,6 +1586,8 @@ impl Sim {
                     q.4.retry,
                     q.4.attack_after,
                     q.4.dig_after,
+                    q.4.drop_after,
+                    q.4.pick_after,
                 )
             };
             // The queen is player-driven: she never takes forage/dig jobs and
@@ -1449,6 +1615,22 @@ impl Sim {
                         self.set_dig_after(id, None);
                         self.set_retry(id, 60);
                     }
+                    continue;
+                }
+                if let Some((tx, ty)) = drop_after {
+                    if self.carried_amount(id) == 0 {
+                        self.set_drop_after(id, None);
+                    } else if self.drop_in_range(id, tx, ty) {
+                        self.set_drop_after(id, None);
+                        self.try_drop(id, tx, ty);
+                    } else if !self.route_for_drop(id, tx, ty) {
+                        self.set_drop_after(id, None);
+                        self.set_retry(id, 60);
+                    }
+                    continue;
+                }
+                if let Some(eid) = pick_after {
+                    self.resolve_pick_after(id, eid);
                     continue;
                 }
                 if let Some(tid) = attack_after {
@@ -1536,6 +1718,23 @@ impl Sim {
                     self.set_dig_after(id, None);
                     self.set_retry(id, 60);
                 }
+                continue;
+            }
+            // walk-to-drop / walk-to-pick intents resolve on arrival
+            if let Some((tx, ty)) = drop_after {
+                if self.carried_amount(id) == 0 {
+                    self.set_drop_after(id, None);
+                } else if self.drop_in_range(id, tx, ty) {
+                    self.set_drop_after(id, None);
+                    self.try_drop(id, tx, ty);
+                } else if !self.route_for_drop(id, tx, ty) {
+                    self.set_drop_after(id, None);
+                    self.set_retry(id, 60);
+                }
+                continue;
+            }
+            if let Some(eid) = pick_after {
+                self.resolve_pick_after(id, eid);
                 continue;
             }
             match job {
