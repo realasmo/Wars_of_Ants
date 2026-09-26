@@ -86,9 +86,10 @@ impl Sim {
                 let Some(&tent) = self.ids.get(&target) else {
                     return false;
                 };
-                let attackable =
-                    self.ecs.get::<&Predator>(tent).is_ok() || self.ecs.get::<&Ant>(tent).is_ok();
-                if !attackable {
+                // no friendly fire: only predators are valid targets (enemy
+                // colony ants join the valid set in Phase 4). Dev kill covers
+                // removing your own units.
+                if self.ecs.get::<&Predator>(tent).is_err() {
                     return false;
                 }
                 self.set_job(ant, Job::Manual);

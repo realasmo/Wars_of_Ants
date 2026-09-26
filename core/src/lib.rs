@@ -7,7 +7,7 @@ mod sim;
 mod world;
 
 pub use balance::{SourceSpec, UnitStats, SOURCES};
-pub use components::{AntState, Carry, Caste, FoodKind, Layer};
+pub use components::{AntState, Carry, Caste, FoodKind, Layer, WorkerAi};
 pub use sim::{
     snapshot_spec, Activity, AntSnap, Colony, Command, Config, DevSpawn, EggSnap, EntitySnap,
     FoodRole, FoodSnap, Phase, Sim, SpiderSnap, Team, DT, TPS,

@@ -51,7 +51,13 @@ impl Sim {
             // never auto-picks-up food — only Attack orders and walk-to-dig
             // intents move her.
             if caste == Caste::Queen {
-                if !matches!(state, AntState::Idle) || retry > 0 {
+                if !matches!(state, AntState::Idle) {
+                    continue;
+                }
+                // the queen shares the worker backoff: decrement it, or any
+                // set_retry would freeze her walk-to-act intents forever
+                if retry > 0 {
+                    self.set_retry(id, retry - 1);
                     continue;
                 }
                 if land_after {
@@ -109,6 +115,10 @@ impl Sim {
                     continue;
                 }
                 if let Some(tid) = attack_after {
+                    // same semantics as the worker branch: a successful route
+                    // KEEPS the intent — the order re-resolves (and engages)
+                    // when the walk arrives. Clearing here made the queen
+                    // surface, stand where the spider used to be, and die.
                     let ok = self
                         .ids
                         .get(&tid)
@@ -119,7 +129,7 @@ impl Sim {
                                 .map(|q| (q.layer, tile_of(q.p)))
                         })
                         .map(|(tlayer, ttile)| {
-                            if let (Layer::Surface, Layer::Surface) = (tlayer, pos.layer) {
+                            if tlayer == pos.layer {
                                 self.set_state(id, AntState::Fighting { target: tid });
                                 true
                             } else {
@@ -127,9 +137,8 @@ impl Sim {
                             }
                         })
                         .unwrap_or(true);
-                    if ok {
+                    if !ok {
                         self.set_attack_after(id, None);
-                    } else {
                         self.set_retry(id, 60);
                     }
                 }
@@ -150,9 +159,12 @@ impl Sim {
                         .map(|q| (q.layer, tile_of(q.p)))
                 });
                 match tinfo {
-                    Some((Layer::Surface, _ttile)) if pos.layer == Layer::Surface => {
+                    // same-layer: engage now. attack_after deliberately stays
+                    // set — combat() may re-route the chase (underground) and
+                    // the intent re-resolves on arrival; it clears when the
+                    // target dies or the route backs off.
+                    Some((tlayer, _ttile)) if tlayer == pos.layer => {
                         self.set_pending(id, None);
-                        self.set_attack_after(id, None);
                         self.set_state(id, AntState::Fighting { target: tid });
                     }
                     Some((tlayer, ttile)) => {

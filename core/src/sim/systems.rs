@@ -263,6 +263,17 @@ impl Sim {
             let d = tpos.p - new_pos.p;
             let dist = d.len();
             if dist > ANT_RANGE {
+                if pos.layer == Layer::Underground {
+                    // below ground a straight line would glide through dirt
+                    // and rock: route instead. The Fighting state ends here;
+                    // attack_after re-engages when the walk arrives.
+                    if !self.route(id, pos.layer, tile_of(tpos.p)) {
+                        self.set_state(id, AntState::Idle);
+                        self.set_attack_after(id, None);
+                        self.set_retry(id, 60);
+                    }
+                    continue;
+                }
                 let step = speed * DT;
                 if dist > step {
                     new_pos.p = new_pos.p + d * (step / dist);
