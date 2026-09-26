@@ -8,11 +8,13 @@ mod ai;
 mod commands;
 mod food;
 mod geom;
-mod snapshot;
+pub(crate) mod snapshot;
 mod systems;
 mod worldgen;
 
-pub use snapshot::EntitySnap;
+pub use snapshot::{
+    snapshot_spec, Activity, AntSnap, EggSnap, EntitySnap, FoodRole, FoodSnap, SpiderSnap,
+};
 
 use std::collections::BTreeMap;
 

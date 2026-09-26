@@ -23,6 +23,12 @@ impl Rng {
         self.next_u32() as f64 / (u32::MAX as f64 + 1.0)
     }
 
+    /// Internal state pair — for the canonical full-state digest (the RNG
+    /// steers the future, so it belongs in there).
+    pub fn state_pair(&self) -> (u64, u64) {
+        (self.state, self.inc)
+    }
+
     pub fn range(&mut self, lo: f64, hi: f64) -> f64 {
         lo + self.f64() * (hi - lo)
     }

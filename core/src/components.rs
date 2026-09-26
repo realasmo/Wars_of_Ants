@@ -25,15 +25,13 @@ pub enum Caste {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FoodKind {
     /// Legacy founded worlds only (test economy).
-    Green = 0,
+    Green,
     /// Legacy founded worlds only (spider drops there).
-    Super = 1,
+    Super,
     /// Resource economy: units and sources are one of these three.
-    /// (2 and 3 were the carried-item codes Dirt/Egg before `Carry` existed;
-    /// retired, never reused.)
-    Protein = 4,
-    Carbs = 5,
-    Water = 6,
+    Protein,
+    Carbs,
+    Water,
 }
 
 /// What an ant carries. A sum type instead of `{amount, kind}` so an empty

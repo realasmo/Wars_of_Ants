@@ -7,8 +7,11 @@ mod sim;
 mod world;
 
 pub use balance::{SourceSpec, UnitStats, SOURCES};
-pub use components::{AntState, Caste, Layer};
-pub use sim::{Colony, Command, Config, DevSpawn, EntitySnap, Phase, Sim, Team, DT, TPS};
+pub use components::{AntState, Carry, Caste, FoodKind, Layer};
+pub use sim::{
+    snapshot_spec, Activity, AntSnap, Colony, Command, Config, DevSpawn, EggSnap, EntitySnap,
+    FoodRole, FoodSnap, Phase, Sim, SpiderSnap, Team, DT, TPS,
+};
 pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK};
 
 use wasm_bindgen::prelude::*;
@@ -209,26 +212,142 @@ impl WoaSim {
         self.inner.world.soil_surface.clone()
     }
 
+    /// Flat snapshot transport: `[tick, dead, carbs, count]` header, then
+    /// stride-10 records `[id, kind, layer, x, y, p0..p4]`. The positional
+    /// codes are single-sourced in `sim::snapshot` and exported through
+    /// `snapshot_spec()` — the client asserts its decoder against that spec
+    /// at boot. Layout version 1 (see spec).
     pub fn snapshot(&self) -> Vec<f64> {
+        use sim::snapshot as wire; // the wire-code module (crate-private)
         let snaps = self.inner.snapshot();
-        let mut v = Vec::with_capacity(4 + snaps.len() * 9);
+        let mut v = Vec::with_capacity(4 + snaps.len() * 10);
         v.push(self.inner.tick as f64);
         v.push(self.inner.colony.dead as u8 as f64);
         v.push(self.inner.colony.carbs as f64);
         v.push(snaps.len() as f64);
-        for s in snaps {
+        let mut rec = |id: u32, kind: u8, layer: u8, x: f64, y: f64, p: [f64; 5]| {
             v.extend([
-                s.id as f64,
-                s.kind as f64,
-                s.layer as f64,
-                s.x,
-                s.y,
-                s.state as f64,
-                s.extra,
-                s.hp,
-                s.aux,
+                id as f64,
+                kind as f64,
+                layer as f64,
+                x,
+                y,
+                p[0],
+                p[1],
+                p[2],
+                p[3],
+                p[4],
             ]);
+        };
+        for s in snaps {
+            match s {
+                EntitySnap::Ant(a) => {
+                    let kind = match a.caste {
+                        Caste::Queen => wire::KIND_QUEEN,
+                        Caste::Worker => wire::KIND_WORKER,
+                        Caste::Soldier => wire::KIND_SOLDIER,
+                    };
+                    let act = match a.activity {
+                        Activity::Idle => wire::ACT_IDLE,
+                        Activity::Moving => wire::ACT_MOVING,
+                        Activity::Digging => wire::ACT_DIGGING,
+                        Activity::Fighting => wire::ACT_FIGHTING,
+                        Activity::Flying => wire::ACT_FLYING,
+                    };
+                    let (tag, data) = match a.carry {
+                        Carry::None => (wire::CARRY_NONE, 0.0),
+                        Carry::Dirt { blocks } => (wire::CARRY_DIRT, blocks as f64),
+                        Carry::Egg => (wire::CARRY_EGG, 0.0),
+                        Carry::Food(f) => (wire::CARRY_FOOD, wire::food_code(f) as f64),
+                    };
+                    rec(
+                        a.id,
+                        kind,
+                        a.layer as u8,
+                        a.x,
+                        a.y,
+                        [
+                            act as f64,
+                            a.hp,
+                            tag as f64,
+                            data,
+                            a.hunger,
+                        ],
+                    );
+                }
+                EntitySnap::Food(f) => match f.role {
+                    FoodRole::Source { src } => rec(
+                        f.id,
+                        wire::KIND_SOURCE,
+                        f.layer as u8,
+                        f.x,
+                        f.y,
+                        [
+                            f.amount as f64,
+                            wire::food_code(f.kind) as f64,
+                            src as f64,
+                            0.0,
+                            0.0,
+                        ],
+                    ),
+                    role => {
+                        // Loose dropped unit (p2 = remaining spoil fraction,
+                        // -1 = not spoiling) or banked pantry pile (p2 = -1).
+                        let spoil = match role {
+                            FoodRole::Loose { spoil } => spoil.unwrap_or(-1.0),
+                            _ => -1.0,
+                        };
+                        rec(
+                            f.id,
+                            wire::KIND_FOOD,
+                            f.layer as u8,
+                            f.x,
+                            f.y,
+                            [
+                                f.amount as f64,
+                                wire::food_code(f.kind) as f64,
+                                spoil,
+                                0.0,
+                                0.0,
+                            ],
+                        );
+                    }
+                },
+                EntitySnap::Egg(e) => rec(
+                    e.id,
+                    wire::KIND_EGG,
+                    e.layer as u8,
+                    e.x,
+                    e.y,
+                    [
+                        e.hatch_left,
+                        if e.caste == Caste::Soldier { 1.0 } else { 0.0 },
+                        if e.carried { 1.0 } else { 0.0 },
+                        0.0,
+                        0.0,
+                    ],
+                ),
+                EntitySnap::Spider(p) => rec(
+                    p.id,
+                    wire::KIND_SPIDER,
+                    p.layer as u8,
+                    p.x,
+                    p.y,
+                    [
+                        p.hp,
+                        if p.hunting { 1.0 } else { 0.0 },
+                        0.0,
+                        0.0,
+                        0.0,
+                    ],
+                ),
+            }
         }
         v
+    }
+
+    /// Wire-code spec for the client's boot-time decoder assertion.
+    pub fn snapshot_spec() -> String {
+        sim::snapshot_spec()
     }
 }
