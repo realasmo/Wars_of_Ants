@@ -554,17 +554,22 @@ export class Game {
         this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
         return;
       }
-      // carrying something → place/drop it (egg, dirt, food)
-      if (me !== undefined && me.aux > 1.5) {
-        if (me.aux >= 2.5) {
-          // egg: place on the empty target cell — the ant walks there first
+      // carrying something → place/drop it (egg, dirt, resources)
+      // aux codes: 2 dirt, 3 egg, 4 protein, 5 carbs, 6 water — resource
+      // units (4–6) are NOT placements, they take the drop branch below
+      if (me !== undefined && me.aux >= 2.5 && me.aux < 3.5) {
+        // egg: place on the empty target cell — the ant walks there first
+        {
           const kind = this.sim.tileAt(me.layer, tx, ty);
           if (kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
             this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'egg' });
             this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
             return;
           }
-        } else if (me.layer === 1) {
+        }
+      }
+      if (me !== undefined && me.aux > 1.5 && me.aux < 2.5) {
+        if (me.layer === 1) {
           // dirt: fill the fully-empty adjacent 2×2 block — but never the
           // entrance hole: clicking near it while hauling means "carry it out"
           const ent0 = this.sim.entrance;
@@ -591,10 +596,17 @@ export class Game {
           return;
         }
         // invalid placement → fall through (walk / entrance / dig-refused)
-      } else if (me !== undefined && me.extra > 0.5 && me.kind !== 0) {
-        // food: drop one unit on the empty target cell (spoils off silver)
+      }
+      if (me !== undefined && me.extra > 0.5 && me.kind !== 0 && me.aux < 2.5) {
+        // resource unit: drop it on the empty target cell (spoils off
+        // silver) — but clicking the nest hole while hauling means "bring it
+        // home": skip so the entrance crossing below takes it
+        const entR = this.sim.entrance;
+        const nearHole =
+          entR !== null &&
+          Math.max(Math.abs(tx - (entR[0] + 1)), Math.abs(ty - (entR[1] + 1))) <= 2;
         const kind = this.sim.tileAt(me.layer, tx, ty);
-        if (kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
+        if (!nearHole && kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
           this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'food' });
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
