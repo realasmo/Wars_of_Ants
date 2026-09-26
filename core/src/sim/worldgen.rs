@@ -145,12 +145,15 @@ impl Sim {
             },
             config,
             tick: 0,
-            events: Vec::new(),
+            events: std::collections::VecDeque::new(),
             event_total: 0,
             patches,
             ids: std::collections::BTreeMap::new(),
             next_id: 0,
             dug_tiles: 0,
+            food_tiles: std::collections::BTreeMap::new(),
+            tiles_epoch: 1,
+            soil_epoch: 1,
         };
 
         let (queen_id, anchor) = if founding {

@@ -103,6 +103,7 @@ impl Sim {
     }
 
     pub(crate) fn set_soil_block(&mut self, layer: Layer, bx: u32, by: u32, soil: u8) {
+        self.soil_epoch += 1;
         let w = self.config.width;
         let v = match layer {
             Layer::Surface => &mut self.world.soil_surface,

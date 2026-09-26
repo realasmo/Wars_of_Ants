@@ -238,6 +238,7 @@ impl Sim {
                 self.world.underground.set(cx, cy, EMPTY);
             }
         }
+        self.tiles_epoch += 1;
         self.dug_tiles += carved;
         self.world.entrance = Some((bx, by));
         let qent = self.ids[&ant];
@@ -490,6 +491,7 @@ impl Sim {
                             self.world.underground.set(bx + dx, by + dy, crate::world::DIRT);
                         }
                     }
+                    self.tiles_epoch += 1;
                     if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
                         *q = if blocks > 1 {
                             Carry::Dirt { blocks: blocks - 1 }

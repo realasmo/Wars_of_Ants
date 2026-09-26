@@ -176,6 +176,7 @@ impl Sim {
                         self.world.underground.set(tx + dx, ty + dy, EMPTY);
                     }
                 }
+                self.tiles_epoch += 1;
                 self.dug_tiles += 4;
                 // the founding queen carries excavated dirt out (up to
                 // DIRT_CAPACITY blocks before dumping); workers' spoil

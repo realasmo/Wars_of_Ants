@@ -10,17 +10,19 @@ use crate::world::{tile_center, EMPTY};
 use hecs::Entity;
 
 impl Sim {
+    fn food_on(&self, layer: Layer, tile: (u32, u32)) -> Vec<u32> {
+        self.food_tiles
+            .get(&(layer as u8, tile.0, tile.1))
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
     /// Total loose+stored food units on a cell (any kind).
     pub(crate) fn cell_food(&self, layer: Layer, tile: (u32, u32)) -> u32 {
         let mut total = 0;
-        for &fid in &self.food_ids() {
+        for fid in self.food_on(layer, tile) {
             let ent = self.ids[&fid];
-            let Ok(fp) = self.ecs.get::<&Pos>(ent) else {
-                continue;
-            };
-            if fp.layer == layer && tile_of(fp.p) == tile {
-                total += self.ecs.get::<&Food>(ent).map(|f| f.amount).unwrap_or(0);
-            }
+            total += self.ecs.get::<&Food>(ent).map(|f| f.amount).unwrap_or(0);
         }
         total
     }
@@ -51,6 +53,10 @@ impl Sim {
             },
         ));
         self.ids.insert(id, ent);
+        self.food_tiles
+            .entry((layer as u8, tile.0, tile.1))
+            .or_default()
+            .insert(id);
         id
     }
 
@@ -88,6 +94,7 @@ impl Sim {
     /// A finite map source (harvest takes time, despawns when depleted).
     pub(crate) fn spawn_source(&mut self, p: Vec2, spec: &SourceSpec, amount: u32) -> u32 {
         let id = self.fresh_id();
+        let tile = tile_of(p);
         let ent = self.ecs.spawn((
             Food {
                 amount,
@@ -104,6 +111,12 @@ impl Sim {
             },
         ));
         self.ids.insert(id, ent);
+        // sources are food for every tile-indexed lookup (cell caps, manual
+        // pickup) — forgetting this silently broke standing harvests once
+        self.food_tiles
+            .entry((Layer::Surface as u8, tile.0, tile.1))
+            .or_default()
+            .insert(id);
         id
     }
 
@@ -115,14 +128,8 @@ impl Sim {
         kind: FoodKind,
         spoil: Option<f64>,
     ) {
-        for fid in self.food_ids() {
+        for fid in self.food_on(layer, tile) {
             let ent = self.ids[&fid];
-            let Ok(fp) = self.ecs.get::<&Pos>(ent) else {
-                continue;
-            };
-            if fp.layer != layer || tile_of(fp.p) != tile {
-                continue;
-            }
             let room = self
                 .ecs
                 .get::<&Food>(ent)
@@ -167,18 +174,11 @@ impl Sim {
         self.ev(format!("ant #{ant} banked 1 {rname} at ({},{})", tile.0, tile.1));
         self.spawn_unit_food(Layer::Underground, tile, kind, None);
         // pantry piles never spoil and are not forage targets
-        for fid in self.food_ids() {
+        for fid in self.food_on(Layer::Underground, tile) {
             let fent = self.ids[&fid];
-            let on_tile = self
-                .ecs
-                .get::<&Pos>(fent)
-                .map(|p| p.layer == Layer::Underground && tile_of(p.p) == tile)
-                .unwrap_or(false);
-            if on_tile {
-                if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
-                    q.stored = true;
-                    q.spoil = None;
-                }
+            if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
+                q.stored = true;
+                q.spoil = None;
             }
         }
         if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
@@ -220,17 +220,10 @@ impl Sim {
         }
     }
 
+    /// First food entity on a surface tile (the manual pickup path is
+    /// surface-only; the old scan was layer-blind by accident).
     pub(crate) fn food_on_tile(&self, tile: (u32, u32)) -> Option<u32> {
-        for &fid in &self.food_ids() {
-            let ent = self.ids[&fid];
-            let Ok(fp) = self.ecs.get::<&Pos>(ent) else {
-                continue;
-            };
-            if tile_of(fp.p) == tile {
-                return Some(fid);
-            }
-        }
-        None
+        self.food_on(Layer::Surface, tile).first().copied()
     }
 
     pub(crate) fn food_info(&self, fid: u32) -> Option<((u32, u32), u32)> {

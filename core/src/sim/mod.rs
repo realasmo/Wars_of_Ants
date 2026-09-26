@@ -16,7 +16,7 @@ pub use snapshot::{
     snapshot_spec, Activity, AntSnap, EggSnap, EntitySnap, FoodRole, FoodSnap, SpiderSnap,
 };
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::balance::*;
 use crate::components::*;
@@ -178,7 +178,7 @@ pub struct Sim {
     pub config: Config,
     pub tick: u64,
     /// Capped sim-side event log: everything the game did, newest last.
-    pub events: Vec<String>,
+    pub events: VecDeque<String>,
     /// Total events ever emitted (retained = events.len()).
     pub event_total: u64,
     /// Surface dust patches (founding mode): founding inside one grants its
@@ -187,6 +187,16 @@ pub struct Sim {
     pub(crate) ids: BTreeMap<u32, hecs::Entity>,
     pub(crate) next_id: u32,
     pub(crate) dug_tiles: u32,
+    /// Food entities by (layer, tile) — they never move, so this index turns
+    /// the per-tile pantry/cap scans from O(all food) into O(food on tile).
+    /// BTree everywhere: iteration order is deterministic.
+    pub(crate) food_tiles: BTreeMap<(u8, u32, u32), BTreeSet<u32>>,
+    /// Bumped by every tile mutation (dig, carve, refill). Lets the client
+    /// skip the per-tick grid re-pull — the same lever the Phase-4 network
+    /// protocol will pull.
+    pub tiles_epoch: u64,
+    /// Bumped by every soil mutation (worldgen grants, dev painting).
+    pub soil_epoch: u64,
 }
 
 impl Sim {
@@ -208,15 +218,15 @@ impl Sim {
     /// part of sim state, replays, or canonical output.
     pub(crate) fn ev(&mut self, text: String) {
         if self.events.len() >= EVENT_CAP {
-            self.events.remove(0);
+            self.events.pop_front();
         }
-        self.events.push(format!("[{}] {}", self.tick, text));
+        self.events.push_back(format!("[{}] {}", self.tick, text));
         self.event_total += 1;
     }
 
     /// Retained events, oldest first (capped at EVENT_CAP).
-    pub fn event_lines(&self) -> &[String] {
-        &self.events
+    pub fn event_lines(&self) -> Vec<String> {
+        self.events.iter().cloned().collect()
     }
 
     pub fn event_total(&self) -> u64 {
@@ -407,6 +417,18 @@ impl Sim {
     pub(crate) fn kill_cause(&mut self, id: u32, cause: &str) {
         if let Some(ent) = self.ids.remove(&id) {
             let was_ant = self.ecs.get::<&Ant>(ent).is_ok();
+            if let (Ok(pos), true) = (
+                self.ecs.get::<&Pos>(ent),
+                self.ecs.get::<&Food>(ent).is_ok(),
+            ) {
+                let key = (pos.layer as u8, pos.p.x.floor() as u32, pos.p.y.floor() as u32);
+                if let Some(set) = self.food_tiles.get_mut(&key) {
+                    set.remove(&id);
+                    if set.is_empty() {
+                        self.food_tiles.remove(&key);
+                    }
+                }
+            }
             let _ = self.ecs.despawn(ent);
             if was_ant {
                 self.colony.ant_count -= 1;

@@ -350,4 +350,14 @@ impl WoaSim {
     pub fn snapshot_spec() -> String {
         sim::snapshot_spec()
     }
+
+    /// Bumped by every tile mutation — re-pull the grids only when it moves.
+    pub fn tiles_epoch(&self) -> u64 {
+        self.inner.tiles_epoch
+    }
+
+    /// Bumped by every soil mutation (grants, dev painting).
+    pub fn soil_epoch(&self) -> u64 {
+        self.inner.soil_epoch
+    }
 }
