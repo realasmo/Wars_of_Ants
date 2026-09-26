@@ -29,10 +29,18 @@ body {
   z-index: 10;
 }
 
-#panel {
+/* left HUD column: colony panel on top, perf overlay (F3) directly under it */
+#left {
   position: absolute;
   top: 12px;
   left: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+#panel {
   background: rgba(15, 13, 10, 0.82);
   border: 1px solid #3d342a;
   border-radius: 8px;
@@ -145,9 +153,6 @@ body {
 }
 
 #perf {
-  position: absolute;
-  bottom: 10px;
-  left: 12px;
   background: rgba(15, 13, 10, 0.82);
   border: 1px solid #3d342a;
   border-radius: 8px;

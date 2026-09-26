@@ -9,16 +9,19 @@
   <body>
     <div id="app"></div>
     <div id="hud">
-      <div id="panel">
-        <div class="row"><span>Colony</span><span id="stat-time">0:00</span></div>
-        <div class="row"><span>Food store</span><span id="stat-food">0</span></div>
-        <div class="row"><span>Super food</span><span id="stat-super">0</span></div>
-        <div class="row"><span>Ants</span><span id="stat-ants">0</span></div>
-        <div class="row"><span>Eggs</span><span id="stat-eggs">0</span></div>
-        <div class="row"><span>Tiles dug</span><span id="stat-dug">0</span></div>
-        <hr />
-        <div class="row"><span>Controlling</span><span id="ctrl-ant">—</span></div>
-        <div class="row"><span>View [Tab]</span><span id="ctrl-layer">Underground</span></div>
+      <div id="left">
+        <div id="panel">
+          <div class="row"><span>Colony</span><span id="stat-time">0:00</span></div>
+          <div class="row"><span>Food store</span><span id="stat-food">0</span></div>
+          <div class="row"><span>Super food</span><span id="stat-super">0</span></div>
+          <div class="row"><span>Ants</span><span id="stat-ants">0</span></div>
+          <div class="row"><span>Eggs</span><span id="stat-eggs">0</span></div>
+          <div class="row"><span>Tiles dug</span><span id="stat-dug">0</span></div>
+          <hr />
+          <div class="row"><span>Controlling</span><span id="ctrl-ant">—</span></div>
+          <div class="row"><span>View [Tab]</span><span id="ctrl-layer">Underground</span></div>
+        </div>
+        <div id="perf" class="hidden"></div>
       </div>
       <div id="help">
         <b>Hold left button</b>: your ant follows the cursor &nbsp;·&nbsp; <b>Left-click an
@@ -38,7 +41,6 @@
     </div>
     <pre id="inputlog" hidden></pre>
     <div id="replay-badge" class="hidden">REPLAY</div>
-    <div id="perf" class="hidden"></div>
     <div id="devpanel" class="hidden">
       <div class="dev-title">DEV (F2)</div>
       <div class="dev-hint">pick an entity, then click the map</div>
