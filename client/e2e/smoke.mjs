@@ -185,19 +185,28 @@ try {
   if (s.eggs !== 4) failures.push(`expected 4 founding eggs, got ${s.eggs}`);
   await page.evaluate(() => window.__woa.step(3700));
   s = await state();
-  if (s.phase !== 3 || s.workers !== 0) {
+  // the starter chamber may carve through NATURAL orange soil (~17% of
+  // seeds) — then the eggs hatch without any painting, by design
+  const naturalOrange = s.phase === 4;
+  if (!naturalOrange && (s.phase !== 3 || s.workers !== 0)) {
     failures.push(`eggs hatched without orange soil (phase ${s.phase}, workers ${s.workers})`);
   }
-  // paint orange under the queen only: some eggs hatch, the rest wait —
-  // leaving eggs for the transport round-trip below
-  const q0 = s.queen;
-  await page.evaluate((p) => window.__woa.setsoil(1, Math.floor(p.x), Math.floor(p.y), 1), { x: q0.x, y: q0.y });
-  await page.evaluate(() => window.__woa.step(80));
+  if (!naturalOrange) {
+    // paint orange under the queen only: some eggs hatch, the rest wait —
+    // leaving eggs for the transport round-trip below
+    const q0 = s.queen;
+    await page.evaluate((p) => window.__woa.setsoil(1, Math.floor(p.x), Math.floor(p.y), 1), { x: q0.x, y: q0.y });
+  }
+  if (!naturalOrange) await page.evaluate(() => window.__woa.step(80));
   s = await dump('s04-colony');
   await shot('s04-colony');
-  console.log('colony:', JSON.stringify({ phase: s.phase, workers: s.workers, dead: s.dead }));
+  console.log('colony:', JSON.stringify({ phase: s.phase, workers: s.workers, dead: s.dead, naturalOrange }));
   if (s.phase !== 4) failures.push(`hatching on orange did not start the colony phase (${s.phase})`);
   if (s.workers < 1) failures.push(`no egg hatched on orange soil (workers ${s.workers})`);
+  // stock carbs: the fight + late windows check combat and stability, not
+  // foraging luck — sparse-source survival is a balance question, not a
+  // regression signal
+  await page.evaluate(() => window.__woa.setfood(200));
   // egg transport round-trip with one of the remaining eggs
   const eggState = await state();
   if (eggState.eggs > 0) {

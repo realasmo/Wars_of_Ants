@@ -235,8 +235,12 @@ impl Sim {
         let mut soil_underground = vec![SOIL_NONE as u8; (w * h) as usize];
         let mut patches: Vec<Patch> = Vec::new();
         if founding {
-            for by in (1..h - 2).step_by(2) {
-                for bx in (1..w - 2).step_by(2) {
+            // IMPORTANT: soil blocks must align with the dig grid (even
+            // origins, x & !1) — a half-offset soil block straddles two dig
+            // blocks and looks/tunnels wrong (reported: orange half under
+            // dirt, neighbor undiggable behind its rock cells)
+            for by in (2..h - 3).step_by(2) {
+                for bx in (2..w - 3).step_by(2) {
                     let r = rng.f64();
                     let soil = if r < ORANGE_SOIL_CHANCE {
                         SOIL_ORANGE

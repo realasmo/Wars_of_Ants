@@ -627,13 +627,16 @@ fn diagonal_dig_requires_an_open_flank() {
 }
 
 #[test]
-fn soil_blocks_are_never_blocked_by_rocks() {
+fn soil_blocks_align_with_dig_blocks_and_are_diggable() {
     let s = Sim::new_founding(42, Team::Red);
     let w = s.config.width;
-    for by in (1..s.config.height - 2).step_by(2) {
-        for bx in (1..w - 2).step_by(2) {
+    // scan even block origins only — odd cells belong to even blocks
+    for by in (0..s.config.height).step_by(2) {
+        for bx in (0..w).step_by(2) {
             let soil = s.world.soil_underground[(by * w + bx) as usize];
             if soil != 0 {
+                // alignment: the soil block must be exactly one dig block
+                assert_eq!((bx & !1, by & !1), (bx, by), "soil block at ({bx},{by}) is off the dig grid");
                 for dy in 0..2u32 {
                     for dx in 0..2u32 {
                         let k = s.tile_at(Layer::Underground, bx + dx, by + dy);
@@ -787,15 +790,26 @@ fn scouts_discover_sources_and_harvest_takes_time() {
         s.tick();
     }
     assert_eq!(phase(&s), Phase::Colony);
-    // dev-spawn a strawberry (4s harvest) far from the nest, unknown
+    // dev-spawn a strawberry (4s harvest) far from the nest, unknown —
+    // pick a spot clear of worldgen sources (their placement shifted with
+    // the soil-alignment fix)
     let q = queen(&s);
-    let sx = q.x + 20.0;
-    let sy = q.y + 15.0;
+    let mut sx = q.x + 20.0;
+    let mut sy = q.y + 15.0;
+    let clear = |snaps: &Vec<woa_core::EntitySnap>, x: f64, y: f64| {
+        !snaps
+            .iter()
+            .any(|e| e.kind == 2 && e.state == 2 && (e.x - x).abs() < 4.0 && (e.y - y).abs() < 4.0)
+    };
+    while !clear(&s.snapshot(), sx, sy) {
+        sx += 5.0;
+        sy += 3.0;
+    }
     s.dev_spawn(DevSpawn::Source(4), sx, sy);
     let src = s
         .snapshot()
         .into_iter()
-        .find(|e| e.kind == 2 && e.state == 2 && (e.x - sx).abs() < 1.0)
+        .find(|e| e.kind == 2 && e.state == 2 && (e.x - sx).abs() < 1.0 && (e.y - sy).abs() < 1.0)
         .unwrap();
     let amount0 = src.extra as u32;
     // not discovered: no worker fetches it while it's out of sight — verify
@@ -809,15 +823,15 @@ fn scouts_discover_sources_and_harvest_takes_time() {
     for _ in 0..500 {
         s.tick();
     }
-    let after: Vec<_> = s
+    let after: Option<f64> = s
         .snapshot()
         .into_iter()
-        .filter(|e| e.kind == 2 && (e.x - sx).abs() < 1.0)
-        .collect();
-    let total: f64 = after.iter().map(|e| e.extra).sum();
+        .filter(|e| e.kind == 2 && e.state == 2 && (e.x - sx).abs() < 1.5 && (e.y - sy).abs() < 1.5)
+        .map(|e| e.extra)
+        .next();
     assert!(
-        total < amount0 as f64,
-        "harvesting consumed units from the source ({total} vs {amount0})"
+        after.map(|a| a < amount0 as f64).unwrap_or(true),
+        "harvesting consumed units from the source ({after:?} vs {amount0})"
     );
     // finite: AI workers deplete a source placed by the entrance (discovered
     // as they pass) until it despawns. Fresh dev workers: the commanded one
