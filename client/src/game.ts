@@ -1,7 +1,7 @@
 import { Renderer } from './render';
 import { Input } from './input';
 import { Hud } from './hud';
-import { Sim, TPS } from './sim';
+import { Sim, TPS, lerpPos } from './sim';
 import type { Snap } from './sim';
 import { InputLog, r2 } from './inputlog';
 import { coreVersion } from './wasm';
@@ -432,7 +432,11 @@ export class Game {
           this.log.push({ type: 'cmd', act: 'move', ant, x: r2(this.steerTarget.x), y: r2(this.steerTarget.y), note: 'steer' });
           this.sim.move(ant, this.steerTarget.x, this.steerTarget.y);
         }
-        this.renderer.centerOn(me.x, me.y);
+        // camera tracks the same interpolated position the sprite is drawn at —
+        // centering on the raw tick snapshot judders at sim rate (20 Hz)
+        const p = this.sim.prev.get(ant) ?? me;
+        const pos = lerpPos(p, me, Math.min(1, this.acc * TPS));
+        this.renderer.centerOn(pos.x, pos.y);
       }
       if (++this.hudCounter >= 5) {
         this.hudCounter = 0;

@@ -1,5 +1,6 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import type { Sim, Snap } from './sim';
+import { lerpPos } from './sim';
 
 const SURFACE_COLORS: Record<number, number> = {
   0: 0x4a6741,
@@ -288,8 +289,8 @@ export class Renderer {
         e.t.text = label;
       }
       const p = this.sim.prev.get(s.id) ?? s;
-      const t = Math.min(1, Math.max(0, alpha));
-      e.c.position.set(p.x + (s.x - p.x) * t, p.y + (s.y - p.y) * t);
+      const pos = lerpPos(p, s, Math.min(1, Math.max(0, alpha)));
+      e.c.position.set(pos.x, pos.y);
       e.c.visible = s.layer === layer;
       if (s.kind === 1 && s.state === 2) {
         e.g.rotation = Math.sin(s.x * 7 + s.y * 3) * 0.4;
@@ -302,9 +303,9 @@ export class Renderer {
       const s = this.sim.cur.get(playerAnt);
       if (s && s.layer === this.activeLayer) {
         const p = this.sim.prev.get(playerAnt) ?? s;
-        const t = Math.min(1, Math.max(0, alpha));
+        const pos = lerpPos(p, s, Math.min(1, Math.max(0, alpha)));
         this.ring
-          .circle(p.x + (s.x - p.x) * t, p.y + (s.y - p.y) * t, 0.5)
+          .circle(pos.x, pos.y, 0.5)
           .stroke({ width: 0.06, color: 0xd9c27a });
       }
     }

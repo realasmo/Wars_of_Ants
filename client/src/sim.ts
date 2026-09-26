@@ -14,6 +14,15 @@ export interface Snap {
 
 export const TPS = 20;
 
+/** Interpolated position between two snapshots, for smooth rendering between
+ * fixed ticks. Snaps instead of lerps when the prev→cur jump can't be motion —
+ * a layer change (entrance crossing teleports to the entrance tile) or a hop
+ * larger than 2 tiles (max real per-tick motion is ~0.15 tiles). */
+export function lerpPos(p: Snap, s: Snap, t: number): { x: number; y: number } {
+  if (p.layer !== s.layer || (s.x - p.x) ** 2 + (s.y - p.y) ** 2 > 4) return { x: s.x, y: s.y };
+  return { x: p.x + (s.x - p.x) * t, y: p.y + (s.y - p.y) * t };
+}
+
 export class Sim {
   private sim: WoaSim;
   readonly w: number;
