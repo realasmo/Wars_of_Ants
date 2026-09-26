@@ -181,9 +181,14 @@ impl Sim {
                 // DIRT_CAPACITY blocks before dumping); workers' spoil
                 // handling is a later wave
                 if caste == Caste::Queen {
-                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                        q.kind = FoodKind::Dirt;
-                        q.amount = (q.amount + 1).min(DIRT_CAPACITY);
+                    if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                        let blocks = match *q {
+                            Carry::Dirt { blocks } => blocks,
+                            _ => 0,
+                        };
+                        *q = Carry::Dirt {
+                            blocks: (blocks + 1).min(DIRT_CAPACITY),
+                        };
                     }
                 }
                 match resume {

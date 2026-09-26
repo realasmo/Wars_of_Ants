@@ -22,7 +22,7 @@ impl Sim {
             let (caste, pos, state, carrying, job, pending, retry, attack_after, dig_after, drop_after, pick_after, land_after, found_after) = {
                 let mut qo = match self
                     .ecs
-                    .query_one::<(&Ant, &Pos, &AntState, &Carrying, &WorkerAi)>(ent)
+                    .query_one::<(&Ant, &Pos, &AntState, &Carry, &WorkerAi)>(ent)
                 {
                     Ok(q) => q,
                     Err(_) => continue,
@@ -93,7 +93,7 @@ impl Sim {
                     continue;
                 }
                 if let Some((tx, ty)) = drop_after {
-                    if self.carried_amount(id) == 0 {
+                    if self.carry_of(id) == Carry::None {
                         self.set_drop_after(id, None);
                     } else if self.drop_in_range(id, tx, ty) {
                         self.set_drop_after(id, None);
@@ -197,7 +197,7 @@ impl Sim {
             }
             // walk-to-drop / walk-to-pick intents resolve on arrival
             if let Some((tx, ty)) = drop_after {
-                if self.carried_amount(id) == 0 {
+                if self.carry_of(id) == Carry::None {
                     self.set_drop_after(id, None);
                 } else if self.drop_in_range(id, tx, ty) {
                     self.set_drop_after(id, None);
@@ -214,25 +214,23 @@ impl Sim {
             }
             match job {
                 Job::Manual => {
-                    if pos.layer == Layer::Surface
-                        && carrying.amount == 0
-                        && self.egg_carried_by(id).is_none()
-                    {
+                    if pos.layer == Layer::Surface && carrying == Carry::None {
                         if let Some(fid) = self.food_on_tile(tile_of(pos.p)) {
                             if let Some(&fent) = self.ids.get(&fid) {
                                 if let Some(kind) = self.advance_harvest(fent) {
                                     if let Some(&aent) = self.ids.get(&id) {
-                                        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
-                                            q.amount = 1;
-                                            q.kind = kind;
+                                        if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+                                            *q = Carry::Food(kind);
                                         }
                                     }
                                 }
                             }
                         }
                     } else if pos.layer == Layer::Underground
-                        && carrying.amount > 0
-                        && matches!(carrying.kind, FoodKind::Green | FoodKind::Super)
+                        && matches!(
+                            carrying,
+                            Carry::Food(FoodKind::Green | FoodKind::Super)
+                        )
                     {
                         // bank carried food: on silver cells, or beside the
                         // queen when no pantry cell is handy
@@ -248,7 +246,7 @@ impl Sim {
                     }
                 }
                 Job::Idle => {
-                    if carrying.amount > 0 {
+                    if carrying != Carry::None {
                         match self.pantry_tile() {
                             Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
                             None => {
@@ -329,9 +327,8 @@ impl Sim {
                             if amount > 0 {
                                 if let Some(kind) = self.advance_harvest(fent) {
                                     if let Some(&aent) = self.ids.get(&id) {
-                                        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
-                                            q.amount = 1;
-                                            q.kind = kind;
+                                        if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+                                            *q = Carry::Food(kind);
                                         }
                                     }
                                     match self.pantry_tile() {
@@ -359,7 +356,7 @@ impl Sim {
                     }
                 }
                 Job::Deliver(tx, ty) => {
-                    if carrying.amount == 0 {
+                    if carrying == Carry::None {
                         self.set_job(id, Job::Idle);
                         continue;
                     }

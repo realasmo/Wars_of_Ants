@@ -3,7 +3,7 @@
 
 use super::Sim;
 use crate::balance::{FOOD_CELL_CAP, SourceSpec};
-use crate::components::{Carrying, Food, FoodKind, Layer, Pos};
+use crate::components::{Carry, Food, FoodKind, Layer, Pos};
 use crate::math::Vec2;
 use crate::path::tile_of;
 use crate::world::{tile_center, EMPTY};
@@ -149,23 +149,20 @@ impl Sim {
     /// Bank carried food at a cell: credits the store, leaves a visible pile.
     pub(crate) fn store_food(&mut self, ant: u32, tile: (u32, u32)) {
         let ent = self.ids[&ant];
-        let kind = self
-            .ecs
-            .get::<&Carrying>(ent)
-            .map(|c| c.kind)
-            .unwrap_or(FoodKind::Green);
+        let kind = match self.ecs.get::<&Carry>(ent).map(|c| *c) {
+            Ok(Carry::Food(kind)) => kind,
+            _ => return, // nothing edible in hand — nothing to bank
+        };
         match kind {
             FoodKind::Green | FoodKind::Carbs => self.colony.carbs += 1,
             FoodKind::Super | FoodKind::Protein => self.colony.protein += 1,
             FoodKind::Water => self.colony.water += 1,
-            _ => {}
         }
         self.colony.delivered += 1;
         let rname = match kind {
             FoodKind::Water => "water",
             FoodKind::Carbs | FoodKind::Green => "carbs",
             FoodKind::Protein | FoodKind::Super => "protein",
-            _ => "?",
         };
         self.ev(format!("ant #{ant} banked 1 {rname} at ({},{})", tile.0, tile.1));
         self.spawn_unit_food(Layer::Underground, tile, kind, None);
@@ -184,8 +181,8 @@ impl Sim {
                 }
             }
         }
-        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-            q.amount = 0;
+        if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+            *q = Carry::None;
         }
     }
 

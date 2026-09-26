@@ -322,10 +322,7 @@ impl Sim {
                 atk_cd: st.atk_cd,
                 atk_t: 0.0,
             },
-            Carrying {
-                amount: 0,
-                kind: FoodKind::Green,
-            },
+            Carry::None,
             WorkerAi {
                 job: if caste == Caste::Soldier {
                     Job::Manual

@@ -28,12 +28,17 @@ impl Sim {
                 };
                 let (caste, pos, carrying) = match self
                     .ecs
-                    .query_one::<(&Ant, &Pos, &Carrying)>(ent)
+                    .query_one::<(&Ant, &Pos, &Carry)>(ent)
                     .unwrap()
                     .get()
                 {
                     Some(q) => (q.0.caste, q.1.layer, *q.2),
                     None => return false,
+                };
+                let hands_diggable = match carrying {
+                    Carry::None => true,
+                    Carry::Dirt { blocks } => blocks < DIRT_CAPACITY,
+                    Carry::Egg | Carry::Food(_) => false,
                 };
                 let queen_may_dig = caste == Caste::Queen
                     && self.colony.founding
@@ -41,9 +46,7 @@ impl Sim {
                         self.colony.phase,
                         Phase::Founding | Phase::Brood
                     )
-                    && (carrying.amount == 0
-                        || (carrying.kind == FoodKind::Dirt
-                            && carrying.amount < DIRT_CAPACITY));
+                    && hands_diggable;
                 if (caste != Caste::Worker && !queen_may_dig)
                     || pos != Layer::Underground
                     || !self.world.underground.in_bounds(tx, ty)
@@ -179,8 +182,8 @@ impl Sim {
                 let aent = self.ids[&ant];
                 let hands_free = self
                     .ecs
-                    .get::<&Carrying>(aent)
-                    .map(|c| c.amount == 0)
+                    .get::<&Carry>(aent)
+                    .map(|c| *c == Carry::None)
                     .unwrap_or(false);
                 if egg_carried.is_some() || !hands_free {
                     return false;
@@ -199,9 +202,8 @@ impl Sim {
                 if let Ok(mut q) = self.ecs.get::<&mut Egg>(eent) {
                     q.carried_by = Some(ant);
                 }
-                if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
-                    q.amount = 1;
-                    q.kind = FoodKind::Egg;
+                if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+                    *q = Carry::Egg;
                 }
                 self.set_job(ant, Job::Manual);
                 true
@@ -409,18 +411,16 @@ impl Sim {
         let Some(&ent) = self.ids.get(&ant) else {
             return false;
         };
-        let (carrying, layer) = match self.ecs.query_one::<(&Carrying, &Pos)>(ent)
+        let (carrying, layer) = match self.ecs.query_one::<(&Carry, &Pos)>(ent)
             .unwrap()
             .get()
         {
             Some(q) => (*q.0, q.1.layer),
             None => return false,
         };
-        if carrying.amount == 0 {
-            return false;
-        }
-        match carrying.kind {
-            FoodKind::Dirt => match layer {
+        match carrying {
+            Carry::None => false,
+            Carry::Dirt { .. } => match layer {
                 Layer::Surface => true,
                 Layer::Underground => {
                     let (bx, by) = block_of(tx, ty);
@@ -429,7 +429,7 @@ impl Sim {
                         && self.block_adjacent(ant, bx, by)
                 }
             },
-            _ => chebyshev(self.ant_tile(ant), (tx, ty)) <= 1,
+            Carry::Egg | Carry::Food(_) => chebyshev(self.ant_tile(ant), (tx, ty)) <= 1,
         }
     }
 
@@ -440,8 +440,8 @@ impl Sim {
         let dirt = self
             .ids
             .get(&ant)
-            .and_then(|&e| self.ecs.get::<&Carrying>(e).ok())
-            .map(|c| c.kind == FoodKind::Dirt && c.amount > 0)
+            .and_then(|&e| self.ecs.get::<&Carry>(e).ok())
+            .map(|c| matches!(&*c, Carry::Dirt { .. }))
             .unwrap_or(false);
         if layer == Layer::Underground && dirt {
             let (bx, by) = block_of(tx, ty);
@@ -457,27 +457,26 @@ impl Sim {
             Some(&e) => e,
             None => return false,
         };
-        let (carrying, layer) = match self.ecs.query_one::<(&Carrying, &Pos)>(ent)
+        let (carrying, layer) = match self.ecs.query_one::<(&Carry, &Pos)>(ent)
             .unwrap()
             .get()
         {
             Some(q) => (*q.0, q.1.layer),
             None => return false,
         };
-        if carrying.amount == 0 {
-            return false;
-        }
-        match carrying.kind {
-            FoodKind::Dirt => match layer {
+        match carrying {
+            Carry::None => false,
+            Carry::Dirt { blocks } => match layer {
                 Layer::Surface => {
                     // dumped above ground: all carried dirt disappears
-                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                        q.amount = 0;
+                    if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                        *q = Carry::None;
                     }
                     true
                 }
                 Layer::Underground => {
-                    // dumped below: the dirt refills the fully-empty block
+                    // dumped below: one carried block refills the fully-empty
+                    // 2×2 block
                     let (bx, by) = block_of(tx, ty);
                     if !self.block_in_bounds(bx, by)
                         || !self.block_empty(bx, by)
@@ -490,14 +489,17 @@ impl Sim {
                             self.world.underground.set(bx + dx, by + dy, crate::world::DIRT);
                         }
                     }
-                    // one dump fills one block per carried unit
-                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                        q.amount = q.amount.saturating_sub(1);
+                    if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                        *q = if blocks > 1 {
+                            Carry::Dirt { blocks: blocks - 1 }
+                        } else {
+                            Carry::None
+                        };
                     }
                     true
                 }
             },
-            FoodKind::Egg => {
+            Carry::Egg => {
                 // place the carried egg on the adjacent empty cell
                 let grid_kind = self.grid_of(layer).get(tx, ty);
                 if grid_kind != EMPTY || chebyshev(self.ant_tile(ant), (tx, ty)) > 1 {
@@ -529,13 +531,13 @@ impl Sim {
                     break;
                 }
                 if placed {
-                    if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                        q.amount = 0;
+                    if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                        *q = Carry::None;
                     }
                 }
                 placed
             }
-            FoodKind::Green | FoodKind::Super | FoodKind::Protein | FoodKind::Carbs | FoodKind::Water => {
+            Carry::Food(kind) => {
                 // drop one unit as loose (spoiling) food
                 let tile = (tx, ty);
                 if !self.grid_of(layer).in_bounds(tx, ty)
@@ -544,21 +546,21 @@ impl Sim {
                 {
                     return false;
                 }
-                self.spawn_unit_food(layer, tile, carrying.kind, Some(SPOIL_TIME));
-                if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                    q.amount = 0;
+                self.spawn_unit_food(layer, tile, kind, Some(SPOIL_TIME));
+                if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                    *q = Carry::None;
                 }
                 true
             }
         }
     }
 
-    pub(crate) fn carried_amount(&self, id: u32) -> u32 {
+    pub(crate) fn carry_of(&self, id: u32) -> Carry {
         self.ids
             .get(&id)
-            .and_then(|&e| self.ecs.get::<&Carrying>(e).ok())
-            .map(|c| c.amount)
-            .unwrap_or(0)
+            .and_then(|&e| self.ecs.get::<&Carry>(e).ok())
+            .map(|c| *c)
+            .unwrap_or(Carry::None)
     }
 
     /// Pick up the remembered egg once adjacent; drop the intent if the egg
@@ -574,11 +576,11 @@ impl Sim {
             .ok()
             .and_then(|mut q| q.get().map(|q| (q.0.carried_by.is_none(), tile_of(q.1.p), q.1.layer)))
             .map(|(free, tile, _)| {
-                free && self.carried_amount(id) == 0 && chebyshev(self.ant_tile(id), tile) <= 1
+                free && self.carry_of(id) == Carry::None && chebyshev(self.ant_tile(id), tile) <= 1
             })
             .unwrap_or(false);
         if !valid {
-            if !self.ids.contains_key(&eid) || self.carried_amount(id) > 0 {
+            if !self.ids.contains_key(&eid) || self.carry_of(id) != Carry::None {
                 self.set_pick_after(id, None);
             }
             return;
@@ -587,27 +589,11 @@ impl Sim {
         if let Ok(mut q) = self.ecs.get::<&mut Egg>(eent) {
             q.carried_by = Some(id);
         }
-        if let Ok(mut q) = self.ecs.get::<&mut Carrying>(aent) {
-            q.amount = 1;
-            q.kind = FoodKind::Egg;
+        if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+            *q = Carry::Egg;
         }
         self.set_pick_after(id, None);
         self.set_job(id, Job::Manual);
     }
 
-    /// The egg this ant is carrying, if any.
-    pub(crate) fn egg_carried_by(&self, ant: u32) -> Option<u32> {
-        for eid in self.egg_ids() {
-            let ent = self.ids[&eid];
-            if self
-                .ecs
-                .get::<&Egg>(ent)
-                .map(|e| e.carried_by == Some(ant))
-                .unwrap_or(false)
-            {
-                return Some(eid);
-            }
-        }
-        None
-    }
 }

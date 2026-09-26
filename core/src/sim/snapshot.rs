@@ -38,7 +38,7 @@ impl Sim {
         let mut v = Vec::new();
         for (ent, (ant, pos, state, carry, combat)) in self
             .ecs
-            .query::<(&Ant, &Pos, &AntState, &Carrying, &Combat)>()
+            .query::<(&Ant, &Pos, &AntState, &Carry, &Combat)>()
             .iter()
         {
             let Some(&id) = rev.get(&ent) else { continue };
@@ -60,7 +60,11 @@ impl Sim {
             let extra = if ant.caste == Caste::Queen {
                 self.colony.starve_t / STARVE_TIME
             } else {
-                carry.amount as f64
+                match *carry {
+                    Carry::None => 0.0,
+                    Carry::Dirt { blocks } => blocks as f64,
+                    Carry::Egg | Carry::Food(_) => 1.0,
+                }
             };
             v.push(EntitySnap {
                 id,
@@ -71,12 +75,13 @@ impl Sim {
                 state,
                 extra,
                 hp: (combat.hp / combat.max_hp).clamp(0.0, 1.0),
-                // for the queen, aux encodes what she hauls only while she
-                // hauls it (0 = empty-handed, 2 = dirt)
-                aux: if ant.caste == Caste::Queen && carry.amount == 0 {
-                    0.0
-                } else {
-                    carry.kind as u8 as f64
+                // carried-item code while carrying, 0 when empty-handed (the
+                // pre-Carry snapshot leaked the last kind forever)
+                aux: match *carry {
+                    Carry::None => 0.0,
+                    Carry::Dirt { .. } => 2.0,
+                    Carry::Egg => 3.0,
+                    Carry::Food(k) => k as u8 as f64,
                 },
             });
         }

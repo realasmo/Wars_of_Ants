@@ -28,14 +28,26 @@ pub enum FoodKind {
     Green = 0,
     /// Legacy founded worlds only (spider drops there).
     Super = 1,
-    /// Carried-resource flags (not world entities): dirt = 2, egg = 3 kept
-    /// for snapshot-code stability.
-    Dirt = 2,
-    Egg = 3,
     /// Resource economy: units and sources are one of these three.
+    /// (2 and 3 were the carried-item codes Dirt/Egg before `Carry` existed;
+    /// retired, never reused.)
     Protein = 4,
     Carbs = 5,
     Water = 6,
+}
+
+/// What an ant carries. A sum type instead of `{amount, kind}` so an empty
+/// hand can never carry a stale kind — the phantom-dot / dead-branch class
+/// of client bugs came exactly from there.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Carry {
+    None,
+    /// Excavated dirt blocks (the founding queen hauls up to DIRT_CAPACITY).
+    Dirt { blocks: u32 },
+    /// A brood egg; the egg entity itself rides along (`Egg::carried_by`).
+    Egg,
+    /// One unit of food.
+    Food(FoodKind),
 }
 
 #[derive(Clone, Debug)]
@@ -112,12 +124,6 @@ pub struct WorkerAi {
     pub land_after: bool,
     /// Grounded queen: found the nest at this tile once the walk completes.
     pub found_after: Option<(u32, u32)>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Carrying {
-    pub amount: u32,
-    pub kind: FoodKind,
 }
 
 #[derive(Clone, Copy, Debug)]
