@@ -144,6 +144,24 @@ impl EntitySnap {
             EntitySnap::Spider(e) => e.id,
         }
     }
+
+    pub fn layer(&self) -> Layer {
+        match self {
+            EntitySnap::Ant(e) => e.layer,
+            EntitySnap::Food(e) => e.layer,
+            EntitySnap::Egg(e) => e.layer,
+            EntitySnap::Spider(e) => e.layer,
+        }
+    }
+
+    pub fn pos(&self) -> (f64, f64) {
+        match self {
+            EntitySnap::Ant(e) => (e.x, e.y),
+            EntitySnap::Food(e) => (e.x, e.y),
+            EntitySnap::Egg(e) => (e.x, e.y),
+            EntitySnap::Spider(e) => (e.x, e.y),
+        }
+    }
 }
 
 pub(crate) fn source_name(src: u8) -> &'static str {

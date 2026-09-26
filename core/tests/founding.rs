@@ -1,15 +1,40 @@
-use woa_core::{Command, DevSpawn, Layer, Phase, Sim, Team, DIRT, EMPTY, SOURCES};
+use woa_core::{
+    Activity, AntSnap, Carry, Caste, Command, DevSpawn, EggSnap, EntitySnap, FoodKind, FoodRole,
+    Layer, Phase, Sim, Team, DIRT, EMPTY, SOURCES,
+};
 
-fn queen(s: &Sim) -> woa_core::EntitySnap {
-    s.snapshot().into_iter().find(|e| e.kind == 0).unwrap()
+fn queen(s: &Sim) -> AntSnap {
+    s.snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Ant(a) if a.caste == Caste::Queen => Some(a),
+            _ => None,
+        })
+        .unwrap()
 }
 
 fn eggs(s: &Sim) -> usize {
-    s.snapshot().iter().filter(|e| e.kind == 3).count()
+    s.snapshot()
+        .iter()
+        .filter(|e| matches!(e, EntitySnap::Egg(_)))
+        .count()
 }
 
 fn workers(s: &Sim) -> usize {
-    s.snapshot().iter().filter(|e| e.kind == 1).count()
+    s.snapshot()
+        .iter()
+        .filter(|e| matches!(e, EntitySnap::Ant(a) if a.caste == Caste::Worker))
+        .count()
+}
+
+fn first_egg(s: &Sim) -> EggSnap {
+    s.snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Egg(e) => Some(e),
+            _ => None,
+        })
+        .unwrap()
 }
 
 /// Found the nest at the queen's spawn tile (map center) and return to the
@@ -85,7 +110,11 @@ fn walk_and_dig(s: &mut Sim, ticks: usize) -> (u32, u32) {
         s.tick();
     }
     assert_eq!(s.tile_at(Layer::Underground, tx, ty), EMPTY);
-    assert_eq!(queen(s).aux, 2.0, "queen should carry dirt (aux=2)");
+    assert_eq!(
+        queen(s).carry,
+        Carry::Dirt { blocks: 1 },
+        "queen should haul the dug block"
+    );
     (tx, ty)
 }
 
@@ -100,8 +129,8 @@ fn flight_start_is_lone_flying_queen() {
     assert_eq!(workers(&s), 0);
     assert_eq!(eggs(&s), 0);
     let q = queen(&s);
-    assert_eq!(q.layer, Layer::Surface as u8);
-    assert_eq!(q.state, 4); // flying
+    assert_eq!(q.layer, Layer::Surface);
+    assert_eq!(q.activity, Activity::Flying);
     assert_eq!(s.colony.ant_count, 1);
 }
 
@@ -141,7 +170,11 @@ fn queen_flies_fast_then_lands_and_walks_slower() {
         walked
     );
     // landing is one-way: a second Land is refused
-    assert!(!s.issue(Command::Land { ant: q.id, x: q.x, y: q.y }));
+    assert!(!s.issue(Command::Land {
+        ant: q.id,
+        x: q.x,
+        y: q.y
+    }));
 }
 
 #[test]
@@ -149,7 +182,11 @@ fn found_nest_creates_entrance_and_chamber() {
     let mut s = Sim::new_founding(42, Team::Red);
     let q = queen(&s);
     assert!(s.issue(Command::Land { ant: q.id, x: q.x, y: q.y }));
-    assert!(s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y }));
+    assert!(s.issue(Command::FoundNest {
+        ant: q.id,
+        x: q.x,
+        y: q.y
+    }));
     assert_eq!(s.colony.phase, Phase::Founding);
     assert_eq!(s.colony.phase_t, 60.0);
     // 2×2 entrance hole + 4×4 starter chamber (block-aligned)
@@ -166,10 +203,14 @@ fn found_nest_creates_entrance_and_chamber() {
     }
     assert_eq!(s.tile_at(Layer::Underground, 47, 50), 1, "chamber edge stays dirt");
     let q = queen(&s);
-    assert_eq!(q.layer, Layer::Underground as u8);
+    assert_eq!(q.layer, Layer::Underground);
     assert!(s.tiles_dug() >= 20);
     // one nest per game
-    assert!(!s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y }));
+    assert!(!s.issue(Command::FoundNest {
+        ant: q.id,
+        x: q.x,
+        y: q.y
+    }));
 }
 
 #[test]
@@ -178,12 +219,20 @@ fn found_nest_refused_near_map_border() {
     let q = queen(&s);
     assert!(s.issue(Command::Land { ant: q.id, x: q.x, y: q.y }));
     // walk to the bottom rows where the starter chamber would not fit
-    assert!(s.issue(Command::Move { ant: q.id, x: 48.5, y: 92.5 }));
+    assert!(s.issue(Command::Move {
+        ant: q.id,
+        x: 48.5,
+        y: 92.5
+    }));
     for _ in 0..420 {
         s.tick();
     }
     let q = queen(&s);
-    assert!(!s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y }));
+    assert!(!s.issue(Command::FoundNest {
+        ant: q.id,
+        x: q.x,
+        y: q.y
+    }));
     assert_eq!(s.colony.phase, Phase::Grounded);
     assert!(s.world.entrance.is_none());
 }
@@ -198,7 +247,7 @@ fn queen_dig_yields_dirt_and_dump_refills_the_cell() {
     // dumping underground refills the adjacent block just dug
     assert!(s.issue(Command::Drop { ant: q.id, tx, ty }));
     assert_eq!(s.tile_at(Layer::Underground, tx, ty), DIRT);
-    assert_eq!(queen(&s).aux, 0.0);
+    assert_eq!(queen(&s).carry, Carry::None);
 }
 
 #[test]
@@ -211,9 +260,9 @@ fn dirt_dumped_on_the_surface_disappears() {
     for _ in 0..100 {
         s.tick();
     }
-    assert_eq!(queen(&s).layer, Layer::Surface as u8);
+    assert_eq!(queen(&s).layer, Layer::Surface);
     assert!(s.issue(Command::Drop { ant: q.id, tx: 0, ty: 0 }));
-    assert_eq!(queen(&s).aux, 0.0);
+    assert_eq!(queen(&s).carry, Carry::None);
     assert_eq!(
         s.tile_at(Layer::Underground, tx, ty),
         EMPTY,
@@ -239,7 +288,7 @@ fn founding_timer_lays_four_eggs_then_workers_hatch_on_orange() {
     assert_eq!(phase(&s), Phase::Brood, "eggs must wait without orange soil");
     assert_eq!(workers(&s), 0);
     // paint orange under one egg — it hatches and the colony phase begins
-    let egg = s.snapshot().into_iter().find(|e| e.kind == 3).unwrap();
+    let egg = first_egg(&s);
     let (ex, ey) = (egg.x.floor() as u32, egg.y.floor() as u32);
     s.dev_set_soil(1, ex, ey, 1);
     for _ in 0..30 {
@@ -314,12 +363,20 @@ fn founding_is_deterministic_per_seed_and_team() {
         // targets a spot, so read the position fresh)
         let q = queen(&s);
         s.issue(Command::Land { ant: q.id, x: q.x, y: q.y });
-        s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y });
+        s.issue(Command::FoundNest {
+            ant: q.id,
+            x: q.x,
+            y: q.y
+        });
         for _ in 0..60 {
             s.tick();
         }
         let (tx, ty) = walk_and_dig(&mut s, 60);
-        s.issue(Command::Drop { ant: queen(&s).id, tx, ty });
+        s.issue(Command::Drop {
+            ant: queen(&s).id,
+            tx,
+            ty,
+        });
         for _ in 0..1300 {
             s.tick();
         }
@@ -391,7 +448,11 @@ fn distant_dig_command_walks_there_and_digs() {
             assert_eq!(s.tile_at(Layer::Underground, bx + dx, by + dy), EMPTY);
         }
     }
-    assert_eq!(queen(&s).aux, 2.0, "queen hauls one dirt block");
+    assert_eq!(
+        queen(&s).carry,
+        Carry::Dirt { blocks: 1 },
+        "queen hauls one dirt block"
+    );
 }
 
 #[test]
@@ -401,14 +462,20 @@ fn eggs_can_be_carried_and_placed_keeping_hatch_state() {
         s.tick();
     }
     let q = queen(&s);
-    let egg = s.snapshot().into_iter().find(|e| e.kind == 3).unwrap();
-    let frac0 = egg.extra; // hatch progress
+    let egg = first_egg(&s);
+    let frac0 = egg.hatch_left; // remaining incubation fraction
     assert!(s.issue(Command::PickEgg { ant: q.id, egg: egg.id }));
-    // carried: snapshot flags it and the queen carries an egg-mark (aux 3)
+    // carried: the snapshot flags it and the queen carries the egg
     let s1 = s.snapshot();
-    let e1 = s1.iter().find(|e| e.id == egg.id).unwrap();
-    assert_eq!(e1.state, 1, "egg is carried");
-    assert_eq!(s1.iter().find(|e| e.kind == 0).unwrap().aux, 3.0);
+    let e1 = s1
+        .iter()
+        .find_map(|e| match e {
+            EntitySnap::Egg(e) if e.id == egg.id => Some(e),
+            _ => None,
+        })
+        .unwrap();
+    assert!(e1.carried, "egg is carried");
+    assert_eq!(queen(&s).carry, Carry::Egg);
     // no digging while hands are full
     let ((_, _), (tx, ty)) = dig_site(&s);
     assert!(!s.issue(Command::Dig { ant: q.id, tx, ty }));
@@ -418,31 +485,52 @@ fn eggs_can_be_carried_and_placed_keeping_hatch_state() {
         .into_iter()
         .find(|&(x, y)| s.tile_at(Layer::Underground, x, y) == EMPTY)
         .unwrap();
-    assert!(s.issue(Command::Drop { ant: q.id, tx: spot.0, ty: spot.1 }));
-    let e2 = s.snapshot().into_iter().find(|e| e.id == egg.id).unwrap();
-    assert_eq!(e2.state, 0, "egg placed");
-    assert!((e2.extra - frac0).abs() < 0.05, "hatch state preserved");
+    assert!(s.issue(Command::Drop {
+        ant: q.id,
+        tx: spot.0,
+        ty: spot.1
+    }));
+    let e2 = s
+        .snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Egg(e) if e.id == egg.id => Some(e),
+            _ => None,
+        })
+        .unwrap();
+    assert!(!e2.carried, "egg placed");
+    assert!((e2.hatch_left - frac0).abs() < 0.05, "hatch state preserved");
 }
 
 #[test]
 fn dropped_food_spoils_off_silver_and_freezes_on_it() {
     // (the founding queen never auto-picks food — use a legacy worker)
     let mut s = Sim::new(3, woa_core::Config::default());
-    let w = s.snapshot().into_iter().find(|e| e.kind == 1).unwrap();
+    let w = s
+        .snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Ant(a) if a.caste == Caste::Worker => Some(a.id),
+            _ => None,
+        })
+        .unwrap();
     // drop 1 unit far from any soil: it must spoil after SPOIL_TIME
     // (worker picks food up on the surface via a manual move onto a pile)
     let pile = s
         .snapshot()
         .into_iter()
-        .find(|e| e.kind == 2)
+        .find_map(|e| match e {
+            EntitySnap::Food(f) => Some(f),
+            _ => None,
+        })
         .expect("legacy worldgen has surface piles");
     // cross to the surface first (Move is same-layer), then walk to the pile
-    assert!(s.issue(Command::UseEntrance { ant: w.id }));
+    assert!(s.issue(Command::UseEntrance { ant: w }));
     for _ in 0..100 {
         s.tick();
     }
     assert!(s.issue(Command::Move {
-        ant: w.id,
+        ant: w,
         x: pile.x,
         y: pile.y
     }));
@@ -452,7 +540,10 @@ fn dropped_food_spoils_off_silver_and_freezes_on_it() {
     let carrying = s
         .snapshot()
         .into_iter()
-        .find(|e| e.kind == 1 && e.extra > 0.5)
+        .find_map(|e| match e {
+            EntitySnap::Ant(a) if a.carry != Carry::None => Some(a),
+            _ => None,
+        })
         .expect("worker picked up food");
     assert!(s.issue(Command::Drop {
         ant: carrying.id,
@@ -463,10 +554,15 @@ fn dropped_food_spoils_off_silver_and_freezes_on_it() {
     for _ in 0..6100 {
         s.tick();
     }
-    let spoiled = !s
-        .snapshot()
-        .iter()
-        .any(|e| e.kind == 2 && e.hp < 1.0);
+    let spoiled = !s.snapshot().iter().any(|e| {
+        matches!(
+            e,
+            EntitySnap::Food(woa_core::FoodSnap {
+                role: FoodRole::Loose { spoil: Some(_) },
+                ..
+            })
+        )
+    });
     assert!(spoiled, "dropped food must spoil off silver");
 }
 
@@ -474,25 +570,33 @@ fn dropped_food_spoils_off_silver_and_freezes_on_it() {
 fn food_piles_respect_cell_cap() {
     let mut s = Sim::new_founding(1337, Team::Red);
     // (fresh seed's own piles sit near the map center; spawn far away at 30,30)
-    // worldgen sources are everywhere now — only count green (aux 0) units
-    let before: usize = s
-        .snapshot()
-        .iter()
-        .filter(|e| e.kind == 2 && e.aux == 0.0 && (e.x - 30.5).abs() <= 12.0 && (e.y - 30.5).abs() <= 12.0)
-        .count();
+    // worldgen sources are everywhere now — only count green units near the
+    // dev drop point
+    let green_near = |snaps: &[EntitySnap]| -> Vec<woa_core::FoodSnap> {
+        snaps
+            .iter()
+            .filter_map(|e| match e {
+                EntitySnap::Food(f)
+                    if f.kind == FoodKind::Green
+                        && (f.x - 30.5).abs() <= 12.0
+                        && (f.y - 30.5).abs() <= 12.0 =>
+                {
+                    Some(f.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let before = green_near(&s.snapshot()).len();
     s.dev_spawn(DevSpawn::Food, 30.5, 30.5);
-    let piles: Vec<_> = s
-        .snapshot()
-        .into_iter()
-        .filter(|e| e.kind == 2 && e.aux == 0.0 && (e.x - 30.5).abs() <= 12.0 && (e.y - 30.5).abs() <= 12.0)
-        .collect();
+    let piles = green_near(&s.snapshot());
     assert!(piles.len() > before, "spreading created cells");
     assert!(!piles.is_empty());
     for p in &piles {
-        assert!(p.extra <= 6.0, "pile of {} exceeds the cell cap", p.extra);
+        assert!(p.amount <= 6, "pile of {} exceeds the cell cap", p.amount);
     }
-    let total: f64 = piles.iter().map(|p| p.extra).sum();
-    assert_eq!(total as u32, 45, "no food lost to spreading");
+    let total: u32 = piles.iter().map(|p| p.amount).sum();
+    assert_eq!(total, 45, "no food lost to spreading");
 }
 
 #[test]
@@ -524,7 +628,11 @@ fn queen_hauls_two_dirt_blocks_before_dumping() {
     for _ in 0..60 {
         s.tick();
     }
-    assert!(s.issue(Command::Dig { ant: q.id, tx: b_tx, ty: b_ty }));
+    assert!(s.issue(Command::Dig {
+        ant: q.id,
+        tx: b_tx,
+        ty: b_ty
+    }));
     for _ in 0..140 {
         s.tick();
     }
@@ -540,8 +648,16 @@ fn queen_hauls_two_dirt_blocks_before_dumping() {
         "third dig must be refused at capacity"
     );
     // each dump refills one adjacent block: dump B where she stands first
-    assert!(s.issue(Command::Drop { ant: q.id, tx: b_tx, ty: b_ty }));
-    assert_eq!(queen(&s).aux, 2.0, "still hauling one block after the first dump");
+    assert!(s.issue(Command::Drop {
+        ant: q.id,
+        tx: b_tx,
+        ty: b_ty
+    }));
+    assert_eq!(
+        queen(&s).carry,
+        Carry::Dirt { blocks: 1 },
+        "still hauling one block after the first dump"
+    );
     // walk back into the dug-out block A and refill it
     assert!(s.issue(Command::Move {
         ant: q.id,
@@ -551,8 +667,12 @@ fn queen_hauls_two_dirt_blocks_before_dumping() {
     for _ in 0..140 {
         s.tick();
     }
-    assert!(s.issue(Command::Drop { ant: q.id, tx: a_tx, ty: a_ty }));
-    assert_eq!(queen(&s).aux, 0.0, "all dirt dumped");
+    assert!(s.issue(Command::Drop {
+        ant: q.id,
+        tx: a_tx,
+        ty: a_ty
+    }));
+    assert_eq!(queen(&s).carry, Carry::None, "all dirt dumped");
 }
 
 #[test]
@@ -607,7 +727,11 @@ fn diagonal_dig_requires_an_open_flank() {
                 if solid(f1) && solid(f2) {
                     let q = queen(&s);
                     assert!(
-                        !s.issue(Command::Dig { ant: q.id, tx: dbx, ty: dby }),
+                        !s.issue(Command::Dig {
+                            ant: q.id,
+                            tx: dbx,
+                            ty: dby
+                        }),
                         "seed {seed}: corner-only dig must be refused (flanks {f1}/{f2})"
                     );
                     return; // geometry verified
@@ -619,11 +743,19 @@ fn diagonal_dig_requires_an_open_flank() {
     let mut s = founded(42);
     let ((sx, sy), (tx2, ty2)) = dig_site(&s);
     let q = queen(&s);
-    assert!(s.issue(Command::Move { ant: q.id, x: sx as f64 + 0.5, y: sy as f64 + 0.5 }));
+    assert!(s.issue(Command::Move {
+        ant: q.id,
+        x: sx as f64 + 0.5,
+        y: sy as f64 + 0.5
+    }));
     for _ in 0..80 {
         s.tick();
     }
-    assert!(s.issue(Command::Dig { ant: q.id, tx: tx2, ty: ty2 }));
+    assert!(s.issue(Command::Dig {
+        ant: q.id,
+        tx: tx2,
+        ty: ty2
+    }));
 }
 
 #[test]
@@ -667,7 +799,14 @@ fn distant_pick_and_drop_send_the_ant_walking() {
         s.tick();
     }
     let q = queen(&s);
-    let eggs_all: Vec<_> = s.snapshot().into_iter().filter(|e| e.kind == 3).collect();
+    let eggs_all: Vec<EggSnap> = s
+        .snapshot()
+        .into_iter()
+        .filter_map(|e| match e {
+            EntitySnap::Egg(e) => Some(e),
+            _ => None,
+        })
+        .collect();
     let egg = eggs_all
         .iter()
         .max_by(|a, b| {
@@ -678,11 +817,18 @@ fn distant_pick_and_drop_send_the_ant_walking() {
         .unwrap();
     let (ex, ey) = (egg.x.floor() as u32, egg.y.floor() as u32);
     assert!((ex as f64 - q.x).abs() + (ey as f64 - q.y).abs() > 2.5, "test needs a distant egg");
-    assert!(s.issue(Command::PickEgg { ant: q.id, egg: egg.id }));
+    assert!(s.issue(Command::PickEgg {
+        ant: q.id,
+        egg: egg.id
+    }));
     for _ in 0..300 {
         s.tick();
     }
-    assert_eq!(queen(&s).aux, 3.0, "queen should reach and pick up the egg");
+    assert_eq!(
+        queen(&s).carry,
+        Carry::Egg,
+        "queen should reach and pick up the egg"
+    );
     // distant empty cell: Drop walks there and places it
     let (qx, qy) = { let qq = queen(&s); (qq.x.floor() as u32, qq.y.floor() as u32) };
     let mut spot = None;
@@ -702,13 +848,27 @@ fn distant_pick_and_drop_send_the_ant_walking() {
     }
     let (sx, sy) = spot.expect("an empty cell a few tiles away");
     assert!((sx.max(qx) - sx.min(qx)) + (sy.max(qy) - sy.min(qy)) > 2, "target must be distant");
-    assert!(s.issue(Command::Drop { ant: q.id, tx: sx, ty: sy }));
+    assert!(s.issue(Command::Drop {
+        ant: q.id,
+        tx: sx,
+        ty: sy
+    }));
     for _ in 0..400 {
         s.tick();
     }
-    assert_eq!(queen(&s).aux, 0.0, "egg should be placed after walking");
-    let placed = s.snapshot().into_iter().find(|e| e.id == egg.id).unwrap();
-    assert_eq!((placed.x.floor() as u32, placed.y.floor() as u32), (sx, sy));
+    assert_eq!(queen(&s).carry, Carry::None, "egg should be placed after walking");
+    let placed = s
+        .snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Egg(e) if e.id == egg.id => Some(e),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        (placed.x.floor() as u32, placed.y.floor() as u32),
+        (sx, sy)
+    );
 }
 
 #[test]
@@ -734,7 +894,11 @@ fn right_click_flies_there_lands_then_walks_and_founds() {
     );
     // distant found target: the nest appears only after the walk
     let (fx, fy) = (q.x + 6.0, q.y + 4.0);
-    assert!(s.issue(Command::FoundNest { ant: q.id, x: fx, y: fy }));
+    assert!(s.issue(Command::FoundNest {
+        ant: q.id,
+        x: fx,
+        y: fy
+    }));
     for _ in 0..30 {
         s.tick();
     }
@@ -751,27 +915,42 @@ fn right_click_flies_there_lands_then_walks_and_founds() {
 fn founding_world_has_scattered_finite_sources_and_no_green() {
     let s = Sim::new_founding(42, Team::Red);
     let snaps = s.snapshot();
+    let foods: Vec<&woa_core::FoodSnap> = snaps
+        .iter()
+        .filter_map(|e| match e {
+            EntitySnap::Food(f) => Some(f),
+            _ => None,
+        })
+        .collect();
     // no green piles anywhere
     assert!(
-        !snaps.iter().any(|e| e.kind == 2 && e.aux == 0.0),
+        !foods.iter().any(|f| f.kind == FoodKind::Green),
         "founding world must not contain green food"
     );
-    let sources: Vec<_> = snaps.iter().filter(|e| e.kind == 2 && e.state == 2).collect();
+    let sources: Vec<&woa_core::FoodSnap> = foods
+        .iter()
+        .copied()
+        .filter(|f| matches!(f.role, FoodRole::Source { .. }))
+        .collect();
     let total: u32 = SOURCES.iter().map(|sp| sp.count).sum();
     assert_eq!(sources.len() as u32, total, "all six source types placed");
     let carbs_near = sources
         .iter()
-        .filter(|e| e.aux == 5.0 && (e.x - 48.5).abs() <= 16.0 && (e.y - 48.5).abs() <= 16.0)
+        .filter(|f| f.kind == FoodKind::Carbs && (f.x - 48.5).abs() <= 16.0 && (f.y - 48.5).abs() <= 16.0)
         .count();
     assert!(carbs_near >= 1, "at least one carb source near the founding center");
     // deterministic per seed
     let b = Sim::new_founding(42, Team::Blue);
-    let sa: Vec<_> = sources.iter().map(|e| (e.id, e.x as u32, e.y as u32, e.extra as u32)).collect();
+    let sa: Vec<_> = sources.iter().map(|f| (f.id, f.x as u32, f.y as u32, f.amount)).collect();
     let sb: Vec<_> = b
         .snapshot()
         .iter()
-        .filter(|e| e.kind == 2 && e.state == 2)
-        .map(|e| (e.id, e.x as u32, e.y as u32, e.extra as u32))
+        .filter_map(|e| match e {
+            EntitySnap::Food(f) if matches!(f.role, FoodRole::Source { .. }) => {
+                Some((f.id, f.x as u32, f.y as u32, f.amount))
+            }
+            _ => None,
+        })
         .collect();
     assert_eq!(sa, sb);
 }
@@ -783,7 +962,7 @@ fn scouts_discover_sources_and_harvest_takes_time() {
     for _ in 0..1220 {
         s.tick();
     }
-    let e = s.snapshot().into_iter().find(|e| e.kind == 3).unwrap();
+    let e = first_egg(&s);
     s.dev_set_soil(1, e.x.floor() as u32, e.y.floor() as u32, 1);
     s.dev_set_soil(1, e.x.floor() as u32 + 2, e.y.floor() as u32, 1);
     for _ in 0..3620 + 60 {
@@ -796,10 +975,10 @@ fn scouts_discover_sources_and_harvest_takes_time() {
     let q = queen(&s);
     let mut sx = q.x + 20.0;
     let mut sy = q.y + 15.0;
-    let clear = |snaps: &Vec<woa_core::EntitySnap>, x: f64, y: f64| {
-        !snaps
-            .iter()
-            .any(|e| e.kind == 2 && e.state == 2 && (e.x - x).abs() < 4.0 && (e.y - y).abs() < 4.0)
+    let clear = |snaps: &[EntitySnap], x: f64, y: f64| {
+        !snaps.iter().any(
+            |e| matches!(e, EntitySnap::Food(f) if matches!(f.role, FoodRole::Source { .. }) && (f.x - x).abs() < 4.0 && (f.y - y).abs() < 4.0),
+        )
     };
     while !clear(&s.snapshot(), sx, sy) {
         sx += 5.0;
@@ -809,13 +988,29 @@ fn scouts_discover_sources_and_harvest_takes_time() {
     let src = s
         .snapshot()
         .into_iter()
-        .find(|e| e.kind == 2 && e.state == 2 && (e.x - sx).abs() < 1.0 && (e.y - sy).abs() < 1.0)
+        .find_map(|e| match e {
+            EntitySnap::Food(f)
+                if matches!(f.role, FoodRole::Source { .. })
+                    && (f.x - sx).abs() < 1.0
+                    && (f.y - sy).abs() < 1.0 =>
+            {
+                Some(f)
+            }
+            _ => None,
+        })
         .unwrap();
-    let amount0 = src.extra as u32;
+    let amount0 = src.amount;
     // not discovered: no worker fetches it while it's out of sight — verify
     // via knowledge set indirectly: a nearby ant discovers it instantly
-    let w = s.snapshot().into_iter().find(|e| e.kind == 1).unwrap();
-    assert!(s.issue(Command::Move { ant: w.id, x: sx, y: sy }));
+    let w = s
+        .snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Ant(a) if a.caste == Caste::Worker => Some(a.id),
+            _ => None,
+        })
+        .unwrap();
+    assert!(s.issue(Command::Move { ant: w, x: sx, y: sy }));
     for _ in 0..10 {
         s.tick();
     }
@@ -823,14 +1018,22 @@ fn scouts_discover_sources_and_harvest_takes_time() {
     for _ in 0..500 {
         s.tick();
     }
-    let after: Option<f64> = s
+    let after: Option<u32> = s
         .snapshot()
-        .into_iter()
-        .filter(|e| e.kind == 2 && e.state == 2 && (e.x - sx).abs() < 1.5 && (e.y - sy).abs() < 1.5)
-        .map(|e| e.extra)
+        .iter()
+        .filter_map(|e| match e {
+            EntitySnap::Food(f)
+                if matches!(f.role, FoodRole::Source { .. })
+                    && (f.x - sx).abs() < 1.5
+                    && (f.y - sy).abs() < 1.5 =>
+            {
+                Some(f.amount)
+            }
+            _ => None,
+        })
         .next();
     assert!(
-        after.map(|a| a < amount0 as f64).unwrap_or(true),
+        after.map(|a| a < amount0).unwrap_or(true),
         "harvesting consumed units from the source ({after:?} vs {amount0})"
     );
     // finite: AI workers deplete a source placed by the entrance (discovered
@@ -844,10 +1047,9 @@ fn scouts_discover_sources_and_harvest_takes_time() {
     let mut gone = false;
     for _ in 0..25000 {
         s.tick();
-        gone = !s
-            .snapshot()
-            .iter()
-            .any(|e| e.kind == 2 && e.state == 2 && (e.x - ex as f64 - 3.5).abs() < 1.0);
+        gone = !s.snapshot().iter().any(|e| {
+            matches!(e, EntitySnap::Food(f) if matches!(f.role, FoodRole::Source { .. }) && (f.x - ex as f64 - 3.5).abs() < 1.0)
+        });
         if gone {
             break;
         }
@@ -861,7 +1063,7 @@ fn spider_drops_protein_and_low_carbs_slow_the_colony() {
     for _ in 0..1220 {
         s.tick();
     }
-    let e = s.snapshot().into_iter().find(|e| e.kind == 3).unwrap();
+    let e = first_egg(&s);
     s.dev_set_soil(1, e.x.floor() as u32, e.y.floor() as u32, 1);
     s.dev_set_soil(1, e.x.floor() as u32 + 2, e.y.floor() as u32, 1);
     for _ in 0..3620 + 60 {
@@ -870,11 +1072,24 @@ fn spider_drops_protein_and_low_carbs_slow_the_colony() {
     // spider drop = protein units
     let q = queen(&s);
     s.dev_spawn(DevSpawn::Spider, q.x, q.y - 6.0);
-    s.dev_kill(s.snapshot().into_iter().find(|e| e.kind == 4).unwrap().id);
-    let drops = s
+    let spider = s
         .snapshot()
         .into_iter()
-        .filter(|e| e.kind == 2 && e.aux == 4.0)
+        .find_map(|e| match e {
+            EntitySnap::Spider(p) => Some(p.id),
+            _ => None,
+        })
+        .unwrap();
+    s.dev_kill(spider);
+    let drops = s
+        .snapshot()
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                EntitySnap::Food(f) if f.kind == FoodKind::Protein
+            )
+        })
         .count();
     assert!(drops > 0, "spider drops protein units");
 
@@ -915,7 +1130,11 @@ fn event_log_records_causes_and_discoveries() {
     // run a founding flow and check the story reads back
     let q = queen(&s);
     s.issue(Command::Land { ant: q.id, x: q.x, y: q.y });
-    s.issue(Command::FoundNest { ant: q.id, x: q.x, y: q.y });
+    s.issue(Command::FoundNest {
+        ant: q.id,
+        x: q.x,
+        y: q.y,
+    });
     // through founding (60s) + the full brood timer (180s): eggs go ready
     for _ in 0..4900 {
         s.tick();
@@ -940,7 +1159,11 @@ fn event_log_records_causes_and_discoveries() {
     // combat cause: found a sim, spawn a spider on the grounded queen
     let mut c = Sim::new_founding(42, Team::Red);
     let q2 = queen(&c);
-    c.issue(Command::Land { ant: q2.id, x: q2.x, y: q2.y });
+    c.issue(Command::Land {
+        ant: q2.id,
+        x: q2.x,
+        y: q2.y,
+    });
     c.dev_spawn(DevSpawn::Spider, queen(&c).x, queen(&c).y);
     for _ in 0..600 {
         c.tick();

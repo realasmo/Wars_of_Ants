@@ -137,8 +137,10 @@ fn main() {
                     for id in sim
                         .snapshot()
                         .iter()
-                        .filter(|e| e.kind == 4)
-                        .map(|e| e.id)
+                        .filter_map(|e| match e {
+                            woa_core::EntitySnap::Spider(p) => Some(p.id),
+                            _ => None,
+                        })
                         .collect::<Vec<_>>()
                     {
                         sim.dev_kill(id);

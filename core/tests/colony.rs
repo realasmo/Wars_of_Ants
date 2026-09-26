@@ -1,7 +1,22 @@
-use woa_core::{Command, Config, Layer, Sim, DIRT, EMPTY};
+use woa_core::{
+    Carry, Caste, Command, Config, EntitySnap, FoodRole, Layer, Sim, DIRT, EMPTY,
+};
 
 fn first_worker(s: &Sim) -> u32 {
-    s.snapshot().iter().find(|e| e.kind == 1).unwrap().id
+    s.snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Ant(a) if a.caste == Caste::Worker => Some(a.id),
+            _ => None,
+        })
+        .unwrap()
+}
+
+fn ant_by_id(s: &Sim, id: u32) -> Option<woa_core::AntSnap> {
+    s.snapshot().into_iter().find_map(|e| match e {
+        EntitySnap::Ant(a) if a.id == id => Some(a),
+        _ => None,
+    })
 }
 
 #[test]
@@ -89,29 +104,37 @@ fn spider_dies_to_swarm_and_soldier_is_bred() {
     let mut s = Sim::new(23, cfg);
     let spider = s
         .snapshot()
-        .iter()
-        .find(|e| e.kind == 4)
-        .expect("spider spawned")
-        .id;
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Spider(p) => Some(p.id),
+            _ => None,
+        })
+        .expect("spider spawned");
     let mut soldier_seen = false;
     for i in 0..12_000 {
         if i % 50 == 0 {
             for e in s.snapshot() {
-                if e.kind == 1 {
-                    s.issue(Command::Attack {
-                        ant: e.id,
-                        target: spider,
-                    });
+                if let EntitySnap::Ant(a) = e {
+                    if a.caste == Caste::Worker {
+                        s.issue(Command::Attack {
+                            ant: a.id,
+                            target: spider,
+                        });
+                    }
                 }
             }
         }
         s.tick();
-        if s.snapshot().iter().any(|e| e.kind == 5) {
+        if s
+            .snapshot()
+            .iter()
+            .any(|e| matches!(e, EntitySnap::Ant(a) if a.caste == Caste::Soldier))
+        {
             soldier_seen = true;
         }
     }
     assert!(
-        !s.snapshot().iter().any(|e| e.id == spider),
+        !s.snapshot().iter().any(|e| e.id() == spider),
         "spider should be dead"
     );
     assert!(soldier_seen, "a soldier should have been bred");
@@ -120,14 +143,16 @@ fn spider_dies_to_swarm_and_soldier_is_bred() {
 #[test]
 fn player_loop_entrance_pickup_deposit() {
     let mut s = Sim::new(31, Config::default());
-    let w = s.snapshot().iter().find(|e| e.kind == 1).unwrap().id;
+    let w = first_worker(&s);
     assert!(s.issue(Command::UseEntrance { ant: w }));
     let mut surfaced = false;
     for _ in 0..2000 {
         s.tick();
-        if s.snapshot().iter().any(|e| e.id == w && e.layer == 0) {
-            surfaced = true;
-            break;
+        if let Some(a) = ant_by_id(&s, w) {
+            if a.layer == Layer::Surface {
+                surfaced = true;
+                break;
+            }
         }
     }
     assert!(surfaced, "worker should reach the surface via entrance");
@@ -135,7 +160,10 @@ fn player_loop_entrance_pickup_deposit() {
     let food_snap = s
         .snapshot()
         .into_iter()
-        .find(|e| e.kind == 2 && e.extra > 0.0)
+        .find_map(|e| match e {
+            EntitySnap::Food(f) if f.amount > 0 => Some(f),
+            _ => None,
+        })
         .unwrap();
     let (fx, fy) = (food_snap.x, food_snap.y);
     assert!(s.issue(Command::Move {
@@ -146,8 +174,8 @@ fn player_loop_entrance_pickup_deposit() {
     let mut carrying = false;
     for _ in 0..3000 {
         s.tick();
-        if let Some(e) = s.snapshot().iter().find(|e| e.id == w) {
-            if e.extra > 0.5 {
+        if let Some(a) = ant_by_id(&s, w) {
+            if a.carry != Carry::None {
                 carrying = true;
                 break;
             }
@@ -159,34 +187,33 @@ fn player_loop_entrance_pickup_deposit() {
     let mut home = false;
     for _ in 0..3000 {
         s.tick();
-        if s.snapshot().iter().any(|e| e.id == w && e.layer == 1) {
-            home = true;
-            break;
+        if let Some(a) = ant_by_id(&s, w) {
+            if a.layer == Layer::Underground {
+                home = true;
+                break;
+            }
         }
     }
     assert!(home, "worker should return underground");
 
     let q = s.colony.queen_id;
     let delivered_before = s.colony.delivered;
-    let q_snap = s.snapshot();
-    let (qx, qy) = q_snap
-        .iter()
-        .find(|e| e.id == q)
-        .map(|e| (e.x, e.y))
-        .unwrap();
+    let q_snap = ant_by_id(&s, q).unwrap();
     assert!(s.issue(Command::Move {
         ant: w,
-        x: qx,
-        y: qy,
+        x: q_snap.x,
+        y: q_snap.y,
     }));
     let mut deposited = false;
     for _ in 0..2000 {
         s.tick();
-        if s.colony.delivered > delivered_before
-            && s.snapshot().iter().any(|e| e.id == w && e.extra < 0.5)
-        {
-            deposited = true;
-            break;
+        if s.colony.delivered > delivered_before {
+            if let Some(a) = ant_by_id(&s, w) {
+                if a.carry == Carry::None {
+                    deposited = true;
+                    break;
+                }
+            }
         }
     }
     assert!(deposited, "manual worker should deposit food at the queen");

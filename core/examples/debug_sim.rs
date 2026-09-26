@@ -19,6 +19,10 @@ fn main() {
         s.colony.carbs,
         s.colony.dead
     );
-    let eggs = s.snapshot().iter().filter(|e| e.kind == 3).count();
+    let eggs = s
+        .snapshot()
+        .iter()
+        .filter(|e| matches!(e, woa_core::EntitySnap::Egg(_)))
+        .count();
     println!("live eggs={}", eggs);
 }
