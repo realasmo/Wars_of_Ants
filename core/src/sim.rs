@@ -461,7 +461,9 @@ impl Sim {
                         self.colony.phase,
                         Phase::Founding | Phase::Brood
                     )
-                    && carrying.amount == 0;
+                    && (carrying.amount == 0
+                        || (carrying.kind == FoodKind::Dirt
+                            && carrying.amount < DIRT_CAPACITY));
                 if (caste != Caste::Worker && !queen_may_dig)
                     || pos != Layer::Underground
                     || !self.world.underground.in_bounds(tx, ty)
@@ -628,7 +630,7 @@ impl Sim {
                 match carrying.kind {
                     FoodKind::Dirt => match layer {
                         Layer::Surface => {
-                            // dumped above ground: the dirt disappears
+                            // dumped above ground: all carried dirt disappears
                             if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
                                 q.amount = 0;
                             }
@@ -648,8 +650,9 @@ impl Sim {
                                     self.world.underground.set(bx + dx, by + dy, DIRT);
                                 }
                             }
+                            // one dump fills one block per carried unit
                             if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                                q.amount = 0;
+                                q.amount = q.amount.saturating_sub(1);
                             }
                             true
                         }
@@ -1850,12 +1853,13 @@ impl Sim {
                     }
                 }
                 self.dug_tiles += 4;
-                // the founding queen carries excavated dirt out; workers'
-                // spoil handling is a later wave
+                // the founding queen carries excavated dirt out (up to
+                // DIRT_CAPACITY blocks before dumping); workers' spoil
+                // handling is a later wave
                 if caste == Caste::Queen {
                     if let Ok(mut q) = self.ecs.get::<&mut Carrying>(ent) {
-                        q.amount = 1;
                         q.kind = FoodKind::Dirt;
+                        q.amount = (q.amount + 1).min(DIRT_CAPACITY);
                     }
                 }
                 match resume {

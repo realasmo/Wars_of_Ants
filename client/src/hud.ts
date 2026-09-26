@@ -10,7 +10,7 @@ const HELP_COLONY =
   'the camera follows your ant; spectate (Tab, drag, WASD) when it dies';
 
 const HELP_FOUNDING =
-  'Right-click dirt: walk there and dig (2×2) · Dirt: right-click empty space to refill a 2×2 block, haul it out and drop above ground to discard · ' +
+  'Right-click dirt: walk there and dig (2×2) · You can carry two blocks — right-click empty space to refill one, haul out and drop above ground to discard all · ' +
   'Orange soil = eggs only hatch there · Silver = food never spoils there · Right-click an egg to carry it, again to place · F2 · F3';
 
 const HELP_FLIGHT = 'Hold left button: fly toward the cursor · Right-click: land here · F2: dev tools · F3: perf';

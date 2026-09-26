@@ -474,6 +474,16 @@ export class Game {
           return;
         }
       }
+      // dig any dirt first: the ant walks there and digs on arrival, and an
+      // ant still below dirt capacity keeps digging (dig two, haul once).
+      // Refusals (hands full, partial rock) fall through to the branches below.
+      const kind = this.sim.tileAt(layer, tx, ty);
+      const soft = kind >= 1 && kind <= 3;
+      if (layer === 1 && soft && this.sim.dig(this.playerAnt, tx, ty)) {
+        this.log.push({ type: 'cmd', act: 'dig', ant: this.playerAnt, tx, ty });
+        this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+        return;
+      }
       // carrying something → place/drop it (egg, dirt, food)
       if (me !== undefined && me.aux > 1.5) {
         if (me.aux >= 2.5) {
@@ -555,20 +565,6 @@ export class Game {
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }
-      }
-      // dig any dirt: the ant walks there and digs on arrival (core handles it)
-      const kind = this.sim.tileAt(layer, tx, ty);
-      const soft = kind >= 1 && kind <= 3;
-      if (layer === 1 && soft) {
-        if (this.sim.dig(this.playerAnt, tx, ty)) {
-          this.log.push({ type: 'cmd', act: 'dig', ant: this.playerAnt, tx, ty });
-          this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
-          return;
-        }
-        this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: tx + 0.5, y: ty + 0.5, note: 'dig-refused' });
-        this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
-        this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
-        return;
       }
       const ent = this.sim.entrance;
       if (

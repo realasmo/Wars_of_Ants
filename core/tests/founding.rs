@@ -193,15 +193,9 @@ fn queen_dig_yields_dirt_and_dump_refills_the_cell() {
     let mut s = founded(42);
     let q = queen(&s);
     let (tx, ty) = walk_and_dig(&mut s, 60);
-    // no second dig while hauling
-    let ((sx2, sy2), (tx2, ty2)) = dig_site(&s);
-    let _ = (sx2, sy2);
-    assert!(!s.issue(Command::Dig {
-        ant: q.id,
-        tx: tx2,
-        ty: ty2
-    }));
-    // dumping underground refills an adjacent empty cell — the one just dug
+    // a second block may be dug while hauling one (capacity two) — the
+    // dedicated test below covers the full stack; here one block is enough
+    // dumping underground refills the adjacent block just dug
     assert!(s.issue(Command::Drop { ant: q.id, tx, ty }));
     assert_eq!(s.tile_at(Layer::Underground, tx, ty), DIRT);
     assert_eq!(queen(&s).aux, 0.0);
@@ -518,4 +512,51 @@ fn founding_soil_is_seeded_deterministically() {
     assert!(orange > 50, "orange soil exists to be discovered ({orange})");
     assert!(silver > 50, "silver soil exists to be discovered ({silver})");
     assert_eq!(a.patches.len(), 4, "two orange + two silver dust patches");
+}
+
+#[test]
+fn queen_hauls_two_dirt_blocks_before_dumping() {
+    let mut s = founded(42);
+    let q = queen(&s);
+    // two distinct frontier blocks
+    let (a_tx, a_ty) = walk_and_dig(&mut s, 60);
+    // still carrying one block — a second dig elsewhere is allowed
+    let ((sx, sy), (b_tx, b_ty)) = dig_site(&s);
+    assert!(s.issue(Command::Move {
+        ant: q.id,
+        x: sx as f64 + 0.5,
+        y: sy as f64 + 0.5
+    }));
+    for _ in 0..60 {
+        s.tick();
+    }
+    assert!(s.issue(Command::Dig { ant: q.id, tx: b_tx, ty: b_ty }));
+    for _ in 0..140 {
+        s.tick();
+    }
+    // full: a third dig is refused until dumped
+    let ((sx3, sy3), (c_tx, c_ty)) = dig_site(&s);
+    let _ = (sx3, sy3);
+    assert!(
+        !s.issue(Command::Dig {
+            ant: q.id,
+            tx: c_tx,
+            ty: c_ty
+        }),
+        "third dig must be refused at capacity"
+    );
+    // each dump refills one adjacent block: dump B where she stands first
+    assert!(s.issue(Command::Drop { ant: q.id, tx: b_tx, ty: b_ty }));
+    assert_eq!(queen(&s).aux, 2.0, "still hauling one block after the first dump");
+    // walk back into the dug-out block A and refill it
+    assert!(s.issue(Command::Move {
+        ant: q.id,
+        x: a_tx as f64 + 0.5,
+        y: a_ty as f64 + 0.5
+    }));
+    for _ in 0..140 {
+        s.tick();
+    }
+    assert!(s.issue(Command::Drop { ant: q.id, tx: a_tx, ty: a_ty }));
+    assert_eq!(queen(&s).aux, 0.0, "all dirt dumped");
 }

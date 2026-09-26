@@ -68,6 +68,8 @@ pub const FOUNDING_EGGS: u32 = 4;
 pub const FOUNDING_EGG_HATCH: f64 = 180.0;
 /// Seconds per dirt cell dug by the founding queen.
 pub const QUEEN_DIG_TIME: f64 = 1.0;
+/// Dirt blocks an ant may carry before having to dump (dig two, haul once).
+pub const DIRT_CAPACITY: u32 = 2;
 
 // --- soil / food logistics ---
 
