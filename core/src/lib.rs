@@ -260,6 +260,7 @@ impl WoaSim {
                         Activity::Digging => wire::ACT_DIGGING,
                         Activity::Fighting => wire::ACT_FIGHTING,
                         Activity::Flying => wire::ACT_FLYING,
+                        Activity::Harvesting => wire::ACT_HARVESTING,
                     };
                     let (tag, data) = match a.carry {
                         Carry::None => (wire::CARRY_NONE, 0.0),

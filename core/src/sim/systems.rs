@@ -115,6 +115,40 @@ impl Sim {
         }
     }
 
+    /// Advance every harvester: shared progress lives on the Food entity;
+    /// a completed unit fills the mandibles and the ant returns to Idle
+    /// (the forage/deliver loop re-plans on the next ai tick).
+    pub(crate) fn harvesting(&mut self) {
+        let ids = self.ant_ids();
+        for id in ids {
+            let Some(&ent) = self.ids.get(&id) else { continue };
+            let state = match self.ecs.get::<&AntState>(ent) {
+                Ok(q) => (*q).clone(),
+                Err(_) => continue,
+            };
+            let AntState::Harvesting { target } = state else { continue };
+            let Some(&fent) = self.ids.get(&target) else {
+                self.set_state(id, AntState::Idle);
+                continue;
+            };
+            let amount = self
+                .ecs
+                .get::<&Food>(fent)
+                .map(|f| f.amount)
+                .unwrap_or(0);
+            if amount == 0 {
+                self.set_state(id, AntState::Idle);
+                continue;
+            }
+            if let Some(kind) = self.advance_harvest(fent) {
+                if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                    *q = Carry::Food(kind);
+                }
+                self.set_state(id, AntState::Idle);
+            }
+        }
+    }
+
     pub(crate) fn digging(&mut self) {
         let ids = self.ant_ids();
         for id in ids {

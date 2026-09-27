@@ -299,6 +299,7 @@ impl Sim {
         self.movement();
         self.discover();
         self.digging();
+        self.harvesting();
         self.combat();
         self.predators();
         self.cleanup_deaths();

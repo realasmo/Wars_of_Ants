@@ -27,6 +27,7 @@ const ACTIVITY = {
   digging: 2,
   fighting: 3,
   flying: 4,
+  harvesting: 5,
 } as const;
 
 const CARRY = {

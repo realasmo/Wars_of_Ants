@@ -1212,3 +1212,110 @@ fn worker_dig_collects_dirt_then_auto_dumps() {
     }
     assert!(dumped, "worker auto-dumps the spoil after digging");
 }
+
+#[test]
+fn harvesting_is_a_visible_activity_and_fills_mandibles() {
+    let mut s = founded(42);
+    let q = queen(&s);
+    let wid = s.dev_spawn(DevSpawn::Worker, q.x, q.y);
+    let snap = |s: &Sim, id: u32| {
+        s.snapshot()
+            .into_iter()
+            .find_map(|e| match e {
+                EntitySnap::Ant(a) if a.id == id => Some((a.activity, a.carry)),
+                _ => None,
+            })
+            .unwrap()
+    };
+    // a strawberry beside the entrance (4s/unit — the Harvesting state is
+    // visible for the whole pickup)
+    let (ex, ey) = s.world.entrance.unwrap();
+    s.dev_spawn(DevSpawn::Source(4), ex as f64 + 1.5, ey as f64 - 1.5);
+    // moves are same-layer: hop the entrance first, then walk to the source
+    assert!(s.issue(Command::UseEntrance { ant: wid }));
+    for _ in 0..400 {
+        s.tick();
+        let on_surface = s
+            .snapshot()
+            .into_iter()
+            .any(|e| matches!(e, EntitySnap::Ant(a) if a.id == wid && a.layer == Layer::Surface));
+        if on_surface {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: wid,
+        x: ex as f64 + 1.5,
+        y: ey as f64 - 1.5
+    }));
+    let mut saw_harvesting = false;
+    let mut farmed = false;
+    for _ in 0..1500 {
+        s.tick();
+        let (act, carry) = snap(&s, wid);
+        if act == Activity::Harvesting {
+            saw_harvesting = true;
+        }
+        if matches!(carry, Carry::Food(_)) {
+            farmed = true;
+            break;
+        }
+    }
+    assert!(saw_harvesting, "harvesting shows as an activity");
+    assert!(farmed, "completed unit lands in the mandibles");
+}
+
+#[test]
+fn queen_farms_and_banks_on_silver() {
+    let mut s = founded(42);
+    let q = queen(&s);
+    let (ex, ey) = s.world.entrance.unwrap();
+    // strawberry by the hole; the queen crosses, farms one unit, comes
+    // home and banks it on a painted silver cell
+    s.dev_spawn(DevSpawn::Source(4), ex as f64 + 1.5, ey as f64 - 1.5);
+    assert!(s.issue(Command::UseEntrance { ant: q.id }));
+    for _ in 0..400 {
+        s.tick();
+        if queen(&s).layer == Layer::Surface {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: q.id,
+        x: ex as f64 + 1.5,
+        y: ey as f64 - 1.5
+    }));
+    let mut harvested = false;
+    for _ in 0..800 {
+        s.tick();
+        if matches!(queen(&s).carry, Carry::Food(_)) {
+            harvested = true;
+            break;
+        }
+    }
+    assert!(harvested, "the queen can farm a source herself");
+
+    // paint silver inside the chamber and walk her onto it
+    s.dev_set_soil(1, ex + 1, ey + 4, 2);
+    assert!(s.issue(Command::UseEntrance { ant: q.id }));
+    for _ in 0..400 {
+        s.tick();
+        if queen(&s).layer == Layer::Underground {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: q.id,
+        x: ex as f64 + 1.5,
+        y: ey as f64 + 4.5
+    }));
+    let before = s.colony.carbs;
+    for _ in 0..600 {
+        s.tick();
+        if queen(&s).carry == Carry::None {
+            break;
+        }
+    }
+    assert_eq!(queen(&s).carry, Carry::None, "queen banks her haul");
+    assert!(s.colony.carbs > before, "the banked unit lands in the store");
+}

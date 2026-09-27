@@ -141,6 +141,23 @@ impl Sim {
                         self.set_attack_after(id, None);
                         self.set_retry(id, 60);
                     }
+                    continue;
+                }
+                // the queen is player-driven and never takes forage jobs,
+                // but she may farm like any ant: stand on food with free
+                // mandibles → visibly work it; a full haul banks on silver
+                // soil (pantry cells) when she walks over one
+                if carrying == Carry::None && pos.layer == Layer::Surface {
+                    if let Some(fid) = self.food_on_tile(tile_of(pos.p)) {
+                        self.set_state(id, AntState::Harvesting { target: fid });
+                    }
+                } else if pos.layer == Layer::Underground && matches!(carrying, Carry::Food(_)) {
+                    let tile = tile_of(pos.p);
+                    if self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER
+                        && self.cell_food(Layer::Underground, tile) < FOOD_CELL_CAP
+                    {
+                        self.store_food(id, tile);
+                    }
                 }
                 continue;
             }
@@ -231,16 +248,10 @@ impl Sim {
             match job {
                 Job::Manual => {
                     if pos.layer == Layer::Surface && carrying == Carry::None {
+                        // stand on food → visibly work it (Harvesting drives
+                        // the mandible animation and fills hands on pickup)
                         if let Some(fid) = self.food_on_tile(tile_of(pos.p)) {
-                            if let Some(&fent) = self.ids.get(&fid) {
-                                if let Some(kind) = self.advance_harvest(fent) {
-                                    if let Some(&aent) = self.ids.get(&id) {
-                                        if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
-                                            *q = Carry::Food(kind);
-                                        }
-                                    }
-                                }
-                            }
+                            self.set_state(id, AntState::Harvesting { target: fid });
                         }
                     } else if matches!(carrying, Carry::Dirt { .. }) {
                         // a spoil-laden manual worker can't harvest (hands
@@ -344,18 +355,30 @@ impl Sim {
                     }
                 }
                 Job::Fetch(fid) => {
-                    let fent = match self.ids.get(&fid) {
-                        Some(&e) => e,
-                        None => {
-                            self.set_job(id, Job::Idle);
-                            continue;
-                        }
-                    };
+                    if !self.ids.contains_key(&fid) {
+                        self.set_job(id, Job::Idle);
+                        continue;
+                    }
                     if matches!(carrying, Carry::Dirt { .. }) {
                         // spoil picked up en route (auto-digging through soft
                         // tiles) must not be silently overwritten by the
                         // harvest — dump it, then the forage loop resumes
                         self.haul_out_dirt(id);
+                        continue;
+                    }
+                    // unit already in the mandibles → hand off to delivery
+                    // (pantry run, or dig out more nest when it's full)
+                    if let Carry::Food(_) = carrying {
+                        match self.pantry_tile() {
+                            Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
+                            None => {
+                                self.ev(format!("pantry full — ant #{id} digs expansion"));
+                                match self.pick_dig_target() {
+                                    Some(t) => self.set_job(id, Job::DigTile(t.0, t.1)),
+                                    None => self.set_retry(id, 100),
+                                }
+                            }
+                        }
                         continue;
                     }
                     let Some((ftile, amount)) = self.food_info(fid) else {
@@ -365,25 +388,7 @@ impl Sim {
                     if pos.layer == Layer::Surface {
                         if tile_of(pos.p) == ftile {
                             if amount > 0 {
-                                if let Some(kind) = self.advance_harvest(fent) {
-                                    if let Some(&aent) = self.ids.get(&id) {
-                                        if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
-                                            *q = Carry::Food(kind);
-                                        }
-                                    }
-                                    match self.pantry_tile() {
-                                        Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
-                                        None => {
-                                            // pantry full: dig out more nest first
-                                            self.ev(format!("pantry full — ant #{id} digs expansion"));
-                                            match self.pick_dig_target() {
-                                                Some(t) => self.set_job(id, Job::DigTile(t.0, t.1)),
-                                                None => self.set_retry(id, 100),
-                                            }
-                                        }
-                                    }
-                                }
-                                // else: still harvesting — stay on the source
+                                self.set_state(id, AntState::Harvesting { target: fid });
                             } else {
                                 self.set_job(id, Job::Idle);
                             }

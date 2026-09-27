@@ -22,6 +22,7 @@ pub const ACT_MOVING: u8 = 1;
 pub const ACT_DIGGING: u8 = 2;
 pub const ACT_FIGHTING: u8 = 3;
 pub const ACT_FLYING: u8 = 4;
+pub const ACT_HARVESTING: u8 = 5;
 
 pub const CARRY_NONE: u8 = 0;
 pub const CARRY_DIRT: u8 = 1;
@@ -48,7 +49,7 @@ pub fn food_code(kind: FoodKind) -> u8 {
 /// decoder assertion. Bump `snapshot` when the layout changes.
 pub fn snapshot_spec() -> String {
     format!(
-        "{{\"snapshot\":1,\"stride\":10,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}}}}"
+        "{{\"snapshot\":1,\"stride\":10,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}}}}"
     )
 }
 
@@ -62,6 +63,8 @@ pub enum Activity {
     Fighting,
     /// The founding queen is airborne (flight phase).
     Flying,
+    /// Working a food source or picking up a loose pile.
+    Harvesting,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -199,6 +202,7 @@ impl Sim {
                     AntState::Moving { .. } => Activity::Moving,
                     AntState::Digging { .. } => Activity::Digging,
                     AntState::Fighting { .. } => Activity::Fighting,
+                    AntState::Harvesting { .. } => Activity::Harvesting,
                 }
             };
             v.push(EntitySnap::Ant(AntSnap {
@@ -410,6 +414,7 @@ impl Sim {
         };
         match &*st {
             AntState::Idle => ("idle".into(), String::new()),
+            AntState::Harvesting { target } => ("harv".into(), format!("#{target}")),
             AntState::Moving {
                 path,
                 next,

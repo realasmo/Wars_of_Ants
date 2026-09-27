@@ -90,6 +90,12 @@ pub enum AntState {
     Fighting {
         target: u32,
     },
+    /// Standing on a food source/loose pile, working it (the progress bar
+    /// is shared and lives on the Food entity). Completing a unit fills
+    /// the mandibles and returns the ant to Idle.
+    Harvesting {
+        target: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

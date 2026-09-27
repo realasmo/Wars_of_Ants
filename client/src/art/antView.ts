@@ -373,6 +373,10 @@ export class AntView {
     const hl = art.headLen;
     const hw = art.headWid;
     const now = performance.now() / 1000;
+    // working mandibles come with a subtle head peck (dig/farm rhythm);
+    // bobbing the composed head frame keeps mandibles + antennae attached
+    const working = f.activity === 'digging' || f.activity === 'harvesting';
+    const hr = this.headRot + (working ? Math.sin(now * 14) * 0.07 : 0);
 
     // ground shadow rides the body, faded + offset in flight
     AntView.place(this.shadowS, this.wx, this.wy, this.facing, -0.3, flying ? 0.18 : 0.06, 0, this.unit);
@@ -387,7 +391,7 @@ export class AntView {
     // head plane: pivot at the neck, rotation = follow-through + idle turns
     const hx = 0.56 * this.unit;
     const hy = this.sway * this.unit;
-    AntView.place(this.headS, this.wx, this.wy, this.facing, hx, hy, this.headRot, this.unit);
+    AntView.place(this.headS, this.wx, this.wy, this.facing, hx, hy, hr, this.unit);
 
     // mandibles: bases at the head front corners; open angle per activity
     const carrying = f.carry.t !== 'none';
@@ -409,6 +413,9 @@ export class AntView {
     let open: number;
     if (f.activity === 'digging') {
       open = 0.12 + 0.3 * (0.5 + 0.5 * Math.sin(now * 16));
+    } else if (f.activity === 'harvesting') {
+      // farming: front mandibles work the source in a steady pick rhythm
+      open = 0.1 + 0.32 * (0.5 + 0.5 * Math.sin(now * 12));
     } else if (fighting) {
       // alert flare (≈48°) → fast snap to locked → brief clamp → reopen;
       // soldiers bite on a slightly slower, heavier cadence
@@ -430,8 +437,8 @@ export class AntView {
     }
     const mbase = 0.1 + hl / 2;
     this.mandibleOpen = open;
-    this.placeOn(this.mandS[0], hx, hy, this.headRot, mbase, hw * 0.22, open);
-    this.placeOn(this.mandS[1], hx, hy, this.headRot, mbase, -hw * 0.22, -open);
+    this.placeOn(this.mandS[0], hx, hy, hr, mbase, hw * 0.22, open);
+    this.placeOn(this.mandS[1], hx, hy, hr, mbase, -hw * 0.22, -open);
 
     // antennae: base rotation + idle wave + counter-tilt on turns + speed sweep
     const walking = this.speedEma > 0.05;
@@ -450,7 +457,7 @@ export class AntView {
       }
       const la = side * 0.7 + wave + counter + sweepBase * side;
       const abase = 0.08 + hl * 0.42;
-      this.placeOn(this.antS[i], hx, hy, this.headRot, abase, side * hw * 0.12, la);
+      this.placeOn(this.antS[i], hx, hy, hr, abase, side * hw * 0.12, la);
       // club chains at the scape tip, curled slightly
       const tipAng = this.antS[i].rotation;
       this.clubS[i].position.set(
@@ -470,7 +477,7 @@ export class AntView {
     }
     const lagTarget = Math.max(-0.25, Math.min(0.25, this.angVel * 0.35));
     this.itemLagY += (lagTarget - this.itemLagY) * Math.min(1, 6 * dt);
-    this.placeOn(this.itemS, hx, hy, this.headRot, 0.1 + hl / 2 + 0.16, this.itemLagY, 0);
+    this.placeOn(this.itemS, hx, hy, hr, 0.1 + hl / 2 + 0.16, this.itemLagY, 0);
 
     // wings (queen): stubs at rest, fluttering pair in flight; both sweep
     // back-outward (−X content, mirrored tilt per side)
