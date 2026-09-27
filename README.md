@@ -8,35 +8,63 @@ Design reference: AntWar.io (see `docs/BASED-ON.md`); world content draft: `docs
 - **Remote (origin):** `git@github.com:realasmo/Wars_of_Ants.git`
 - **SSH key:** `/root/.ssh/key_Wars_of_Ants` (configured via repo-local `core.sshCommand`)
 
-## Current status (2026-09-26)
+## Current status (2026-09-27) — version 0.1.00.50-dev
 
 **Playable:** title → team select → flying queen → found nest → excavate
 (2×2 blocks, dirt hauling) → orange-soil nursery (egg transport) → first
 workers → scout and harvest finite sources (protein/carbs/water) → survive
-spiders. Engine: deterministic 20 tps core (native + WASM byte-identical),
-replays (v2), e2e playtest suite, in-game dev console (`` ` ``) with a live
-sim event log. Version 0.6.0.
+spiders → **squad play** (X-menu: recruit/release followers, silver rings).
+Engine: deterministic 20 tps core (native + WASM byte-identical), replays
+(v2), e2e playtest suite, in-game dev console (`` ` ``) with a live sim
+event log. Every game change bumps `GAME_VERSION` (menu + corner).
 
-**Code-quality wave shipped (see `docs/AUDIT.md`):** merciless audit of
-everything so far, then — `sim.rs` split into `sim/` modules (worldgen,
-commands, ai, systems, food, geom, snapshot); the snapshot is a typed layer
-(`Carry` enum in the core, named shapes + `decode.ts` boundary in the client,
-boot-time wire-spec assertion via `snapshot_spec()`); `canonical_state()` is
-a true full-state digest (soil grids, known sources, RNG state, AI intents);
-fixed: half-open `irange` mis-tuning every balance range, the
-pantry-saturation deadlock, the queen retry-freeze, dropped queen attack
-intents, friendly fire, underground chase routing, and the three shipped
-`aux`-overload client bugs. Perf: food-by-tile index (legacy test suite 10×
-faster), epoch-gated tile/soil re-pulls, event ring.
+**Ants are procedural and alive** (ticket `docs/TICKET-procedural-ants.md`,
+shipped): part-based rigs — planted-feet tripod gait (feet never slide),
+two-bone IK legs with knees, per-caste silhouettes and per-team palettes,
+idle micro-motion (antennae, breathing, head turns), carrying between the
+mandibles, a mandible state machine (idle closed / alert flare + bite snap
+in combat / parted to item width while carrying / dig + harvest work
+rhythms), queen wings and wing scars. Live art set: **Camponotus**
+(carpenter ants — worker/soldier/queen readable at a glance; intake
+`docs/ant-proportions-intake-camponotus.md`; re-skinning a species =
+editing `client/src/art/ants.ts` numbers).
 
-**Decided next (see TODO.md):** Wave B — water healing + corpses + Medic —
-then C (neutral creatures), D (aphid farming + honey ants), E (bosses);
-drafts and costs in `docs/WORLD-DESIGN.md`.
+**User TODO batch (2026-09-27) — F1–F3 shipped:**
+- **F1:** harvesting is a real visible activity (mandible work + head
+  peck); the queen can farm sources and bank on silver soil.
+- **F2:** map collectibles — wet wood builds a food-storage block, dry
+  wool an egg-friendly block (haul, place, reversible).
+- **F3:** squad follow — worker/soldier X-menu (all-in-sight / one /
+  soldiers / release), followers keep near you and cross layers, silver
+  squad rings, replay-logged commands.
+- **F4 (next):** the queen's X-menu — egg types with resource costs
+  (Worker / Soldier / Honey / Medic), worker→soldier conversion, fallen-
+  ant rescue; absorbs Wave B (corpses/healing) and reaches toward the
+  aphid economy.
 
-**Open balance questions from playtesting:** sparse-source survival is sharp
-(90 s starvation, seed-dependent) — knobs: `SOURCES`, `CARB_LOW`,
-`EAT_PERIOD`; orange/silver density (3.5% each); founding lottery (natural
-orange in the starter chamber ~17% of seeds).
+**Playtest-fix wave:** worker digging now obeys dirt capacity and
+auto-hauls spoil to the surface; eggs can be carried through the entrance;
+the carb-low slowdown is gone and the founding grace also suspends eating
+(the reserves now survive to meet the first workers — the queen-death
+death-spiral is fixed); refused actions explain themselves in the help
+bar; HUD shows carried items and the map size.
+
+**Code-quality wave shipped (see `docs/AUDIT.md`):** `sim/` module split;
+typed snapshot layer (core `Carry` enum + client `decode.ts` boundary +
+boot wire-spec assertion); true full-state canonical digest; irange,
+pantry-deadlock, queen retry-freeze, dropped attack intents, friendly
+fire, underground chase fixes; food index + epoch-gated re-pulls.
+
+**Decided next:** F4 brood production (see TODO.md), then C (neutral
+creatures), D (aphid farming), E (bosses); drafts and costs in
+`docs/WORLD-DESIGN.md`. The visual/lighting ticket menu (baked AO first)
+follows the content waves; one effect per ticket, rendering-only.
+
+**Open balance questions from playtesting:** founding lottery (natural
+orange in the starter chamber ~17% of seeds); orange/silver density
+(3.5% each); sparse-source survival sharpness (knobs: `SOURCES`,
+`START_FOOD`, `STARVE_TIME`); do soldiers dig; should clicks auto-route
+across layers.
 
 ## Why this project exists
 
