@@ -1,6 +1,6 @@
 use woa_core::{
     Activity, AntSnap, Carry, Caste, Command, DevSpawn, EggSnap, EntitySnap, FoodKind, FoodRole,
-    Layer, Phase, Sim, Team, DIRT, EMPTY, SOURCES,
+    Layer, Phase, Sim, Team, DIRT, EMPTY, SOURCES, START_FOOD,
 };
 
 fn queen(s: &Sim) -> AntSnap {
@@ -315,6 +315,24 @@ fn founding_timer_lays_four_eggs_then_workers_hatch_on_orange() {
 
 fn phase(s: &Sim) -> Phase {
     s.colony.phase
+}
+
+#[test]
+fn solo_founding_queen_does_not_burn_the_reserves() {
+    let mut s = founded(42);
+    // the whole solo window (60s excavation + 180s incubation) passes with
+    // no possible income — the reserves must survive to meet the workforce
+    for _ in 0..(235 * 20) {
+        s.tick();
+    }
+    assert!(
+        !s.colony.dead,
+        "lone founding queen must not die during incubation"
+    );
+    assert_eq!(
+        s.colony.carbs, START_FOOD,
+        "the solo queen must not eat through the founding reserves"
+    );
 }
 
 #[test]

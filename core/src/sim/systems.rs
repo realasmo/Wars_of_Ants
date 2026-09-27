@@ -479,18 +479,24 @@ impl Sim {
             }
         }
         self.colony.lay_cooldown -= DT;
+        // founding grace: the lone queen carries reserves — while no workers
+        // exist there is no possible income, so she neither eats them away
+        // nor starves. The reserves exist to bridge the brood incubation and
+        // reach the first foragers.
+        let grace = self.colony.founding && self.caste_counts().0 == 0;
         if self.colony.carbs > 0 {
-            self.colony.eat_t += DT;
-            if self.colony.eat_t >= EAT_PERIOD {
-                self.colony.carbs -= 1;
+            if !grace {
+                self.colony.eat_t += DT;
+                if self.colony.eat_t >= EAT_PERIOD {
+                    self.colony.carbs -= 1;
+                    self.colony.eat_t = 0.0;
+                }
+            } else {
                 self.colony.eat_t = 0.0;
             }
             self.colony.starve_t = 0.0;
         } else {
             self.colony.eat_t = 0.0;
-            // founding grace: the lone queen carries reserves — starvation
-            // only threatens a colony that has a workforce
-            let grace = self.colony.founding && self.caste_counts().0 == 0;
             if !grace {
                 self.colony.starve_t += DT;
                 if self.colony.starve_t >= STARVE_TIME {

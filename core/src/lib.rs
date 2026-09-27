@@ -6,7 +6,7 @@ mod rng;
 mod sim;
 mod world;
 
-pub use balance::{SourceSpec, UnitStats, SOURCES};
+pub use balance::{SourceSpec, UnitStats, SOURCES, START_FOOD};
 pub use components::{AntState, Carry, Caste, FoodKind, Layer, WorkerAi};
 pub use sim::{
     Activity, AntSnap, Colony, Command, Config, DevSpawn, EggSnap, EntitySnap, FoodRole,
