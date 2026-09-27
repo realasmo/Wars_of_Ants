@@ -87,13 +87,18 @@ function bakeParts(renderer: PixiRenderer, caste: Caste, pal: Palette): AntParts
   const tibiaLen = legLen * (1 - art.femurFrac);
   const lw = art.limbWid;
 
-  // --- thorax: pronotum + mesonotum (+ propodeal spines) + the two-node
-  //     waist (rigid relative to the thorax — one quad, one draw) ---
+  // --- thorax: pronotum + mesonotum + the waist (rigid relative to the
+  //     thorax — one quad, one draw); dealate queens get wing scars ---
   const thorax = bake(renderer, (g) => {
-    // petiole + postpetiole behind the thorax (two nodes — never one blob)
-    g.circle(u(-0.52), 0, u(art.petioleWid / 2 + 0.03)).fill(pal.head).stroke({ width: ow, color: pal.outline });
-    g.ellipse(u(-0.34), 0, u(0.13), u(art.postpetioleWid / 2 + 0.02)).fill(pal.head).stroke({ width: ow, color: pal.outline });
-    if (art.wings === 'none') {
+    // waist nodes behind the thorax (Camponotus: ONE node; Carebara had two);
+    // the petiole is dark on every caste (gaster color, not head color)
+    if (art.waistNodes === 2) {
+      g.circle(u(-0.52), 0, u(art.petioleWid / 2 + 0.03)).fill(pal.gaster).stroke({ width: ow, color: pal.outline });
+      g.ellipse(u(-0.34), 0, u(0.13), u(art.postpetioleWid / 2 + 0.02)).fill(pal.gaster).stroke({ width: ow, color: pal.outline });
+    } else {
+      g.circle(u(-0.48), 0, u(art.petioleWid / 2 + 0.03)).fill(pal.gaster).stroke({ width: ow, color: pal.outline });
+    }
+    if (art.wings === 'none' && caste !== 'queen') {
       for (const s of [-1, 1]) {
         g.moveTo(u(-0.42), u(s * 0.3)).lineTo(u(-0.66), u(s * 0.44)).lineTo(u(-0.4), u(s * 0.42)).closePath()
           .fill(pal.thorax).stroke({ width: ow, color: pal.outline });
@@ -101,25 +106,43 @@ function bakeParts(renderer: PixiRenderer, caste: Caste, pal: Palette): AntParts
     }
     g.ellipse(u(-0.2), 0, u(0.32), u(0.44)).fill(pal.thorax).stroke({ width: ow, color: pal.outline });
     g.ellipse(u(0.16), 0, u(0.36), u(0.5)).fill(pal.thorax).stroke({ width: ow, color: pal.outline });
-    g.ellipse(u(-0.16), u(-0.16), u(0.16), u(0.1)).fill({ color: pal.highlight, alpha: 0.3 });
-    g.ellipse(u(0.2), u(-0.2), u(0.18), u(0.12)).fill({ color: pal.highlight, alpha: 0.3 });
+    if (art.wings !== 'scars') {
+      // gloss highlights (on scar queens these read as glints that drown
+      // out the wing-scratch marks, so they get scars instead)
+      g.ellipse(u(-0.16), u(-0.16), u(0.16), u(0.1)).fill({ color: pal.highlight, alpha: 0.3 });
+      g.ellipse(u(0.2), u(-0.2), u(0.18), u(0.12)).fill({ color: pal.highlight, alpha: 0.3 });
+    } else {
+      // dealate gyne: wing-scratch marks — two clearly separated parallel
+      // strokes per side sweeping back from the midline, drawn ABOVE the
+      // thorax fills (dark-on-dark is invisible, so they use the highlight
+      // tone at full intent)
+      for (const s of [-1, 1]) {
+        g.moveTo(u(0.05), u(s * 0.18)).lineTo(u(-0.3), u(s * 0.46))
+          .stroke({ width: P * 0.032, color: pal.highlight, alpha: 0.6 });
+        g.moveTo(u(-0.08), u(s * 0.14)).lineTo(u(-0.46), u(s * 0.36))
+          .stroke({ width: P * 0.032, color: pal.highlight, alpha: 0.6 });
+      }
+    }
   });
 
-  // --- head: pivot at the neck (rear center); cordate lobes on the soldier ---
+  // --- head: pivot at the neck (rear center); 'rect' = straight-sided
+  //     major/gyne head, 'oval' = minor worker ---
   const hw = art.headWid;
   const hl = art.headLen;
   const hc = 0.08 + hl / 2;
   const head = bake(renderer, (g) => {
-    if (caste === 'soldier') {
-      for (const s of [-1, 1]) {
-        g.circle(u(hc - hl * 0.4), u(s * hw * 0.32), u(hw * 0.3)).fill(pal.head).stroke({ width: ow, color: pal.outline });
-      }
+    if (art.headShape === 'rect') {
+      g.roundRect(u(hc - hl / 2 - 0.04), u(-hw / 2), u(hl + 0.12), u(hw), u(hw * 0.18))
+        .fill(pal.head).stroke({ width: ow, color: pal.outline });
+    } else {
+      g.ellipse(u(hc), 0, u(hl / 2 + 0.04), u(hw / 2)).fill(pal.head).stroke({ width: ow, color: pal.outline });
     }
-    g.ellipse(u(hc), 0, u(hl / 2 + 0.04), u(hw / 2)).fill(pal.head).stroke({ width: ow, color: pal.outline });
     g.moveTo(u(hc + hl / 2 - 0.06), 0).lineTo(u(hc - hl * 0.25), 0)
       .stroke({ width: P * 0.022, color: pal.gaster, alpha: 0.6 });
-    g.circle(u(hc + hl * 0.08), u(-hw * 0.36), u(0.05)).fill(pal.outline);
-    g.circle(u(hc + hl * 0.08), u(hw * 0.36), u(0.05)).fill(pal.outline);
+    // compound eyes at mid-head SIDES (behind the mandible bases — the
+    // broad major mandibles occlude anything near the front rim)
+    g.circle(u(hc - hl * 0.02), u(-hw * 0.42), u(0.05)).fill(pal.outline);
+    g.circle(u(hc - hl * 0.02), u(hw * 0.42), u(0.05)).fill(pal.outline);
     g.ellipse(u(hc + 0.02), u(-hw * 0.2), u(hl * 0.16), u(hw * 0.1)).fill({ color: pal.highlight, alpha: 0.25 });
   });
 
@@ -143,6 +166,13 @@ function bakeParts(renderer: PixiRenderer, caste: Caste, pal: Palette): AntParts
     }
     g.ellipse(u(-gl * 0.9), 0, u(gl * 0.08), u(gw * 0.2)).fill({ color: pal.highlight, alpha: 0.22 });
     g.ellipse(u(-gl * 0.5), u(-gw * 0.16), u(gl * 0.18), u(gw * 0.1)).fill({ color: pal.highlight, alpha: 0.16 });
+    if (art.gasterBands) {
+      // gyne pubescence: pale transverse tergite bands across the gaster
+      for (const bx of [0.35, 0.55, 0.75] as const) {
+        g.moveTo(u(-gl * bx), u(-gw * 0.36)).lineTo(u(-gl * bx), u(gw * 0.36))
+          .stroke({ width: P * 0.05, color: pal.highlight, alpha: 0.45 });
+      }
+    }
   });
 
   // --- waist merged into the thorax texture (above) ---
@@ -163,15 +193,18 @@ function bakeParts(renderer: PixiRenderer, caste: Caste, pal: Palette): AntParts
     tibiaLen,
   );
 
-  // --- mandible: curved fang pivoting at its base, dark tip ---
+  // --- mandible: curved fang pivoting at its base, dark tip; majors
+  //     (mandibleLen ≥ 0.3) get a broader triangular base ---
   const ml = art.mandibleLen * hw;
+  const broad = art.mandibleLen >= 0.4 ? 2.2 : art.mandibleLen >= 0.3 ? 1.6 : 1;
+  const mfill = pal.mandible ?? pal.limbs;
   const mandible = bake(renderer, (g) => {
-    g.moveTo(0, u(ml * 0.1))
-      .bezierCurveTo(u(ml * 0.45), u(ml * 0.3), u(ml * 0.8), u(ml * 0.1), u(ml), u(-ml * 0.3))
+    g.moveTo(0, u(ml * 0.1 * broad))
+      .bezierCurveTo(u(ml * 0.45), u(ml * 0.3 * broad), u(ml * 0.8), u(ml * 0.1), u(ml), u(-ml * 0.3))
       .lineTo(u(ml * 0.88), u(-ml * 0.24))
-      .bezierCurveTo(u(ml * 0.7), 0, u(ml * 0.35), u(ml * 0.12), 0, u(-ml * 0.08))
+      .bezierCurveTo(u(ml * 0.7), 0, u(ml * 0.35), u(ml * 0.12), 0, u(-ml * 0.08 * broad))
       .closePath()
-      .fill(pal.limbs)
+      .fill(mfill)
       .stroke({ width: ow, color: pal.outline });
     g.circle(u(ml * 0.97), u(-ml * 0.27), u(0.045)).fill(pal.outline);
   }, ml);
@@ -183,7 +216,7 @@ function bakeParts(renderer: PixiRenderer, caste: Caste, pal: Palette): AntParts
   const scape = bake(renderer, (g) => capsule(g, scapeLen, 0.07, 0.055, pal.limbs, pal.outline), scapeLen);
   const club = bake(renderer, (g) => capsule(g, clubLen, 0.085, 0.11, pal.accent, pal.outline), clubLen);
 
-  // --- wings: stubs (queen at rest) + full flight pair; both sweep
+  // --- wings: stubs (resting queens) + full flight pair; both sweep
   //     BACKWARD from a root near the thorax rear (−X content) ---
   const wingStub =
     art.wings === 'stubs'
@@ -191,7 +224,7 @@ function bakeParts(renderer: PixiRenderer, caste: Caste, pal: Palette): AntParts
           g.ellipse(u(-0.24), 0, u(0.18), u(0.075)).fill({ color: 0xd8cfc0, alpha: 0.5 })
             .stroke({ width: ow * 0.6, color: pal.outline, alpha: 0.55 });
         })
-      : null;
+      : null; // 'scars' queens bake their wing marks into the thorax
   const wing = bake(renderer, (g) => {
     g.ellipse(u(-0.85), 0, u(0.82), u(0.24)).fill({ color: 0xd8cfc0, alpha: 0.5 })
       .stroke({ width: ow * 0.6, color: pal.outline, alpha: 0.55 });

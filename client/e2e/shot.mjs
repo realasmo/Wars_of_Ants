@@ -79,15 +79,18 @@ try {
     await page.evaluate(() => window.__woa.step(120));
   }
 
-  // caste lineup: spawned worker + soldier clear of the bigger queen, idle
+  // caste lineup: spawned worker + soldier clear of the bigger queen; PAUSE
+  // before the shot so the free-roaming castes can't overlap into a chimera
   const q3 = await page.evaluate(() => { const s = window.__woa.state(); return { x: s.queen.x, y: s.queen.y }; });
   await page.evaluate((p) => {
-    window.__woa.spawn('worker', p.x + 3.6, p.y);
-    window.__woa.spawn('soldier', p.x - 3.8, p.y);
+    window.__woa.spawn('worker', p.x + 4.2, p.y);
+    window.__woa.spawn('soldier', p.x - 4.4, p.y);
   }, q3);
   await page.evaluate(() => window.__woa.step(8));
+  await page.evaluate(() => window.__woa.pause());
   await page.waitForTimeout(1100);
   await page.screenshot({ path: `${OUT}/castes.png` });
+  await page.evaluate(() => window.__woa.pause());
 
   // walking worker: select it (click+verify in ONE evaluate — split calls
   // race the live rAF loop), then send it across the chamber

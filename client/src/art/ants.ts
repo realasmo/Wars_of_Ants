@@ -2,30 +2,32 @@
 // Render code reads these values and nothing else: changing the look means
 // editing this file, never the render code (ticket: procedural-ants).
 //
-// Proportion values come from the photo intake (docs/ant-proportions-intake.md,
-// Carebara diversa, GLM-Vision 2026-09-27). Units: thorax length = 1.0 unless
-// the field says otherwise. The queen is extrapolated (no queen photos): the
-// intake's starting point is the soldier's gaster emphasis pushed further with
-// a worker-sized head, plus wing stubs.
+// LIVE SET: Camponotus (carpenter ants) — values from the photo intake
+// (docs/ant-proportions-intake-camponotus.md, GLM-Vision 2026-09-27; soldier
+// row Camponotus-corrected because the soldier photos were Myrmecia).
+// Units: thorax length = 1.0 unless the field says otherwise.
 //
-// Palette hexes are re-tuned for the game's dark underground background —
-// the intake's museum-flash hues are hue references only. The one contrast
-// rule the intake marks as reliable: dark gaster vs lighter mesosoma, and
-// bicolor (lighter) limbs on every caste.
+// Palette notes: "glossy black" reads as near-black brown with a bright warm
+// specular, not gray. The queen's photo limbs are near-black (unreadable at
+// play zoom) — in-game limbs are lightened for leg visibility. Team 1 keeps
+// the caste bicolor PATTERN hue-shifted to steel-blue: caste reads by shape,
+// team by hue.
 
 export type Caste = 'worker' | 'soldier' | 'queen';
 
 export interface Palette {
-  /** thorax fill (mesosoma) — the light tagma */
+  /** thorax fill (mesosoma) */
   thorax: number;
-  /** head fill — darker than thorax, glossy */
+  /** head fill */
   head: number;
   /** gaster fill — darkest tagma */
   gaster: number;
   /** one subtle highlight per segment */
   highlight: number;
-  /** legs + mandibles — distinctly lighter than the body (bicolor) */
+  /** legs + antennae — lighter than the body (bicolor) */
   limbs: number;
+  /** mandibles — defaults to limbs when omitted (queen: dark, photo-correct) */
+  mandible?: number;
   /** dark outline on every part */
   outline: number;
   /** antenna clubs / small accents */
@@ -37,11 +39,17 @@ export interface CasteArt {
   bodyLenTiles: number;
   // tagma proportions, thorax-length units
   headLen: number;
-  headWid: number; // note: worker/soldier heads are WIDER than the thorax
+  headWid: number;
   gasterLen: number;
   gasterWid: number;
+  /** head silhouette: 'oval' (worker), 'rect' (straight-sided major/gyne) */
+  headShape: 'oval' | 'rect';
+  /** waist nodes: Camponotus = 1 (petiole only); Carebara had 2 */
+  waistNodes: 1 | 2;
   petioleWid: number;
-  postpetioleWid: number;
+  postpetioleWid: number; // unused when waistNodes = 1
+  /** pale transverse bands on the gaster (queen pubescence) */
+  gasterBands: boolean;
   /** leg length relative to total body length */
   legRatio: number;
   /** splay angles (deg from body axis): front / mid / rear */
@@ -60,7 +68,9 @@ export interface CasteArt {
   antennaLen: number;
   /** antenna club share of antenna length (pale 2-segment club) */
   clubFrac: number;
-  wings: 'none' | 'stubs';
+  /** 'stubs' = small wing sprites at rest; 'scars' = marks baked into the
+   *  thorax (dealate gyne); flight wings exist either way */
+  wings: 'none' | 'stubs' | 'scars';
   /** legs pull toward the body by this factor while airborne */
   tuckFrac: number;
   gait: {
@@ -99,36 +109,40 @@ export interface CasteArt {
 }
 
 export const CASTES: Record<Caste, CasteArt> = {
-  // worker (minor): H:T:G len 0.65:1:0.55, wid 1.4:1:1.2 — brisk, small steps
+  // minor worker: H:T:G len 0.4:1:1.1, wid 1.2:1:1.7 — long legs + long
+  // scapes, active forager (the intake's strongest caste identifier)
   worker: {
     bodyLenTiles: 1.0,
-    headLen: 0.65,
-    headWid: 1.4,
-    gasterLen: 0.62,
-    gasterWid: 1.2,
-    petioleWid: 0.3,
+    headLen: 0.4,
+    headWid: 1.2,
+    gasterLen: 1.1,
+    gasterWid: 1.7,
+    headShape: 'oval',
+    waistNodes: 1,
+    petioleWid: 0.5,
     postpetioleWid: 0.5,
-    legRatio: 0.5,
-    splay: [45, 85, 45],
+    gasterBands: false,
+    legRatio: 0.85, // photo says ~1.0; tempered for 2-tile tunnels
+    splay: [40, 90, 30],
     legAttach: [0.32, 0.0, -0.38],
-    femurFrac: 0.46,
-    limbWid: 0.24,
+    femurFrac: 0.45,
+    limbWid: 0.22,
     footR: 0.1,
-    mandibleLen: 0.4,
-    antennaLen: 0.34,
-    clubFrac: 0.38,
+    mandibleLen: 0.2,
+    antennaLen: 0.5,
+    clubFrac: 0.35,
     wings: 'none',
     tuckFrac: 0.45,
     gait: {
-      strideTrigger: 0.32,
-      strideLead: 0.55,
-      swingMaxSec: 0.12,
+      strideTrigger: 0.34,
+      strideLead: 0.6,
+      swingMaxSec: 0.11,
       lift: 0.55,
       stagger: 0.13,
       overshoot: 0.1,
       sway: 0.012,
       trailHead: 0.22,
-      trailGaster: 0.3,
+      trailGaster: 0.28,
     },
     idle: {
       waveDur: [0.7, 1.3],
@@ -140,36 +154,40 @@ export const CASTES: Record<Caste, CasteArt> = {
       breatheSec: 1.6,
     },
   },
-  // soldier (supermajor): H:T:G len 1.6:1:1.6, wid 3:1:3 — heavy, slow, wide splay
+  // soldier (major): H:T:G len 0.9:1:0.9, wid 1.5:1:1.4 — rectangular
+  // red-orange head, short defensive legs, glossy black gaster
   soldier: {
-    bodyLenTiles: 2.0,
-    headLen: 1.6,
-    headWid: 3.0,
-    gasterLen: 1.8,
-    gasterWid: 2.2,
-    petioleWid: 0.55,
-    postpetioleWid: 0.7,
-    legRatio: 0.5,
-    splay: [70, 55, 45],
+    bodyLenTiles: 1.7,
+    headLen: 0.9,
+    headWid: 1.5,
+    gasterLen: 0.9,
+    gasterWid: 1.4,
+    headShape: 'rect',
+    waistNodes: 1,
+    petioleWid: 0.5,
+    postpetioleWid: 0.5,
+    gasterBands: false,
+    legRatio: 0.55,
+    splay: [50, 75, 40],
     legAttach: [0.3, 0.0, -0.42],
     femurFrac: 0.48,
     limbWid: 0.26,
     footR: 0.11,
-    mandibleLen: 0.35,
+    mandibleLen: 0.5,
     antennaLen: 0.35,
-    clubFrac: 0.4,
+    clubFrac: 0.38,
     wings: 'none',
     tuckFrac: 0.5,
     gait: {
       strideTrigger: 0.26,
       strideLead: 0.5,
-      swingMaxSec: 0.17,
+      swingMaxSec: 0.18,
       lift: 0.5,
       stagger: 0.12,
       overshoot: 0.1,
       sway: 0.02,
-      trailHead: 0.28,
-      trailGaster: 0.38,
+      trailHead: 0.3,
+      trailGaster: 0.4,
     },
     idle: {
       waveDur: [0.9, 1.6],
@@ -181,27 +199,29 @@ export const CASTES: Record<Caste, CasteArt> = {
       breatheSec: 2.0,
     },
   },
-  // queen: extrapolated — the intake's wide physogastric guess read as a
-  // vertical blob in QC (rounds 3–4), so the gaster is elongated instead
-  // (still the dominant tagma) + worker-sized head + wing stubs
+  // queen (gyne): orange head, LARGE black muscular mesosoma with wing
+  // scars, gaster-dominant black banded gaster
   queen: {
-    bodyLenTiles: 2.7,
-    headLen: 0.7,
-    headWid: 1.5,
-    gasterLen: 2.5,
-    gasterWid: 2.5,
-    petioleWid: 0.35,
-    postpetioleWid: 0.6,
-    legRatio: 0.48,
-    splay: [62, 78, 58],
+    bodyLenTiles: 2.4,
+    headLen: 0.8,
+    headWid: 1.4,
+    gasterLen: 1.15,
+    gasterWid: 1.55,
+    headShape: 'rect',
+    waistNodes: 1,
+    petioleWid: 0.4,
+    postpetioleWid: 0.4,
+    gasterBands: true,
+    legRatio: 0.55,
+    splay: [45, 80, 35],
     legAttach: [0.3, 0.0, -0.4],
     femurFrac: 0.46,
     limbWid: 0.24,
     footR: 0.1,
-    mandibleLen: 0.3,
-    antennaLen: 0.4,
+    mandibleLen: 0.25,
+    antennaLen: 0.5,
     clubFrac: 0.36,
-    wings: 'stubs',
+    wings: 'scars',
     tuckFrac: 0.42,
     gait: {
       strideTrigger: 0.24,
@@ -210,7 +230,7 @@ export const CASTES: Record<Caste, CasteArt> = {
       lift: 0.45,
       stagger: 0.11,
       overshoot: 0.08,
-      sway: 0.028,
+      sway: 0.03,
       trailHead: 0.2,
       trailGaster: 0.45,
     },
@@ -226,35 +246,35 @@ export const CASTES: Record<Caste, CasteArt> = {
   },
 };
 
-/** Team palettes: team 0 red/rust (natural Carebara hues), team 1 steel-blue.
- * Same silhouettes, color only — caste reads by shape, team by hue. */
+/** Team palettes: team 0 natural Camponotus bicolor, team 1 the same caste
+ * patterns hue-shifted to steel-blue. Caste reads by shape, team by hue. */
 export const TEAM_PALETTES: Record<number, Record<Caste, Palette>> = {
   0: {
     worker: {
-      thorax: 0xa06a2e, head: 0x4e2e13, gaster: 0x38210f, highlight: 0xe8c884,
-      limbs: 0xd8a45e, outline: 0x1c1006, accent: 0xf0e0b0,
+      thorax: 0xb4692f, head: 0x2a1c14, gaster: 0x241811, highlight: 0xd9a06b,
+      limbs: 0xd08a4e, outline: 0x120a06, accent: 0xc9a884,
     },
     soldier: {
-      thorax: 0x7a2d1c, head: 0x4e1a10, gaster: 0x33120a, highlight: 0xd8a080,
-      limbs: 0xb06a30, outline: 0x160a06, accent: 0xe8d0b8,
+      thorax: 0xb04a26, head: 0xc1441e, gaster: 0x1e1410, highlight: 0xe8946a,
+      limbs: 0xc25e32, outline: 0x120a06, accent: 0xd8bc9e,
     },
     queen: {
-      thorax: 0x8e3a24, head: 0x5a2014, gaster: 0x46180c, highlight: 0xe0b090,
-      limbs: 0xc08848, outline: 0x180c06, accent: 0xf0e0c0,
+      thorax: 0x1c1815, head: 0xb14a26, gaster: 0x1e1410, highlight: 0x8d867b,
+      limbs: 0x6a5a4a, mandible: 0x3a2c22, outline: 0x0c0a09, accent: 0x9a8f7e,
     },
   },
   1: {
     worker: {
-      thorax: 0x5a7195, head: 0x26344a, gaster: 0x1e2a3c, highlight: 0xb8cce4,
-      limbs: 0x8aa0bc, outline: 0x0c1220, accent: 0xd8e4f0,
+      thorax: 0x4e6a8e, head: 0x1e2634, gaster: 0x1a222e, highlight: 0x8fb0d4,
+      limbs: 0x7a9ac0, outline: 0x0a0e14, accent: 0xb8cce0,
     },
     soldier: {
-      thorax: 0x3e5478, head: 0x22304a, gaster: 0x182238, highlight: 0x9cb4d4,
-      limbs: 0x7490b0, outline: 0x080e1a, accent: 0xc8d8ec,
+      thorax: 0x46628c, head: 0x5070a0, gaster: 0x161c28, highlight: 0x8fb0d4,
+      limbs: 0x6a8ab4, outline: 0x0a0e14, accent: 0xb0c0d8,
     },
     queen: {
-      thorax: 0x46608a, head: 0x243455, gaster: 0x1a2740, highlight: 0xa8c0dc,
-      limbs: 0x7c94b8, outline: 0x0a101c, accent: 0xd0e0f0,
+      thorax: 0x1a2028, head: 0x5070a0, gaster: 0x161c28, highlight: 0x708090,
+      limbs: 0x56617a, mandible: 0x2c3038, outline: 0x080c12, accent: 0xa8b8cc,
     },
   },
 };
@@ -266,6 +286,14 @@ export const FOOD_COLORS: Record<string, number> = {
   protein: 0xc05a5a,
   carbs: 0xd4a832,
   water: 0x4a9fd9,
+};
+
+/** Mandible open angle (rad) per carried-item width class (dev guide §5:
+ * partially open, adjusted to the item's width). */
+export const CARRY_MANDIBLE_OPEN: Record<string, number> = {
+  dirt: 0.16,
+  food: 0.2,
+  egg: 0.26,
 };
 
 /** Bake resolution: texture pixels per thorax unit. 128 keeps parts crisp at

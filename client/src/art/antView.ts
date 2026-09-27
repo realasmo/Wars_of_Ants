@@ -13,7 +13,7 @@
 // RNG (ticket determinism guardrail).
 
 import { Container, Sprite, type Renderer as PixiRenderer } from 'pixi.js';
-import { BAKE_PPU, CASTES, type Caste, type CasteArt } from './ants';
+import { BAKE_PPU, CASTES, CARRY_MANDIBLE_OPEN, type Caste, type CasteArt } from './ants';
 import { antParts, itemPart, type BakedPart } from './bake';
 import { gaitStateFrom, ikKnee, replant, setMoveDir, stepGait, type GaitState } from './gait';
 import type { ActivityName, Carry } from '../sim';
@@ -116,6 +116,9 @@ export class AntView {
   private carryKey = 'none';
   private snapT = -1; // pickup snap timer (s); −1 = idle
   private releaseT = -1; // drop release timer (s)
+  private fightT = 0; // alert/bite mandible cycle phase (s)
+  /** current mandible gap (rad) — telemetry for tuning/QC */
+  private mandibleOpen = 0;
   private itemLagY = 0;
   private readonly breathePhase: number;
   private readonly antA: [AntennaState, AntennaState] = [
@@ -397,15 +400,36 @@ export class AntView {
     }
     if (this.snapT >= 0 && (this.snapT += dt) > 0.14) this.snapT = -1;
     if (this.releaseT >= 0 && (this.releaseT += dt) > 0.18) this.releaseT = -1;
+    // mandible states (dev guide): idle closed · alert flare + bite snap in
+    // combat (suppressed while carrying) · carrying opens to the item's
+    // width · digging keeps its work cycle
+    const fighting = f.activity === 'fighting' && !carrying;
+    if (fighting) this.fightT += dt;
+    else this.fightT = 0;
     let open: number;
-    if (f.activity === 'digging') open = 0.12 + 0.3 * (0.5 + 0.5 * Math.sin(now * 16));
-    else if (f.activity === 'fighting') open = 0.16 + 0.42 * (0.5 + 0.5 * Math.sin(now * 10));
-    else if (this.snapT >= 0) {
+    if (f.activity === 'digging') {
+      open = 0.12 + 0.3 * (0.5 + 0.5 * Math.sin(now * 16));
+    } else if (fighting) {
+      // alert flare (≈48°) → fast snap to locked → brief clamp → reopen;
+      // soldiers bite on a slightly slower, heavier cadence
+      const cycle = this.caste === 'soldier' ? 1.05 : 0.85;
+      const ph = (this.fightT % cycle) / cycle;
+      if (ph < 0.5) open = 0.85;
+      else if (ph < 0.58) open = 0.85 * (1 - (ph - 0.5) / 0.08);
+      else if (ph < 0.72) open = 0.02;
+      else open = 0.02 + 0.83 * ((ph - 0.72) / 0.28);
+    } else if (this.snapT >= 0) {
       const ph = this.snapT / 0.14;
-      open = ph < 0.55 ? 0.06 + 0.5 * Math.sin((Math.PI * ph) / 0.55) : carrying ? 0.14 : 0.06;
-    } else if (this.releaseT >= 0) open = 0.06 + 0.25 * Math.sin(Math.PI * (this.releaseT / 0.18));
-    else open = carrying ? 0.14 : flying ? 0.04 : 0.06;
+      open = ph < 0.55 ? 0.04 + 0.5 * Math.sin((Math.PI * ph) / 0.55) : carrying ? this.carryOpen() : 0.04;
+    } else if (this.releaseT >= 0) {
+      open = 0.04 + 0.25 * Math.sin(Math.PI * (this.releaseT / 0.18));
+    } else if (carrying) {
+      open = this.carryOpen();
+    } else {
+      open = flying ? 0.03 : 0.04;
+    }
     const mbase = 0.1 + hl / 2;
+    this.mandibleOpen = open;
     this.placeOn(this.mandS[0], hx, hy, this.headRot, mbase, hw * 0.22, open);
     this.placeOn(this.mandS[1], hx, hy, this.headRot, mbase, -hw * 0.22, -open);
 
@@ -424,7 +448,7 @@ export class AntView {
       } else if (!walking && !flying) {
         a.t += dt;
       }
-      const la = side * 0.55 + wave + counter + sweepBase * side;
+      const la = side * 0.7 + wave + counter + sweepBase * side;
       const abase = 0.08 + hl * 0.42;
       this.placeOn(this.antS[i], hx, hy, this.headRot, abase, side * hw * 0.12, la);
       // club chains at the scape tip, curled slightly
@@ -464,6 +488,11 @@ export class AntView {
     }
   }
 
+  /** carried item's width class → mandible gap (dev guide §5). */
+  private carryOpen(): number {
+    return CARRY_MANDIBLE_OPEN[this.carryKey.split(':')[0]] ?? 0.2;
+  }
+
   private applyItemTexture(carry: Carry): void {
     if (carry.t === 'none') return;
     this.itemS.texture = itemPart(this.renderer, carry.t === 'food' ? carry.food : carry.t).texture;
@@ -491,6 +520,7 @@ export class AntView {
       speed: this.speedEma,
       swayPhase: this.gait.swayPhase,
       antennae: [this.antS[0].rotation, this.antS[1].rotation],
+      mandibleOpen: this.mandibleOpen,
       legs: this.gait.legs.map((l, i) => ({
         i,
         group: i === 0 || i === 2 || i === 4 ? 'A' : 'B',
