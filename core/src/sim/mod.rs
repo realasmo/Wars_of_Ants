@@ -552,14 +552,21 @@ impl Sim {
         self.with_ai(id, |ai| ai.job = job);
     }
 
-    /// True when the ant is in squad-hunt mode (its rampage survives a
-    /// target's death).
-    pub(crate) fn job_is_hunt(&self, id: u32) -> bool {
-        self.ids
+    /// A fight ended for this ant: idle movement now. Player-commanded
+    /// (Manual) ants are released back to autonomy — an attack order
+    /// shouldn't leave war parties as statues forever. Squad followers
+    /// keep their Follow job (they return to the leader).
+    pub(crate) fn end_fight(&mut self, id: u32) {
+        self.set_state(id, AntState::Idle);
+        let manual = self
+            .ids
             .get(&id)
             .and_then(|&e| self.ecs.get::<&WorkerAi>(e).ok())
-            .map(|ai| matches!(ai.job, Job::Hunt(_)))
-            .unwrap_or(false)
+            .map(|ai| matches!(ai.job, Job::Manual))
+            .unwrap_or(false);
+        if manual {
+            self.set_job(id, Job::Idle);
+        }
     }
 
     pub(crate) fn set_pending(&mut self, id: u32, pending: Option<(Layer, (u32, u32))>) {

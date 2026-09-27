@@ -139,12 +139,10 @@ pub enum Job {
     /// Squad follow: keep near the leader ant (X-menu, F3). `resume` is the
     /// job the follower returns to on release/leader death — busy ants
     /// (farming, feeding, manual control) resume their unfinished activity.
-    /// A leader who starts farming or attacking CONVERTS followers instead
-    /// (Fetch / Hunt) — they keep at it until re-recruited.
+    /// A leader who starts farming converts followers to Fetch; a leader's
+    /// attack order is shared as `attack_after` — they fight that enemy and
+    /// return to following when it dies.
     Follow(u32, Option<Box<Job>>),
-    /// Squad combat mode: fight the target predator; when it dies, acquire
-    /// the next hostile (rampage) until none remain. None = searching.
-    Hunt(Option<u32>),
 }
 
 #[derive(Clone, Debug)]

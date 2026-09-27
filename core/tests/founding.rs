@@ -1591,6 +1591,25 @@ impl std::ops::Deref for FoodSnap_ {
 }
 use woa_core::FoodSnap;
 
+fn ai_token(s: &Sim, id: u32, field: &str) -> String {
+    let canon = s.canonical_state();
+    for part in canon.split('|') {
+        if part.starts_with(&format!("A{id} ")) {
+            let marker = format!(" {field}");
+            if let Some(i) = part.find(&marker) {
+                let rest = &part[i + marker.len()..];
+                let end = rest.find(' ').unwrap_or(rest.len());
+                return rest[..end].to_string();
+            }
+        }
+    }
+    panic!("ant #{id} has no {field} token");
+}
+
+fn atk_token(s: &Sim, id: u32) -> String {
+    ai_token(s, id, "atk")
+}
+
 fn job_token(s: &Sim, id: u32) -> String {
     let canon = s.canonical_state();
     for part in canon.split('|') {
@@ -1932,22 +1951,39 @@ fn leader_harvesting_converts_followers_to_farmers() {
 }
 
 #[test]
-fn leader_attack_converts_the_squad_into_a_rampage() {
+fn leader_attack_shares_the_target_and_the_squad_returns_afterward() {
     let mut s = founded(42);
     s.colony.known.clear();
     let (ex, ey) = s.world.entrance.unwrap();
-    // spare worker as the feeder — feeding outranks squad conversion
+    // clear every worldgen spider first: a clean battlefield (other spiders
+    // aggro into surface brawls and can kill the leader, which ends the
+    // squad by design — not what this test measures)
+    for sp in s
+        .snapshot()
+        .into_iter()
+        .filter_map(|e| match e {
+            EntitySnap::Spider(p) => Some(p.id),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+    {
+        let _ = s.dev_kill(sp);
+    }
     let _feeder = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 3.0);
     let leader = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
     let f1 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 5.0);
     let f2 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 6.0);
     let sp1 = s.dev_spawn(DevSpawn::Spider, ex as f64 + 3.5, ey as f64 + 1.5);
-    let sp2 = s.dev_spawn(DevSpawn::Spider, ex as f64 - 2.5, ey as f64 + 2.5);
     assert!(s.issue(Command::Follow {
         leader,
         mode: FollowMode::All
     }));
-    // the leader attack-clicks spider 1 — the whole squad joins the fight
+    let follows = |s: &Sim, id: u32| {
+        s.snapshot().into_iter().any(|e| matches!(e,
+            EntitySnap::Ant(a) if a.id == id && a.following == Some(leader)))
+    };
+    assert!(follows(&s, f1) && follows(&s, f2), "squad recruited");
+    // the leader attack-clicks the spider — every follower gets the same target
     assert!(s.issue(Command::Attack {
         ant: leader,
         target: sp1
@@ -1956,12 +1992,13 @@ fn leader_attack_converts_the_squad_into_a_rampage() {
         s.tick();
     }
     assert!(
-        job_token(&s, f1).starts_with("Hunt") && job_token(&s, f2).starts_with("Hunt"),
-        "followers join the attack (got {}, {})",
-        job_token(&s, f1),
-        job_token(&s, f2)
+        atk_token(&s, f1) == format!("Some({sp1})") && atk_token(&s, f2) == format!("Some({sp1})"),
+        "followers share the leader's target (got {}, {})",
+        atk_token(&s, f1),
+        atk_token(&s, f2)
     );
-    // workers in a squad fight: the spider takes damage from the swarm
+    assert!(follows(&s, f1), "followers stay squad members while fighting");
+    // the swarm actually damages the spider (4 workers beat one spider)
     let mut hurt = false;
     for _ in 0..8000 {
         s.tick();
@@ -1975,38 +2012,30 @@ fn leader_attack_converts_the_squad_into_a_rampage() {
             _ => {}
         }
     }
-    assert!(hurt || !s.snapshot().iter().any(|e| e.id() == sp1), "the squad damages the spider");
-    // rampage: kill the current target ourselves — the squad moves to the
-    // remaining hostile instead of disbanding
+    assert!(
+        hurt || !s.snapshot().iter().any(|e| e.id() == sp1),
+        "the squad damages the spider"
+    );
+    // target gone: they drop the attack intent and follow again — no rampage
     let _ = s.dev_kill(sp1);
-    for _ in 0..10 {
+    for _ in 0..60 {
         s.tick();
     }
-    assert!(
-        job_token(&s, f1).starts_with("Hunt"),
-        "hunters reacquire after their target dies (got {})",
-        job_token(&s, f1)
-    );
-    // and when NO hostiles remain anywhere (the founding map has two
-    // worldgen spiders of its own), they stand down
-    let all_spiders: Vec<u32> = s
-        .snapshot()
-        .into_iter()
-        .filter_map(|e| match e {
-            EntitySnap::Spider(p) => Some(p.id),
-            _ => None,
-        })
-        .collect();
-    for sp in all_spiders {
-        let _ = s.dev_kill(sp);
-    }
-    for _ in 0..40 {
+    assert_eq!(atk_token(&s, f1), "None", "attack intent cleared after the kill");
+    assert!(follows(&s, f1) && follows(&s, f2), "the squad returns to the leader");
+    // retarget: the leader clicks a fresh second spider, the squad follows suit
+    let sp2 = s.dev_spawn(DevSpawn::Spider, ex as f64 - 2.5, ey as f64 + 2.5);
+    assert!(s.issue(Command::Attack {
+        ant: leader,
+        target: sp2
+    }));
+    for _ in 0..5 {
         s.tick();
     }
-    assert_ne!(job_token(&s, f1), "Hunt(Some(0))", "hunt token sane");
-    assert!(
-        !job_token(&s, f1).starts_with("Hunt"),
-        "rampage ends when no hostiles remain (got {})",
-        job_token(&s, f1)
-    );
+    assert_eq!(atk_token(&s, f1), format!("Some({sp2})"), "retargeting works");
+    let _ = s.dev_kill(sp2);
+    for _ in 0..60 {
+        s.tick();
+    }
+    assert!(follows(&s, f1), "still following after the second kill");
 }
