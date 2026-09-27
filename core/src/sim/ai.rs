@@ -242,6 +242,13 @@ impl Sim {
                                 }
                             }
                         }
+                    } else if matches!(carrying, Carry::Dirt { .. }) {
+                        // a spoil-laden manual worker can't harvest (hands
+                        // gate) and its route may have been interrupted by
+                        // auto-digging — nothing is actionable until the
+                        // dirt is dumped, so haul it out automatically;
+                        // farming resumes clean-handed on the next click
+                        self.haul_out_dirt(id);
                     } else if pos.layer == Layer::Underground
                         && matches!(
                             carrying,
@@ -344,6 +351,13 @@ impl Sim {
                             continue;
                         }
                     };
+                    if matches!(carrying, Carry::Dirt { .. }) {
+                        // spoil picked up en route (auto-digging through soft
+                        // tiles) must not be silently overwritten by the
+                        // harvest — dump it, then the forage loop resumes
+                        self.haul_out_dirt(id);
+                        continue;
+                    }
                     let Some((ftile, amount)) = self.food_info(fid) else {
                         self.set_job(id, Job::Idle);
                         continue;

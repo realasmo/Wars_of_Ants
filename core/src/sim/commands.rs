@@ -19,6 +19,7 @@ impl Sim {
                 let ty = y.floor().clamp(0.0, self.config.height as f64 - 1.0) as u32;
                 let layer = self.ant_layer(ant);
                 self.set_job(ant, Job::Manual);
+                self.set_drop_after(ant, None); // a new order supersedes auto-haul intents
                 self.route(ant, layer, (tx, ty))
             }
             Command::Dig { ant, tx, ty } => {
@@ -60,6 +61,7 @@ impl Sim {
                     return false;
                 }
                 self.set_job(ant, Job::Manual);
+                self.set_drop_after(ant, None); // a new order supersedes auto-haul intents
                 if self.block_adjacent(ant, bx, by) {
                     self.set_dig_after(ant, None);
                     self.set_state(
