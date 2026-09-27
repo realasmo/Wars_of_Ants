@@ -8,15 +8,17 @@ Design reference: AntWar.io (see `docs/BASED-ON.md`); world content draft: `docs
 - **Remote (origin):** `git@github.com:realasmo/Wars_of_Ants.git`
 - **SSH key:** `/root/.ssh/key_Wars_of_Ants` (configured via repo-local `core.sshCommand`)
 
-## Current status (2026-09-27) — version 0.1.01.52-dev
+## Current status (2026-09-27) — version 0.1.02.53-dev
 
 **Playable:** title → team select → flying queen → found nest → excavate
 (2×2 blocks, dirt hauling) → orange-soil nursery (egg transport) → first
 workers → harvest sighted finite sources (protein/carbs/water; foragers
 prioritize what the queen craves) → survive spiders → **squad play**
 (X-menu: recruit/release followers, silver rings, released ants resume
-their interrupted work) → **physical queen feeding** (one feeder worker
-serves her rotating cravings; the request shows above her and in the HUD).
+their interrupted work; a leader who farms or attacks **converts the
+squad** — they keep farming / rampaging the remaining hostiles until
+re-recruited) → **physical queen feeding** (one feeder worker serves her
+rotating cravings; the request shows above her and in the HUD).
 Engine: deterministic 20 tps core (native + WASM byte-identical), replays
 (v2), e2e playtest suite, in-game dev console (`` ` ``) with a live sim
 event log. Every game change bumps `GAME_VERSION` (menu + corner).

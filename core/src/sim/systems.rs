@@ -268,7 +268,11 @@ impl Sim {
             };
             let Some(&tent) = self.ids.get(&target) else {
                 self.set_state(id, AntState::Idle);
-                self.set_job(id, Job::Idle);
+                // hunters pass straight to the next hostile (squad rampage);
+                // everyone else goes back to idle
+                if !self.job_is_hunt(id) {
+                    self.set_job(id, Job::Idle);
+                }
                 continue;
             };
             let tpos = self.ecs.get::<&Pos>(tent).map(|q| *q);
@@ -276,7 +280,9 @@ impl Sim {
                 Ok(t) => t,
                 Err(_) => {
                     self.set_state(id, AntState::Idle);
-                    self.set_job(id, Job::Idle);
+                    if !self.job_is_hunt(id) {
+                        self.set_job(id, Job::Idle);
+                    }
                     continue;
                 }
             };

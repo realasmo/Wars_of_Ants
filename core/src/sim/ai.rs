@@ -512,6 +512,50 @@ impl Sim {
                         self.set_job(id, Job::Rest(t - 1));
                     }
                 }
+                Job::Hunt(target) => {
+                    if matches!(carrying, Carry::Dirt { .. }) {
+                        self.haul_out_dirt(id);
+                        continue;
+                    }
+                    // the target may have died since — rampage: acquire the
+                    // next hostile, any distance (they keep attacking the
+                    // remaining creatures)
+                    let tid = match target.filter(|&t| self.ids.contains_key(&t)) {
+                        Some(t) => Some(t),
+                        None => self.nearest_predator(id),
+                    };
+                    let Some(t) = tid else {
+                        // no hostiles left — back to normal colony life
+                        self.set_job(id, Job::Idle);
+                        continue;
+                    };
+                    if Some(t) != target {
+                        self.set_job(id, Job::Hunt(Some(t)));
+                    }
+                    let tinfo = self
+                        .ids
+                        .get(&t)
+                        .and_then(|&tent| {
+                            self.ecs
+                                .get::<&Pos>(tent)
+                                .ok()
+                                .map(|q| (q.layer, tile_of(q.p)))
+                        });
+                    match tinfo {
+                        Some((tlayer, _)) if tlayer == pos.layer => {
+                            self.set_pending(id, None);
+                            self.set_state(id, AntState::Fighting { target: t });
+                        }
+                        Some((tlayer, ttile)) => {
+                            if !self.route(id, tlayer, ttile) {
+                                self.set_retry(id, 60);
+                            }
+                        }
+                        None => {
+                            self.set_job(id, Job::Hunt(None));
+                        }
+                    }
+                }
                 Job::DigTile(tx, ty) => {
                     if matches!(carrying, Carry::Dirt { blocks: DIRT_CAPACITY }) {
                         // hands full of spoil: haul it out, then come back
@@ -635,6 +679,90 @@ impl Sim {
                 }
             }
         }
+        self.squad_convert();
+    }
+
+    /// Squad conversion (X-menu group mode): a leader who starts farming or
+    /// attacking converts every follower to that activity — they persist at
+    /// it (farm the source / rampage the hostiles) and stop following until
+    /// re-recruited with another "all ants join" order.
+    fn squad_convert(&mut self) {
+        if self.colony.dead {
+            return;
+        }
+        enum Lead {
+            Farm(u32),
+            Attack(u32),
+        }
+        let mut leads: Vec<(u32, Lead)> = Vec::new();
+        for id in self.ant_ids() {
+            let Some(&ent) = self.ids.get(&id) else { continue };
+            let info = self
+                .ecs
+                .query_one::<(&AntState, &WorkerAi)>(ent)
+                .ok()
+                .and_then(|mut q| q.get().map(|(st, ai)| ((*st).clone(), ai.attack_after)));
+            let Some((state, attack_after)) = info else { continue };
+            let lead = if let Some(t) = attack_after {
+                // the attack order was just issued (walk-to-attack included)
+                Lead::Attack(t)
+            } else {
+                match state {
+                    AntState::Harvesting { target } => Lead::Farm(target),
+                    AntState::Fighting { target } => Lead::Attack(target),
+                    _ => continue,
+                }
+            };
+            leads.push((id, lead));
+        }
+        for (leader, lead) in leads {
+            let ids = self.ant_ids();
+            for fid in ids {
+                let follows = self
+                    .ids
+                    .get(&fid)
+                    .and_then(|&e| self.ecs.get::<&WorkerAi>(e).ok())
+                    .map(|ai| matches!(ai.job, Job::Follow(l, _) if l == leader))
+                    .unwrap_or(false);
+                if !follows {
+                    continue;
+                }
+                match lead {
+                    Lead::Farm(target) => {
+                        // workers AND soldiers farm the leader's source
+                        self.set_job(fid, Job::Fetch(target));
+                        self.ev(format!(
+                            "ant #{fid} joins the harvest of #{target} (leader #{leader})"
+                        ));
+                    }
+                    Lead::Attack(target) => {
+                        // the whole squad fights — workers included
+                        self.set_job(fid, Job::Hunt(Some(target)));
+                        self.ev(format!(
+                            "ant #{fid} joins the attack on spider #{target} (leader #{leader})"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Nearest living predator to an ant (global — rampage reaches every
+    /// remaining hostile); ties break on the lowest id for determinism.
+    fn nearest_predator(&self, id: u32) -> Option<u32> {
+        let at = self.ant_tile(id);
+        let mut best: Option<(u32, u32)> = None; // (chebyshev dist, predator id)
+        for (&pid, &ent) in &self.ids {
+            let Ok(pp) = self.ecs.get::<&Pos>(ent) else { continue };
+            if self.ecs.get::<&Predator>(ent).is_err() {
+                continue;
+            }
+            let key = (chebyshev(tile_of(pp.p), at), pid);
+            if best.map(|b| key < b).unwrap_or(true) {
+                best = Some(key);
+            }
+        }
+        best.map(|(_, pid)| pid)
     }
 
     /// Keep exactly one worker assigned to feeding the queen (founding

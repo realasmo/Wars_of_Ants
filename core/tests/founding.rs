@@ -1832,3 +1832,181 @@ fn follow_release_resumes_the_interrupted_activity() {
     }
     assert_eq!(job_token(&s, w2), "Manual", "manual control survives the squad");
 }
+
+// --- squad conversion: leader farms/attacks → followers persist at it ---
+
+#[test]
+fn leader_harvesting_converts_followers_to_farmers() {
+    let mut s = founded(42);
+    let (ex, ey) = s.world.entrance.unwrap();
+    // a spare worker first: the feeder role always reclaims the lowest-id
+    // free worker, and the queen's feeding outranks the squad (user spec)
+    let _feeder = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 3.0);
+    let leader = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
+    let f1 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 5.0);
+    let f2 = s.dev_spawn(DevSpawn::Soldier, ex as f64 + 1.0, ey as f64 + 6.0);
+    let _ = f2;
+    // a strawberry by the entrance; the leader walks out and farms it
+    s.dev_spawn(DevSpawn::Source(3), ex as f64 + 1.5, ey as f64 + 1.5);
+    assert!(s.issue(Command::Follow {
+        leader,
+        mode: FollowMode::All
+    }));
+    assert!(s.issue(Command::UseEntrance { ant: leader }));
+    let mut surfaced = false;
+    for _ in 0..1200 {
+        s.tick();
+        if let Some(EntitySnap::Ant(a)) = s.snapshot().into_iter().find(|e| e.id() == leader) {
+            if a.layer == Layer::Surface {
+                surfaced = true;
+                break;
+            }
+        }
+    }
+    assert!(surfaced, "leader reaches the surface");
+    assert!(s.issue(Command::Move {
+        ant: leader,
+        x: ex as f64 + 1.5,
+        y: ey as f64 + 1.5
+    }));
+    // wait until the leader visibly starts harvesting
+    let mut harvesting = false;
+    for _ in 0..3000 {
+        s.tick();
+        if let Some(EntitySnap::Ant(a)) = s.snapshot().into_iter().find(|e| e.id() == leader) {
+            if a.activity == Activity::Harvesting {
+                harvesting = true;
+                break;
+            }
+        }
+    }
+    assert!(harvesting, "leader starts farming the source");
+    // conversion: the follower (and the soldier) left the squad and farm
+    for _ in 0..10 {
+        s.tick();
+    }
+    assert!(
+        job_token(&s, f1).starts_with("Fetch"),
+        "follower converts to farming (got {})",
+        job_token(&s, f1)
+    );
+    // they persist after the leader walks away and stops
+    assert!(s.issue(Command::Move {
+        ant: leader,
+        x: ex as f64 + 8.0,
+        y: ey as f64 + 8.0
+    }));
+    for _ in 0..600 {
+        s.tick();
+    }
+    let mut f1_fetch = 0;
+    for _ in 0..2000 {
+        s.tick();
+        if job_token(&s, f1).starts_with("Fetch") || job_token(&s, f1).starts_with("Deliver") {
+            f1_fetch += 1;
+        }
+    }
+    assert!(
+        f1_fetch > 1900,
+        "converted farmer keeps farming after the leader stops ({f1_fetch}/2000)"
+    );
+    // re-recruit brings them back to the squad
+    assert!(s.issue(Command::Move {
+        ant: leader,
+        x: ex as f64 + 1.5,
+        y: ey as f64 + 1.5
+    }));
+    for _ in 0..1200 {
+        s.tick();
+    }
+    assert!(s.issue(Command::Follow {
+        leader,
+        mode: FollowMode::All
+    }));
+    let following = s
+        .snapshot()
+        .iter()
+        .filter(|e| matches!(e, EntitySnap::Ant(a) if a.following == Some(leader)))
+        .count();
+    assert!(following >= 1, "all-join re-recruits converted workers");
+}
+
+#[test]
+fn leader_attack_converts_the_squad_into_a_rampage() {
+    let mut s = founded(42);
+    s.colony.known.clear();
+    let (ex, ey) = s.world.entrance.unwrap();
+    // spare worker as the feeder — feeding outranks squad conversion
+    let _feeder = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 3.0);
+    let leader = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
+    let f1 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 5.0);
+    let f2 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 6.0);
+    let sp1 = s.dev_spawn(DevSpawn::Spider, ex as f64 + 3.5, ey as f64 + 1.5);
+    let sp2 = s.dev_spawn(DevSpawn::Spider, ex as f64 - 2.5, ey as f64 + 2.5);
+    assert!(s.issue(Command::Follow {
+        leader,
+        mode: FollowMode::All
+    }));
+    // the leader attack-clicks spider 1 — the whole squad joins the fight
+    assert!(s.issue(Command::Attack {
+        ant: leader,
+        target: sp1
+    }));
+    for _ in 0..5 {
+        s.tick();
+    }
+    assert!(
+        job_token(&s, f1).starts_with("Hunt") && job_token(&s, f2).starts_with("Hunt"),
+        "followers join the attack (got {}, {})",
+        job_token(&s, f1),
+        job_token(&s, f2)
+    );
+    // workers in a squad fight: the spider takes damage from the swarm
+    let mut hurt = false;
+    for _ in 0..8000 {
+        s.tick();
+        let hp = s.snapshot().into_iter().find_map(|e| match e {
+            EntitySnap::Spider(p) if p.id == sp1 => Some(p.hp),
+            _ => None,
+        });
+        match hp {
+            None => break, // dead already
+            Some(hp) if hp < 1.0 => hurt = true,
+            _ => {}
+        }
+    }
+    assert!(hurt || !s.snapshot().iter().any(|e| e.id() == sp1), "the squad damages the spider");
+    // rampage: kill the current target ourselves — the squad moves to the
+    // remaining hostile instead of disbanding
+    let _ = s.dev_kill(sp1);
+    for _ in 0..10 {
+        s.tick();
+    }
+    assert!(
+        job_token(&s, f1).starts_with("Hunt"),
+        "hunters reacquire after their target dies (got {})",
+        job_token(&s, f1)
+    );
+    // and when NO hostiles remain anywhere (the founding map has two
+    // worldgen spiders of its own), they stand down
+    let all_spiders: Vec<u32> = s
+        .snapshot()
+        .into_iter()
+        .filter_map(|e| match e {
+            EntitySnap::Spider(p) => Some(p.id),
+            _ => None,
+        })
+        .collect();
+    for sp in all_spiders {
+        let _ = s.dev_kill(sp);
+    }
+    for _ in 0..40 {
+        s.tick();
+    }
+    assert_ne!(job_token(&s, f1), "Hunt(Some(0))", "hunt token sane");
+    assert!(
+        !job_token(&s, f1).starts_with("Hunt"),
+        "rampage ends when no hostiles remain (got {})",
+        job_token(&s, f1)
+    );
+}

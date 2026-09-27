@@ -41,6 +41,11 @@ Agent sequencing of the batch (one ticket per wave, playtest-gated):
   return home → rest → glance at the nest mouth), followers resume their
   interrupted job on release, queen request display above her + HUD row,
   foragers prioritize the craved resource.
+- **S — squad conversion — SHIPPED 2026-09-27** (ticket
+  docs/TICKET-squad-conversion.md): a leader who farms or attacks converts
+  the squad — followers (workers too) keep farming the source / rampage
+  the remaining hostiles until re-recruited with another "all join";
+  feeding outranks conversion (the feeder may be reclaimed).
 - **F4 — brood production — NEXT** (the big one, absorbs Wave B + part of D):
   queen X-menu, egg types + costs, worker→soldier conversion (consumes the
   worker), Medic + fallen-ant rescue (needs corpse state — Wave B's corpse
@@ -51,8 +56,8 @@ Agent sequencing of the batch (one ticket per wave, playtest-gated):
 
 F4 design settled 2026-09-27: convert-from-worker consumes the existing
 worker; honeydew comes from farming nettle (new map source) until aphids
-exist; followers — soldiers attack what you attack and retaliate when
-you're hit, workers never fight, and the whole squad farms once you start.
+exist; attack-click squad combat SHIPPED in wave S (workers fight too);
+still open for F4: retaliation when the leader is attacked.
 
 ---
 

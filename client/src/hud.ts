@@ -14,7 +14,8 @@ function carrySuffix(a: AntEnt): string {
 
 const HELP_COLONY =
   'Hold left button: your ant follows the cursor · Left-click an ant: take control · Right-click: dig tile / attack spider / ' +
-  'enter-exit nest (the marked hole) · Mouse wheel: zoom · C: control next ant · F2: dev tools · F3: perf · ' +
+  'enter-exit nest (the marked hole) · Mouse wheel: zoom · C: control next ant · X: squad — followers farm or fight ' +
+  'with you and keep at it; re-join (X, 1) to recall them · F2: dev tools · F3: perf · ' +
   'the camera follows your ant; spectate (Tab, drag, WASD) when it dies';
 
 const HELP_FOUNDING =

@@ -552,6 +552,16 @@ impl Sim {
         self.with_ai(id, |ai| ai.job = job);
     }
 
+    /// True when the ant is in squad-hunt mode (its rampage survives a
+    /// target's death).
+    pub(crate) fn job_is_hunt(&self, id: u32) -> bool {
+        self.ids
+            .get(&id)
+            .and_then(|&e| self.ecs.get::<&WorkerAi>(e).ok())
+            .map(|ai| matches!(ai.job, Job::Hunt(_)))
+            .unwrap_or(false)
+    }
+
     pub(crate) fn set_pending(&mut self, id: u32, pending: Option<(Layer, (u32, u32))>) {
         self.with_ai(id, |ai| ai.pending = pending);
     }
