@@ -46,8 +46,10 @@ editing `client/src/art/ants.ts` numbers).
   (Worker / Soldier / Honey / Medic), worker→soldier conversion (consumes
   the worker), fallen-ant rescue; absorbs Wave B (corpses/healing) and
   reaches toward the aphid economy. Honeydew comes from a new **nettle**
-  source (15–22 units, 10s/unit, 4 scattered); squads: soldiers fight for
-  their leader, the whole squad farms when the leader farms.
+  source (15–22 units, 10s/unit, 4 scattered). Squad combat shipped in
+  wave S (assist-attack — the whole squad fights your target, workers
+  included, then returns to you; farm-conversion persists) — F4 adds
+  retaliation when the leader is attacked.
 
 **Worker-priorities wave (ticket `docs/TICKET-worker-priorities.md`):**
 the queen eats **real food** now — a rotating craving cycle

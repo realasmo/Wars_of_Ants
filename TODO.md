@@ -1,4 +1,4 @@
-## NEXT: Wave B — water healing + corpses + Medic (drafts in docs/WORLD-DESIGN.md)
+## NEXT: F4 — queen X-menu brood production (Worker / Soldier / Honey / Medic eggs; absorbs the old Wave B corpses+Medic). Drafts and costs in docs/WORLD-DESIGN.md.
 
 ## User TODO batch (2026-09-27, verbatim — sequenced into waves below)
 
@@ -52,9 +52,9 @@ Agent sequencing of the batch (one ticket per wave, playtest-gated):
   queen X-menu, egg types + costs, worker→soldier conversion (consumes the
   worker), Medic + fallen-ant rescue (needs corpse state — Wave B's corpse
   system), Honey caste + nettle-sourced honeydew economy (15–22 units,
-  10s/unit, 4 scattered) until Wave D's aphids; squads: soldiers fight for
-  the leader (attack-click + retaliate), worker followers never fight, the
-  whole squad farms once the leader starts.
+  10s/unit, 4 scattered) until Wave D's aphids. Squad combat mostly
+  shipped in wave S (assist-attack, workers fight, farm-conversion);
+  still open here: retaliation when the leader is attacked.
 
 F4 design settled 2026-09-27: convert-from-worker consumes the existing
 worker; honeydew comes from farming nettle (new map source) until aphids
@@ -79,7 +79,8 @@ still open for F4: retaliation when the leader is attacked.
 > hardware; worst-frame parity with the pre-change baseline is expected
 > there, not under software rasterization.
 
-Wave B shape (decide details against playtesting):
+Old Wave B shape (mostly absorbed into F4 — corpses + Medic; water's
+healing sink still to design against playtesting):
 - water heals (HP regen / Medic mechanic — pick one)
 - corpses: dead ants become harvestable protein (design decision needed:
   corpse as resource vs pure visual decay)
@@ -87,7 +88,7 @@ Wave B shape (decide details against playtesting):
 
 ## Ants walking and farming.
  - When ant under player control exits the nest, the camera should switch to surface as well and same the opposite way. (DONE via the locked camera)
- - ants should have indicator associated with current activity: farming, just moving, attacking, digging (the snapshot now exposes `activity` — client work only)
+ - ants should have indicator associated with current activity: farming, just moving, attacking, digging (DONE — procedural rigs animate dig/harvest/carry/combat from the snapshot `activity`)
 
 ### Farming resources
  - dead insects

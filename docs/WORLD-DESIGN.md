@@ -31,7 +31,12 @@ Colony resources:
 - **Protein** — spawning ants.
 - **Carbohydrates** — keeps the colony alive and fit; below threshold ants slow down.
 - **Water** — heals injured ants.
-- **Aphid honeydew** — required to spawn Honey ants.
+- **Aphid honeydew** — required to spawn Honey ants. Settled 2026-09-27:
+  until aphid farming exists (Wave D), honeydew comes from **nettle** — a
+  map source like the others (15–22 units, 10s/unit, 4 scattered). The
+  queen's feeding is physical since the worker-priorities wave: rotating
+  cravings (carbs→protein→carbs→water), one feeder worker, requests shown
+  above her and in the HUD.
 
 Map resources are **finite** (harvestable once).
 
