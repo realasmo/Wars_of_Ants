@@ -36,6 +36,7 @@ interface EntityGfx {
   hpBucket: number;
   label: string;
   flying: boolean;
+  downed: boolean;
   /** Short carry label ('none' | 'dirt×n' | 'egg' | food name). */
   haul: string;
   team: number;
@@ -51,6 +52,7 @@ const SOURCE_NAMES: Record<number, string> = {
   4: 'strawberry',
   5: 'cockroach',
   6: 'caterpillar',
+  7: 'nettle',
 };
 
 /** Unit / carried-dot colors per resource kind. */
@@ -60,6 +62,7 @@ const RES_COLORS: Record<string, number> = {
   protein: 0xc05a5a,
   carbs: 0xd4a832,
   water: 0x4a9fd9,
+  honeydew: 0xd9b32b,
 };
 
 function labelText(s: Ent): string {
@@ -70,10 +73,16 @@ function labelText(s: Ent): string {
       return 'worker';
     case 'soldier':
       return 'soldier';
+    case 'honey':
+      return 'honey';
+    case 'medic':
+      return 'medic';
     case 'spider':
       return 'SPIDER';
     case 'egg':
-      return s.caste === 'soldier' ? 'egg(S)' : 'egg';
+      return s.caste === 'worker'
+        ? 'egg'
+        : `egg(${s.caste === 'soldier' ? 'S' : s.caste === 'honey' ? 'H' : 'M'})`;
     case 'source':
       return SOURCE_NAMES[s.src] ?? 'source';
     case 'collectible':
@@ -100,6 +109,8 @@ function haulLabel(c: AntEnt['carry']): string {
       return 'wood';
     case 'wool':
       return 'wool';
+    case 'fallen':
+      return 'fallen';
   }
 }
 
@@ -131,11 +142,27 @@ function drawSource(g: Graphics, s: Extract<Ent, { kind: 'source' }>) {
     g.ellipse(0, 0, 0.34 * k, 0.18 * k).fill(0x4a3b2a);
     g.moveTo(-0.3, -0.1).lineTo(-0.5, -0.25).stroke({ width: 0.05, color: 0x4a3b2a });
     g.moveTo(-0.3, -0.05).lineTo(-0.52, -0.1).stroke({ width: 0.05, color: 0x4a3b2a });
-  } else {
+  } else if (t === 6) {
     // caterpillar: green segments
     for (let i = 0; i < 4; i++) {
       g.circle(-0.3 + i * 0.2, 0, (0.16 - i * 0.01) * (0.6 + 0.4 * k)).fill(0x7aa832);
     }
+  } else {
+    // nettle (F4): a serrated-leaf stalk with amber honeydew drops
+    g.moveTo(0, 0.3 * k).lineTo(0, -0.45 * k).stroke({ width: 0.07, color: 0x3e6b34 });
+    g
+      .moveTo(0, -0.05)
+      .quadraticCurveTo(-0.3 * k, -0.12, -0.34 * k, 0.12)
+      .quadraticCurveTo(-0.1 * k, 0.1, 0, -0.05)
+      .fill(0x4a7a3e);
+    g
+      .moveTo(0, -0.2)
+      .quadraticCurveTo(0.3 * k, -0.28, 0.34 * k, -0.02)
+      .quadraticCurveTo(0.1 * k, 0.0, 0, -0.2)
+      .fill(0x568a48);
+    g.circle(-0.3 * k, 0.16, 0.06).fill(0xd9b32b);
+    g.circle(0.3 * k, 0.02, 0.05).fill(0xd9b32b);
+    g.circle(-0.05, 0.28 * k, 0.045).fill(0xd9b32b);
   }
 }
 
@@ -367,8 +394,17 @@ export class Renderer {
     } else if (s.kind === 'source') {
       drawSource(g, s);
     } else if (s.kind === 'egg') {
-      const soldier = s.caste === 'soldier';
-      g.ellipse(0, 0, soldier ? 0.19 : 0.16, soldier ? 0.28 : 0.24).fill(soldier ? 0xbfd0e8 : 0xe8dcc8);
+      // caste-tinted shells: worker cream, soldier steel, honey amber, medic pale
+      const big = s.caste !== 'worker';
+      const color =
+        s.caste === 'soldier'
+          ? 0xbfd0e8
+          : s.caste === 'honey'
+            ? 0xe8c46a
+            : s.caste === 'medic'
+              ? 0xe4e8dc
+              : 0xe8dcc8;
+      g.ellipse(0, 0, big ? 0.19 : 0.16, big ? 0.28 : 0.24).fill(color);
     } else if (s.kind === 'collectible') {
       if (s.variant === 'wood') {
         // wet wood: a short brown log with pale end grain
@@ -442,7 +478,7 @@ export class Renderer {
           g = new Graphics();
           c.addChild(g, t);
         }
-        e = { c, g, ant, hpG, t, kind: '', carrying: false, hpBucket: -1, label: '', flying: false, haul: 'none', team: -1, req, reqShown: '' };
+        e = { c, g, ant, hpG, t, kind: '', carrying: false, hpBucket: -1, label: '', flying: false, downed: false, haul: 'none', team: -1, req, reqShown: '' };
         this.sprites.set(ent.id, e);
         this.entities.addChild(c);
       }
@@ -457,15 +493,25 @@ export class Renderer {
       const pos = lerpPos(p, ent, Math.min(1, Math.max(0, alpha)));
       const carrying = isAnt(ent) && ent.carry.t !== 'none';
       const hpBucket = Math.floor((isAnt(ent) || ent.kind === 'spider' ? ent.hp : 1) * 8);
+      const downed = isAnt(ent) && ent.downed !== null;
       const label = labelText(ent);
       const flying = isAnt(ent) && ent.activity === 'flying';
       const haul = isAnt(ent) ? haulLabel(ent.carry) : 'none';
       const team = this.sim.team();
-      if (e.kind !== ent.kind || e.carrying !== carrying || e.hpBucket !== hpBucket || e.flying !== flying || e.haul !== haul || e.team !== team) {
+      if (
+        e.kind !== ent.kind ||
+        e.carrying !== carrying ||
+        e.hpBucket !== hpBucket ||
+        e.flying !== flying ||
+        e.downed !== downed ||
+        e.haul !== haul ||
+        e.team !== team
+      ) {
         e.kind = ent.kind;
         e.carrying = carrying;
         e.hpBucket = hpBucket;
         e.flying = flying;
+        e.downed = downed;
         e.haul = haul;
         e.team = team;
         if (e.g !== null) this.drawEntity(e.g, ent);
@@ -473,15 +519,22 @@ export class Renderer {
         if (e.hpG !== null && isAnt(ent)) {
           e.hpG.clear();
           if (ent.hp < 0.98) {
+            // downed ants bleed red instead of green — triage at a glance
+            const barColor = ent.downed !== null ? 0xe8544f : 0x3fbf4f;
             e.hpG.position.set(0, 0);
             e.hpG.rect(-0.4, -0.72, 0.8, 0.1).fill(0x30100e);
-            e.hpG.rect(-0.4, -0.72, 0.8 * Math.max(0, ent.hp), 0.1).fill(0x3fbf4f);
+            e.hpG
+              .rect(-0.4, -0.72, 0.8 * Math.max(0, ent.downed !== null ? 1 : ent.hp), 0.1)
+              .fill(barColor);
           }
         }
       }
-      if (e.label !== label) {
-        e.label = label;
-        e.t.text = label;
+      // a downed ant's label turns red — the medic's marching order
+      const shown = downed ? `${label} DOWN` : label;
+      if (e.label !== shown) {
+        e.label = shown;
+        e.t.text = shown;
+        e.t.style.fill = downed ? 0xe8544f : 0xf0e8da;
       }
       if (e.req !== null) {
         const rl = isAnt(ent) ? requestLabel(ent) : null;

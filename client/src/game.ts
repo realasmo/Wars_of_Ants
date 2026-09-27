@@ -71,6 +71,11 @@ export class Game {
         this.issueFollow(Number((b as HTMLElement).dataset.sq));
       });
     });
+    document.querySelectorAll('#broodmenu .sq-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.orderBrood(Number((b as HTMLElement).dataset.brood));
+      });
+    });
     this.playerAnt = this.initialAnt();
     this.log.push({ type: 'start', seed, workers: sim.workers().length });
     if (replay) {
@@ -123,23 +128,86 @@ export class Game {
     else if (code === 'KeyC') this.cycleAnt();
   }
 
-  // --- squad X-menu (F3 wave) ---
+  // --- squad X-menu (F3 wave) + queen brood X-menu (F4) ---
   private squadOpen = false;
+  private broodOpen = false;
 
   private squadKey(code: string): void {
     if (code === 'KeyX') {
-      // worker (or soldier) leaders only — the queen's X-menu is the F4
-      // brood menu, not built yet
       const me = this.playerAnt !== null ? this.sim.ant(this.playerAnt) : undefined;
-      if (me === undefined || me.kind === 'queen') return;
+      if (me === undefined) return;
+      if (me.kind === 'queen') {
+        // the queen's X is the brood menu (F4)
+        if (this.sim.phase() < 2) return; // nothing to order before the nest
+        this.broodOpen = !this.broodOpen;
+        this.squadOpen = false;
+        document.getElementById('squadmenu')?.classList.add('hidden');
+        document.getElementById('broodmenu')?.classList.toggle('hidden', !this.broodOpen);
+        if (this.broodOpen) this.refreshBroodMenu();
+        return;
+      }
       this.squadOpen = !this.squadOpen;
+      this.broodOpen = false;
+      document.getElementById('broodmenu')?.classList.add('hidden');
       document.getElementById('squadmenu')?.classList.toggle('hidden', !this.squadOpen);
       return;
     }
     const map: Record<string, number> = { Digit1: 0, Digit2: 1, Digit3: 3, Digit4: 2 };
     const mode = map[code];
     if (mode === undefined) return;
+    if (this.broodOpen) {
+      // the brood menu owns the number keys while open
+      this.orderBrood(mode === 3 ? 2 : mode === 2 ? 3 : mode);
+      return;
+    }
     this.issueFollow(mode);
+  }
+
+  /** Cost line for one brood entry, from the core's brood spec (rules =
+   * single source of truth — the client renders, never hardcodes). */
+  private refreshBroodMenu(): void {
+    const have: Record<string, number> = {
+      protein: this.sim.storeProtein(),
+      carbs: this.sim.storeCarbs(),
+      water: this.sim.storeWater(),
+      honeydew: this.sim.storeHoneydew(),
+    };
+    const counts = this.sim.casteCounts();
+    for (const e of this.sim.broodSpec()) {
+      const el = document.getElementById(`brood-${e.code}`);
+      if (el === null) continue;
+      const costs = [
+        ['protein', e.protein],
+        ['carbs', e.carbs],
+        ['water', e.water],
+        ['honeydew', e.honeydew],
+      ] as const;
+      const parts = costs.filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`);
+      if (e.consumesWorker) parts.push('1 worker');
+      const affordable = costs.every(([k, n]) => have[k] >= n) && (!e.consumesWorker || counts.workers > 0);
+      el.textContent = `${e.name} — ${parts.join(' + ')}`;
+      el.closest('.sq-btn')?.classList.toggle('unaffordable', !affordable);
+    }
+  }
+
+  /** Issue one queen brood order; flash the core's refusal reason. */
+  private orderBrood(code: number): void {
+    if (this.playerAnt === null || this.sim.dead || this.replay !== null) return;
+    const reason = this.sim.brood(this.playerAnt, code);
+    if (reason !== '') this.hud.flashHint(reason);
+    this.log.push({ type: 'cmd', act: 'brood', ant: this.playerAnt, kind: String(code) });
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+    this.broodOpen = false;
+    document.getElementById('broodmenu')?.classList.add('hidden');
+  }
+
+  /** Console/e2e hook: order brood directly; returns '' or the refusal. */
+  debugBrood(code: number): string {
+    const q = this.sim.queenId();
+    if (q === null || this.sim.dead || this.replay !== null) return 'no queen';
+    const reason = this.sim.brood(q, code);
+    if (reason === '') this.log.push({ type: 'cmd', act: 'brood', ant: q, kind: String(code) });
+    return reason;
   }
 
   private issueFollow(mode: number): void {
@@ -300,6 +368,13 @@ export class Game {
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
   }
 
+  debugSetHoneydew(n: number): void {
+    if (this.sim.dead || this.replay !== null) return;
+    this.sim.devSetHoneydew(n);
+    this.log.push({ type: 'cmd', act: 'dev-honeydew', n });
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+  }
+
   debugSetSuper(n: number): void {
     if (this.sim.dead || this.replay !== null) return;
     this.sim.devSetSuper(n);
@@ -383,8 +458,11 @@ export class Game {
       carbs: this.sim.storeCarbs(),
       protein: this.sim.storeProtein(),
       water: this.sim.storeWater(),
+      honeydew: this.sim.storeHoneydew(),
       workers: counts.workers,
       soldiers: counts.soldiers,
+      honeys: counts.honeys,
+      medics: counts.medics,
       eggs: this.sim.eggCount(),
       dug: this.sim.tilesDug(),
       layer: this.renderer.activeLayer === 0 ? 'surface' : 'underground',
@@ -529,7 +607,14 @@ export class Game {
     let bestD = 0.6 * 0.6;
     for (const s of this.sim.cur.values()) {
       if (s.layer !== layer) continue;
-      if (s.kind !== 'queen' && s.kind !== 'worker' && s.kind !== 'soldier' && s.kind !== 'spider')
+      if (
+        s.kind !== 'queen' &&
+        s.kind !== 'worker' &&
+        s.kind !== 'soldier' &&
+        s.kind !== 'honey' &&
+        s.kind !== 'medic' &&
+        s.kind !== 'spider'
+      )
         continue;
       const d = (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y);
       if (d < bestD) {
@@ -867,6 +952,7 @@ export class Game {
       else if (c.act === 'dump' || c.act === 'drop')
         this.sim.drop(c.ant ?? 0, c.tx ?? 0, c.ty ?? 0);
       else if (c.act === 'pick-egg') this.sim.pickEgg(c.ant ?? 0, c.target ?? 0);
+      else if (c.act === 'brood') this.sim.brood(c.ant ?? 0, Number(c.kind ?? 0));
       else if (c.act === 'follow-all') this.sim.follow(c.ant ?? 0, 0);
       else if (c.act === 'follow-one') this.sim.follow(c.ant ?? 0, 1);
       else if (c.act === 'follow-soldiers') this.sim.follow(c.ant ?? 0, 2);
@@ -878,6 +964,7 @@ export class Game {
         for (const s of [...this.sim.cur.values()]) if (s.kind === 'spider') this.sim.devKill(s.id);
       } else if (c.act === 'dev-kill') this.sim.devKill(Number(c.target ?? 0));
       else if (c.act === 'dev-water') this.sim.devSetWater(Number(c.n ?? 0));
+      else if (c.act === 'dev-honeydew') this.sim.devSetHoneydew(Number(c.n ?? 0));
       else if (c.act === 'dev-soil')
         this.sim.devSetSoil(Number(c.layer ?? 0), c.x ?? 0, c.y ?? 0, Number(c.soil ?? 0));
       applied = true;

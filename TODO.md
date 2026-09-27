@@ -1,4 +1,4 @@
-## NEXT: F4 — queen X-menu brood production (Worker / Soldier / Honey / Medic eggs; absorbs the old Wave B corpses+Medic). Drafts and costs in docs/WORLD-DESIGN.md.
+## NEXT: admin tuning panel — the ?admin=1 client overlay over the GameRules data layer (GUI-first, whole-rules get/set with validation; full decisions in the project memory + AGENTS quality bar). After that: waves C (neutral creatures) → D (aphid farming) → E (bosses), then the lighting ticket menu.
 
 ## User TODO batch (2026-09-27, verbatim — sequenced into waves below)
 
@@ -48,18 +48,25 @@ Agent sequencing of the batch (one ticket per wave, playtest-gated):
   the leader's target, then returns to following when it dies; feeding
   outranks conversion (the feeder may be reclaimed); fight-end releases
   player-commanded ants back to autonomy.
-- **F4 — brood production — NEXT** (the big one, absorbs Wave B + part of D):
-  queen X-menu, egg types + costs, worker→soldier conversion (consumes the
-  worker), Medic + fallen-ant rescue (needs corpse state — Wave B's corpse
-  system), Honey caste + nettle-sourced honeydew economy (15–22 units,
-  10s/unit, 4 scattered) until Wave D's aphids. Squad combat mostly
-  shipped in wave S (assist-attack, workers fight, farm-conversion);
-  still open here: retaliation when the leader is attacked.
-
-F4 design settled 2026-09-27: convert-from-worker consumes the existing
-worker; honeydew comes from farming nettle (new map source) until aphids
-exist; attack-click assist SHIPPED in wave S (workers fight too, return after the kill);
-still open for F4: retaliation when the leader is attacked.
+- **DONE (F4, 2026-09-28, `6286617`→ship): brood production** — the big one,
+  Wave B + part of D absorbed. Queen X-menu (X as the queen, 1–4 or click):
+  Worker 2p+1w · Soldier 6p+3w **+ consumes one worker** (metamorphosis) ·
+  Honey 1p+8h · Medic 4p+3c — costs paid from the PHYSICAL pantry, every
+  refusal explains itself in the help bar. This also fixes the founding
+  softlock (0 eggs + 0 workers is recoverable — order more workers for
+  pantry protein+water). Honeydew is the 4th resource: **nettle** map
+  sources (15–22u, 10s/u, 4 scattered) until Wave D's aphids; Honey ants
+  secrete 1 honeydew/4 min (banks on silver, spoils loose elsewhere).
+  Combat deaths of caste ants **down** them instead of killing: 60s bleed-out,
+  medics auto-rescue (carry home, heal for 2 stored water, revive at full
+  hp; spiders ignore downed ants; red DOWN labels + red HP bars). Squad
+  **retaliation** shipped: an attacked leader's followers share the
+  attacker as their target. Medics never farm (stand-by in the nest).
+  Foundation: **GameRules** — every tunable (old balance consts + Config +
+  worldgen literals) is now one typed, validated, digest-hashed ruleset on
+  Sim (the admin panel's substrate; F4's brood costs were its first data
+  rows). Wire layout v4 (stride 13). 71 core tests, e2e 3× green with
+  determinism byte-match.
 
 ---
 

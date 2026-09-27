@@ -18,6 +18,7 @@ export interface ReplayCmd {
     | 'dump'
     | 'drop'
     | 'pick-egg'
+    | 'brood'
     | 'follow-all'
     | 'follow-one'
     | 'follow-soldiers'
@@ -26,6 +27,7 @@ export interface ReplayCmd {
     | 'dev-food'
     | 'dev-super'
     | 'dev-water'
+    | 'dev-honeydew'
     | 'dev-kill'
     | 'dev-kill-spiders'
     | 'dev-soil';

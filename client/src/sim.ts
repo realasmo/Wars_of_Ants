@@ -132,6 +132,21 @@ export class Sim {
     return this.sim.cmd_pick_egg(id, egg);
   }
 
+  /** Queen X-menu brood order (F4): caste 0 worker, 1 soldier, 2 honey,
+   * 3 medic. Returns '' on success, else the core's refusal reason. */
+  brood(queen: number, caste: number): string {
+    return this.sim.cmd_brood(queen, caste);
+  }
+
+  /** The queen X-menu's data (costs etc.), straight from the rules. */
+  broodSpec(): BroodSpecEntry[] {
+    if (this.broodSpecCache === null) {
+      this.broodSpecCache = JSON.parse(this.sim.brood_spec()) as BroodSpecEntry[];
+    }
+    return this.broodSpecCache;
+  }
+  private broodSpecCache: BroodSpecEntry[] | null = null;
+
   devSetSoil(layer: number, x: number, y: number, soil: number): void {
     this.sim.dev_set_soil(layer, x, y, soil);
     this.refreshSoil();
@@ -193,6 +208,14 @@ export class Sim {
     return this.sim.store_water();
   }
 
+  storeHoneydew(): number {
+    return this.sim.store_honeydew();
+  }
+
+  devSetHoneydew(n: number): void {
+    this.sim.dev_set_honeydew(n);
+  }
+
   devSetWater(n: number): void {
     this.sim.dev_set_water(n);
   }
@@ -225,22 +248,25 @@ export class Sim {
     return d;
   }
 
-  /** Worker + soldier ids, ascending. */
+  /** Every non-queen ant id, ascending (the cycling roster). */
   workers(): number[] {
     const out: number[] = [];
-    for (const s of this.cur.values())
-      if (s.kind === 'worker' || s.kind === 'soldier') out.push(s.id);
+    for (const s of this.cur.values()) if (isAnt(s) && s.kind !== 'queen') out.push(s.id);
     return out.sort((a, b) => a - b);
   }
 
-  casteCounts(): { workers: number; soldiers: number } {
+  casteCounts(): { workers: number; soldiers: number; honeys: number; medics: number } {
     let workers = 0;
     let soldiers = 0;
+    let honeys = 0;
+    let medics = 0;
     for (const s of this.cur.values()) {
       if (s.kind === 'worker') workers++;
       else if (s.kind === 'soldier') soldiers++;
+      else if (s.kind === 'honey') honeys++;
+      else if (s.kind === 'medic') medics++;
     }
-    return { workers, soldiers };
+    return { workers, soldiers, honeys, medics };
   }
 
   queenId(): number | null {
@@ -289,7 +315,13 @@ export class Sim {
 }
 
 export function isAnt(s: Ent): s is AntEnt {
-  return s.kind === 'queen' || s.kind === 'worker' || s.kind === 'soldier';
+  return (
+    s.kind === 'queen' ||
+    s.kind === 'worker' ||
+    s.kind === 'soldier' ||
+    s.kind === 'honey' ||
+    s.kind === 'medic'
+  );
 }
 
 /** Short carry description for logs/console ("dirt×2", "egg", "protein"). */
@@ -307,5 +339,19 @@ export function carryLabel(c: AntEnt['carry']): string {
       return 'wood';
     case 'wool':
       return 'wool';
+    case 'fallen':
+      return 'downed ant';
   }
+}
+
+/** One queen X-menu entry, from the core's brood_spec (rules = truth). */
+export interface BroodSpecEntry {
+  code: number;
+  name: string;
+  protein: number;
+  carbs: number;
+  water: number;
+  honeydew: number;
+  eggTime: number;
+  consumesWorker: boolean;
 }

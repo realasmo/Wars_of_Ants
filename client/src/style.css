@@ -413,6 +413,37 @@ body {
   z-index: 40;
 }
 #squadmenu.hidden { display: none; }
+/* the queen's brood menu (F4) shares the squad menu's chrome */
+#broodmenu {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  background: rgba(14, 12, 9, 0.92);
+  border: 1px solid #6a5a3a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 40;
+}
+#broodmenu.hidden { display: none; }
+#broodmenu .sq-title { color: #d9c27a; font: bold 12px monospace; letter-spacing: 2px; text-align: center; }
+#broodmenu .sq-btn {
+  background: #2a2318;
+  color: #e8dfc8;
+  border: 1px solid #5a4c30;
+  border-radius: 5px;
+  padding: 6px 10px;
+  font: 12px monospace;
+  cursor: pointer;
+  text-align: left;
+}
+#broodmenu .sq-btn:hover { background: #3a3020; }
+#broodmenu .sq-btn b { color: #d9c27a; margin-right: 6px; }
+#broodmenu .sq-btn.unaffordable { color: #8a7a62; border-color: #3a3020; }
+#broodmenu .sq-btn.unaffordable:hover { background: #2a2318; }
 #squadmenu .sq-title {
   color: #d9c27a;
   font: bold 12px monospace;

@@ -297,6 +297,20 @@ export function itemPart(renderer: PixiRenderer, kind: 'dirt' | 'egg' | string):
       rx: 0.24,
       ry: 0.2,
     };
+  } else if (kind === 'fallen') {
+    // a downed ant carried in the mandibles: dark body lying limp on its
+    // side, legs trailing (F4 medics)
+    part = {
+      ...bake(renderer, (g) => {
+        g.ellipse(u(-0.05), 0, u(0.22), u(0.09)).fill(0x241811).stroke({ width: o, color: 0x0c0806 });
+        g.circle(u(0.18), u(-0.02), u(0.07)).fill(0x2a1c14).stroke({ width: o, color: 0x0c0806 });
+        g.moveTo(u(-0.1), u(-0.06)).lineTo(u(-0.18), u(-0.16)).stroke({ width: o, color: 0x241811 });
+        g.moveTo(u(0.0), u(-0.07)).lineTo(u(-0.02), u(-0.18)).stroke({ width: o, color: 0x241811 });
+        g.moveTo(u(0.1), u(-0.05)).lineTo(u(0.16), u(-0.14)).stroke({ width: o, color: 0x241811 });
+      }),
+      rx: 0.26,
+      ry: 0.16,
+    };
   } else {
     const color = FOOD_COLORS[kind] ?? FOOD_COLORS.green;
     part = {

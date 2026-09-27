@@ -8,7 +8,7 @@ Design reference: AntWar.io (see `docs/BASED-ON.md`); world content draft: `docs
 - **Remote (origin):** `git@github.com:realasmo/Wars_of_Ants.git`
 - **SSH key:** `/root/.ssh/key_Wars_of_Ants` (configured via repo-local `core.sshCommand`)
 
-## Current status (2026-09-27) — version 0.1.02.54-dev
+## Current status (2026-09-28) — version 0.1.03.57-dev
 
 **Playable:** title → team select → flying queen → found nest → excavate
 (2×2 blocks, dirt hauling) → orange-soil nursery (egg transport) → first
@@ -17,8 +17,12 @@ prioritize what the queen craves) → survive spiders → **squad play**
 (X-menu: recruit/release followers, silver rings, released ants resume
 their interrupted work; a leader who farms **converts the squad** — they
 keep farming until re-recruited; an attack order is shared — the whole
-squad fights that enemy, then returns to you) → **physical queen feeding** (one feeder worker serves her
-rotating cravings; the request shows above her and in the HUD).
+squad fights that enemy, then returns to you; a leader under attack calls
+the squad to **retaliate**) → **physical queen feeding** (one feeder worker serves her
+rotating cravings; the request shows above her and in the HUD) →
+**brood production** (X as the queen: order Worker/Soldier/Honey/Medic
+eggs for physical pantry costs; soldier orders consume a worker; honeydew
+from nettle sources and Honey ants; medics rescue downed ants for water).
 Engine: deterministic 20 tps core (native + WASM byte-identical), replays
 (v2), e2e playtest suite, in-game dev console (`` ` ``) with a live sim
 event log. Every game change bumps `GAME_VERSION` (menu + corner).
@@ -42,6 +46,15 @@ editing `client/src/art/ants.ts` numbers).
 - **F3:** squad follow — worker/soldier X-menu (all-in-sight / one /
   soldiers / release), followers keep near you and cross layers, silver
   squad rings, replay-logged commands.
+- **F4 (shipped 2026-09-28):** queen X-menu brood production — Worker 2p+1w,
+  Soldier 6p+3w + consumes a worker, Honey 1p+8h, Medic 4p+3c, paid from
+  the physical pantry; founding softlock fixed (re-order workers). Fourth
+  resource **honeydew**: nettle map sources + Honey ants secreting 1/4min.
+  **Medics**: combat downs caste ants (60s bleed-out), auto-rescue, heal
+  for 2 stored water, revive at full hp. **Retaliation**: the squad turns
+  on whoever hits the leader. Foundation: `GameRules` (rules.rs) — all
+  tunables now one typed, validated, digest-hashed dataset on the sim (the
+  admin tuning panel's substrate). Wire layout v4.
 - **F4 (next):** the queen's X-menu — egg types with resource costs
   (Worker / Soldier / Honey / Medic), worker→soldier conversion (consumes
   the worker), fallen-ant rescue; absorbs Wave B (corpses/healing) and

@@ -134,7 +134,9 @@ export class Input {
         this.onEscape();
       } else if (
         (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3' || e.code === 'Digit4') &&
-        !document.getElementById('squadmenu')?.classList.contains('hidden')
+        // digits serve whichever X-menu is open (squad or the queen's brood)
+        (!document.getElementById('squadmenu')?.classList.contains('hidden') ||
+          !document.getElementById('broodmenu')?.classList.contains('hidden'))
       ) {
         this.onSquadKey(e.code);
       }

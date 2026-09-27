@@ -15,12 +15,13 @@ function carrySuffix(a: AntEnt): string {
 const HELP_COLONY =
   'Hold left button: your ant follows the cursor · Left-click an ant: take control · Right-click: dig tile / attack spider / ' +
   'enter-exit nest (the marked hole) · Mouse wheel: zoom · C: control next ant · X: squad — they follow you, farm with you ' +
-  '(and keep at it), and attack your target; X, 1 recalls them · F2: dev tools · F3: perf · ' +
-  'the camera follows your ant; spectate (Tab, drag, WASD) when it dies';
+  '(and keep at it), and attack your target; X, 1 recalls them · as the QUEEN, X: brood menu (order eggs for pantry food) · ' +
+  'F2: dev tools · F3: perf · the camera follows your ant; spectate (Tab, drag, WASD) when it dies';
 
 const HELP_FOUNDING =
   'Right-click dirt: walk there and dig (2×2) · You can carry two blocks — right-click empty space to refill one, haul out and drop above ground to discard all · ' +
-  'Orange soil = eggs only hatch there · Silver = food never spoils there · Right-click an egg to carry it, again to place · F2 · F3';
+  'Orange soil = eggs only hatch there · Silver = food never spoils there · Right-click an egg to carry it, again to place · ' +
+  'X: brood menu (order eggs for pantry food) · F2 · F3';
 
 const HELP_FLIGHT = 'Hold left button: fly toward the cursor · Right-click: land here · F2: dev tools · F3: perf';
 
@@ -38,6 +39,7 @@ export class Hud {
     el('stat-protein').textContent = String(sim.storeProtein());
     el('stat-carbs').textContent = String(sim.storeCarbs());
     el('stat-water').textContent = String(sim.storeWater());
+    el('stat-honeydew').textContent = String(sim.storeHoneydew());
     const wants = el('stat-wants');
     const req = sim.queenRequest();
     if (req === null) {
@@ -47,8 +49,13 @@ export class Hud {
       wants.textContent = req.hunger > 0 ? `${req.request} NOW` : req.request;
       wants.style.color = req.hunger > 0 ? '#e8544f' : '';
     }
+    const extra = [
+      counts.soldiers > 0 ? `${counts.soldiers}S` : '',
+      counts.honeys > 0 ? `${counts.honeys}H` : '',
+      counts.medics > 0 ? `${counts.medics}M` : '',
+    ].filter(Boolean).join(' ');
     el('stat-ants').textContent =
-      counts.soldiers > 0 ? `${counts.workers} +${counts.soldiers}S` : String(counts.workers);
+      extra.length > 0 ? `${counts.workers} +${extra}` : String(counts.workers);
     el('stat-eggs').textContent = String(sim.eggCount());
     el('stat-dug').textContent = `${sim.tilesDug()} · map ${sim.w}×${sim.h}`;
     const secs = Math.floor(sim.tickCount / 20);

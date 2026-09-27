@@ -114,8 +114,10 @@ function run(raw: string): void {
   switch (cmd) {
     case 'help':
       pushLine(
-        'spawn <kind> [x y] — worker soldier egg spider wood wool moss mushroom raspberry strawberry cockroach caterpillar\n' +
-          'setfood <n> | setsuper <n> | setwater <n> — stores\n' +
+        'spawn <kind> [x y] — worker soldier egg spider wood wool moss mushroom raspberry strawberry cockroach caterpillar nettle honey medic\n' +
+          '  pantry units: pantry-protein | pantry-water | pantry-honeydew (physical piles)\n' +
+          'setfood <n> | setsuper <n> | setwater <n> | sethoneydew <n> — stores\n' +
+          'brood <worker|soldier|honey|medic> — queen X-menu order\n' +
           'soil <layer> <x> <y> <0|1|2> — paint soil block (orange=1 silver=2)\n' +
           'kill <id> | killspiders | pause | step <n>\n' +
           'coords — toggle click/world coordinate logging\n' +
@@ -149,6 +151,20 @@ function run(raw: string): void {
       g.debugSetWater(num(1));
       pushLine(`water = ${num(1)}`, 'cmd');
       break;
+    case 'sethoneydew':
+      if (parts.length < 2) return argErr('sethoneydew <n>');
+      g.debugSetHoneydew(num(1));
+      pushLine(`honeydew = ${num(1)}`, 'cmd');
+      break;
+    case 'brood': {
+      if (parts.length < 2) return argErr('brood <worker|soldier|honey|medic>');
+      const codes: Record<string, number> = { worker: 0, soldier: 1, honey: 2, medic: 3 };
+      const code = codes[parts[1]];
+      if (code === undefined) return argErr('brood <worker|soldier|honey|medic>');
+      const reason = g.debugBrood(code);
+      pushLine(reason === '' ? `brood ordered: ${parts[1]}` : `refused: ${reason}`, reason === '' ? 'cmd' : 'err');
+      break;
+    }
     case 'soil': {
       if (parts.length < 5) return argErr('soil <layer> <x> <y> <0|1|2>');
       g.debugSetSoil(num(1), num(2), num(3), num(4));
@@ -183,7 +199,7 @@ function run(raw: string): void {
       const q = s.queen as Record<string, unknown> | undefined;
       const feeder = s.feeder === null || s.feeder === undefined ? 'none' : `#${s.feeder}`;
       pushLine(
-        `t=${s.tick} phase=${s.phase} P/C/W=${s.protein}/${s.carbs}/${s.water} ` +
+        `t=${s.tick} phase=${s.phase} P/C/W/H=${s.protein}/${s.carbs}/${s.water}/${s.honeydew} ` +
           `workers=${s.workers} eggs=${s.eggs} feeder=${feeder} ` +
           `queen-wants=${q?.request ?? '—'} (hunger ${q?.hunger ?? 0}) dead=${s.dead}`,
         'sys',

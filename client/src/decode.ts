@@ -20,6 +20,8 @@ const KINDS = {
   food: 5,
   source: 6,
   collectible: 7,
+  honey: 8,
+  medic: 9,
 } as const;
 
 const ACTIVITY = {
@@ -38,6 +40,7 @@ const CARRY = {
   food: 3,
   wood: 4,
   wool: 5,
+  fallen: 6,
 } as const;
 
 const FOOD = {
@@ -46,6 +49,15 @@ const FOOD = {
   protein: 2,
   carbs: 3,
   water: 4,
+  honeydew: 5,
+} as const;
+
+/** What an egg hatches into (egg record p1, layout v4). */
+const EGG_CASTE = {
+  worker: 0,
+  soldier: 1,
+  honey: 2,
+  medic: 3,
 } as const;
 
 /** Queen request codes (ant record p6): 0 = none/not the queen, else the
@@ -59,9 +71,10 @@ const REQUEST = {
 
 // --- decoded shapes ---
 
-export type FoodName = keyof typeof FOOD; // 'green' | 'super' | 'protein' | 'carbs' | 'water'
+export type FoodName = keyof typeof FOOD; // 'green' | 'super' | 'protein' | 'carbs' | 'water' | 'honeydew'
 export type ActivityName = keyof typeof ACTIVITY;
-export type AntKindName = 'queen' | 'worker' | 'soldier';
+export type AntKindName = 'queen' | 'worker' | 'soldier' | 'honey' | 'medic';
+export type EggCasteName = keyof typeof EGG_CASTE;
 
 export type Carry =
   | { t: 'none' }
@@ -69,7 +82,8 @@ export type Carry =
   | { t: 'egg' }
   | { t: 'food'; food: FoodName }
   | { t: 'wood' }
-  | { t: 'wool' };
+  | { t: 'wool' }
+  | { t: 'fallen' };
 
 interface Base {
   id: number;
@@ -91,6 +105,8 @@ export interface AntEnt extends Base {
   request: FoodName | null;
   /** Squad leader this ant follows (X-menu), or null. */
   following: number | null;
+  /** Downed (F4): remaining bleed fraction 1→0; null = standing. */
+  downed: number | null;
 }
 
 /** Dropped or banked food pile. */
@@ -102,12 +118,12 @@ export interface FoodEnt extends Base {
   spoil: number | null;
 }
 
-/** Finite map source (moss..caterpillar). */
+/** Finite map source (moss..nettle). */
 export interface SourceEnt extends Base {
   kind: 'source';
   amount: number;
   food: FoodName;
-  /** Visual type 1..6. */
+  /** Visual type 1..7. */
   src: number;
 }
 
@@ -115,7 +131,7 @@ export interface EggEnt extends Base {
   kind: 'egg';
   /** Remaining incubation fraction: 1 fresh → 0 ready. */
   hatchLeft: number;
-  caste: 'worker' | 'soldier';
+  caste: EggCasteName;
   carried: boolean;
 }
 
@@ -151,6 +167,8 @@ const KIND_BY_CODE: Record<number, AntKindName> = {
   [KINDS.queen]: 'queen',
   [KINDS.worker]: 'worker',
   [KINDS.soldier]: 'soldier',
+  [KINDS.honey]: 'honey',
+  [KINDS.medic]: 'medic',
 };
 
 /** Decode the flat transport into named entities. Throws on unknown codes —
@@ -160,7 +178,7 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
   const n = raw[3];
   const ents: Ent[] = [];
   for (let i = 0; i < n; i++) {
-    const o = 4 + i * 12;
+    const o = 4 + i * 13;
     const id = raw[o];
     const kindCode = raw[o + 1];
     const layer = raw[o + 2];
@@ -173,7 +191,14 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
     const p4 = raw[o + 9];
     const p5 = raw[o + 10];
     const p6 = raw[o + 11];
-    if (kindCode === KINDS.queen || kindCode === KINDS.worker || kindCode === KINDS.soldier) {
+    const p7 = raw[o + 12];
+    if (
+      kindCode === KINDS.queen ||
+      kindCode === KINDS.worker ||
+      kindCode === KINDS.soldier ||
+      kindCode === KINDS.honey ||
+      kindCode === KINDS.medic
+    ) {
       const carryTag = p2;
       const carry: Carry =
         carryTag === CARRY.none
@@ -186,7 +211,9 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
                 ? { t: 'wood' }
                 : carryTag === CARRY.wool
                   ? { t: 'wool' }
-                  : { t: 'food', food: foodName(p3) };
+                  : carryTag === CARRY.fallen
+                    ? { t: 'fallen' }
+                    : { t: 'food', food: foodName(p3) };
       ents.push({
         id,
         kind: KIND_BY_CODE[kindCode],
@@ -199,6 +226,7 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
         hunger: p4,
         request: p6 > 0.5 ? foodName(p6) : null,
         following: p5 > 0.5 ? p5 - 1 : null,
+        downed: p7 < -0.5 ? null : p7,
       });
     } else if (kindCode === KINDS.food) {
       ents.push({
@@ -230,7 +258,7 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
         x,
         y,
         hatchLeft: p0,
-        caste: p1 > 0.5 ? 'soldier' : 'worker',
+        caste: eggCasteName(p1),
         carried: p2 > 0.5,
       });
     } else if (kindCode === KINDS.collectible) {
@@ -265,6 +293,16 @@ function activityName(code: number): ActivityName {
   return n;
 }
 
+const EGG_CASTE_NAMES: Record<number, EggCasteName> = Object.fromEntries(
+  Object.entries(EGG_CASTE).map(([k, v]) => [v, k as EggCasteName]),
+);
+
+function eggCasteName(code: number): EggCasteName {
+  const n = EGG_CASTE_NAMES[code];
+  if (n === undefined) throw new Error(`decodeSnapshot: unknown egg caste code ${code}`);
+  return n;
+}
+
 function foodName(code: number): FoodName {
   const n = FOOD_NAMES[code];
   if (n === undefined) throw new Error(`decodeSnapshot: unknown food code ${code}`);
@@ -286,6 +324,7 @@ export function assertWireSpec(specJson: string): void {
     ['carry', CARRY],
     ['food', FOOD],
     ['request', REQUEST],
+    ['eggCaste', EGG_CASTE],
   ];
   for (const [name, local] of groups) {
     const remote = spec[name] as Record<string, number> | undefined;

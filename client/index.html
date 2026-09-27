@@ -16,6 +16,7 @@
           <div class="row"><span>Protein</span><span id="stat-protein">0</span></div>
           <div class="row"><span>Carbs</span><span id="stat-carbs">0</span></div>
           <div class="row"><span>Water</span><span id="stat-water">0</span></div>
+          <div class="row"><span>Honeydew</span><span id="stat-honeydew">0</span></div>
           <div class="row"><span>Queen wants</span><span id="stat-wants">—</span></div>
           <div class="row"><span>Ants</span><span id="stat-ants">0</span></div>
           <div class="row"><span>Eggs</span><span id="stat-eggs">0</span></div>
@@ -33,6 +34,13 @@
       <button class="sq-btn" data-sq="1"><b>2</b> One more ant joins</button>
       <button class="sq-btn" data-sq="2"><b>4</b> All soldiers follow you</button>
       <button class="sq-btn" data-sq="3"><b>3</b> Release the squad</button>
+    </div>
+    <div id="broodmenu" class="hidden">
+      <div class="sq-title">BROOD</div>
+      <button class="sq-btn" data-brood="0"><b>1</b> <span id="brood-0"></span></button>
+      <button class="sq-btn" data-brood="1"><b>2</b> <span id="brood-1"></span></button>
+      <button class="sq-btn" data-brood="2"><b>3</b> <span id="brood-2"></span></button>
+      <button class="sq-btn" data-brood="3"><b>4</b> <span id="brood-3"></span></button>
     </div>
     <div id="help">
         <b>Hold left button</b>: your ant follows the cursor &nbsp;·&nbsp; <b>Left-click an
@@ -101,6 +109,11 @@
           <button data-spawn="strawberry">strawberry</button>
           <button data-spawn="cockroach">cockroach</button>
           <button data-spawn="caterpillar">caterpillar</button>
+        </div>
+        <div class="dev-row">
+          <button data-spawn="nettle">nettle</button>
+          <button data-spawn="honey">honey ant</button>
+          <button data-spawn="medic">medic</button>
         </div>
         <div class="dev-row">
           <button id="dev-spawn-back">← back</button>

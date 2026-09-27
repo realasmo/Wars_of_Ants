@@ -422,6 +422,65 @@ try {
   else console.log('perf:', perfText.split('\n')[0]);
   await page.keyboard.press('F3');
 
+  // --- F4: queen X-menu brood production ---
+  await page.evaluate(() => window.__woa.pause());
+  let s4 = await state();
+  for (let i = 0; i < 10 && s4.playerAnt !== s4.queen.id; i++) {
+    await page.evaluate(() => window.__woa.key('KeyC'));
+    s4 = await state();
+  }
+  if (s4.playerAnt !== s4.queen.id) {
+    failures.push(`could not cycle to the queen (${s4.playerAnt} vs ${s4.queen.id})`);
+  }
+  // the brood menu must stay hidden until X (the squadmenu CSS lesson)
+  const broodHidden0 = await page.evaluate(
+    () => document.getElementById('broodmenu').classList.contains('hidden'),
+  );
+  const broodDisplayed0 = await page.evaluate(
+    () => getComputedStyle(document.getElementById('broodmenu')).display === 'none',
+  );
+  if (!broodHidden0 || !broodDisplayed0) failures.push('broodmenu visible before X');
+  await page.keyboard.press('KeyX');
+  await page.waitForTimeout(120);
+  const broodShown = await page.evaluate(
+    () => getComputedStyle(document.getElementById('broodmenu')).display !== 'none',
+  );
+  if (!broodShown) failures.push('X as the queen did not open the brood menu');
+  const broodBtnText = await page.evaluate(() => document.getElementById('brood-0').textContent);
+  if (!broodBtnText || !broodBtnText.includes('protein')) {
+    failures.push(`brood menu costs missing from the core spec: ${broodBtnText}`);
+  }
+  // order with an empty physical pantry → the refusal explains itself
+  await page.keyboard.press('Digit1');
+  await page.waitForTimeout(120);
+  const hint = await page.evaluate(() => document.getElementById('help').textContent);
+  if (!hint || !hint.includes('not enough')) {
+    failures.push(`empty-pantry brood refusal not flashed: ${hint && hint.slice(0, 80)}`);
+  }
+  const menuClosed = await page.evaluate(
+    () => document.getElementById('broodmenu').classList.contains('hidden'),
+  );
+  if (!menuClosed) failures.push('brood menu did not close after ordering');
+  // pay with real stored piles at the queen's tile → the order lands
+  const q4 = (await state()).queen;
+  for (const kind of ['pantry-protein', 'pantry-protein', 'pantry-water']) {
+    await page.evaluate(({ k, x, y }) => window.__woa.spawn(k, x, y), { k: kind, x: q4.x, y: q4.y });
+  }
+  await page.evaluate(() => window.__woa.step(3)); // force a snapshot pull
+  const b4 = await state();
+  const reason4 = await page.evaluate(() => window.__woa.brood(0));
+  if (reason4 !== '') failures.push(`paid brood order refused: ${reason4}`);
+  await page.evaluate(() => window.__woa.step(3)); // force a snapshot pull
+  const a4 = await state();
+  if (a4.eggs !== b4.eggs + 1) {
+    failures.push(`brood order laid no egg (${b4.eggs} → ${a4.eggs})`);
+  }
+  if (a4.protein !== b4.protein - 2 || a4.water !== b4.water - 1) {
+    failures.push(`brood cost not paid physically (P ${b4.protein}→${a4.protein}, W ${b4.water}→${a4.water})`);
+  }
+  console.log('brood:', JSON.stringify({ eggs: a4.eggs, protein: a4.protein, water: a4.water }));
+  await page.evaluate(() => window.__woa.pause());
+
   // --- regenerate the determinism fixture from this very session ---
   const replayExport = await page.evaluate(() => window.__woa.replay());
   const fixturePath = path.join(ROOT, 'public', 'replays', 'determinism.json');

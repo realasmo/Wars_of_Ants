@@ -1,20 +1,28 @@
 # World design: creatures, resources, map
 
 User's design draft (2026-09-26), captured verbatim as the content bible.
-Balance numbers are placeholders — tune in `core/src/balance.rs` once playable.
-Decisions get promoted to README.md once confirmed in playtesting.
+Balance numbers are placeholders — they now live as data in `core/src/rules.rs`
+(`GameRules`: one typed, validated ruleset per sim; the admin tuning panel
+edits it live in a later wave). Decisions get promoted to README.md once
+confirmed in playtesting.
 
 ## Creatures
 
-### Player-controlled
+### Player-controlled (F4 SHIPPED 2026-09-28 — all costs are paid from the
+physical pantry via the queen's X-menu; refusals explain themselves)
 - **Worker** — 2× protein, 1× water to spawn. Idle: feeds the queen, otherwise
   farms resources. Very weak.
-- **Soldier** — 6× protein, 3× water to convert from worker. Muscles; attacks
-  neutral/hostile creatures.
-- **Honey** — 1× protein, 8× aphid honeydew. Produces 1× aphid honeydew / 4 min.
-- **Medic** — 4× protein, 3× carbohydrates. Transports fallen ants back to the
-  nest to heal.
-- **Queen** — spawns eggs.
+- **Soldier** — 6× protein, 3× water to convert from worker — the order
+  CONSUMES one living worker (it spins into the soldier brood). Muscles;
+  attacks neutral/hostile creatures.
+- **Honey** — 1× protein, 8× aphid honeydew. Produces 1× aphid honeydew / 4 min
+  as a physical unit where it stands (banks on silver pantry soil, spoils as
+  loose loot anywhere else — workers haul it home).
+- **Medic** — 4× protein, 3× carbohydrates. Auto-rescues fallen ants: carries
+  them to the nest and heals them for **2 stored water** (the water sink);
+  medics never farm — they stand by in the nest between casualties.
+- **Queen** — spawns eggs. Combat deaths of caste ants down them instead of
+  killing: 60s bleed-out unless a medic arrives; spiders ignore downed ants.
 
 ### Neutral, with perks
 - **Earthworm** — drops small treasure when killed.

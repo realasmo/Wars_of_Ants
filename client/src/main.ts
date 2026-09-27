@@ -31,6 +31,7 @@ declare global {
       pause: () => void;
       gait: (id: number) => Record<string, unknown> | null;
       squad: (mode: number) => boolean;
+      brood: (code: number) => string;
       parts: (id: number) => Record<string, unknown> | null;
     };
   }
@@ -98,6 +99,7 @@ async function main(): Promise<void> {
     pause: () => game.togglePause(),
     gait: (id) => game.debugAnt(id),
     squad: (mode) => game.debugSquad(mode),
+    brood: (code) => game.debugBrood(code),
     parts: (id) => game.debugAntParts(id),
   };
 }

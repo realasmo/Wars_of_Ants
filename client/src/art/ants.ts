@@ -13,7 +13,7 @@
 // the caste bicolor PATTERN hue-shifted to steel-blue: caste reads by shape,
 // team by hue.
 
-export type Caste = 'worker' | 'soldier' | 'queen';
+export type Caste = 'worker' | 'soldier' | 'queen' | 'honey' | 'medic';
 
 export interface Palette {
   /** thorax fill (mesosoma) */
@@ -199,6 +199,96 @@ export const CASTES: Record<Caste, CasteArt> = {
       breatheSec: 2.0,
     },
   },
+  // honey ant (replete, F4): worker frame with a swollen amber gaster —
+  // the living pantry reads by silhouette before palette
+  honey: {
+    bodyLenTiles: 1.05,
+    headLen: 0.4,
+    headWid: 1.2,
+    gasterLen: 1.4,
+    gasterWid: 2.2,
+    headShape: 'oval',
+    waistNodes: 1,
+    petioleWid: 0.55,
+    postpetioleWid: 0.55,
+    gasterBands: false,
+    legRatio: 0.8,
+    splay: [40, 90, 30],
+    legAttach: [0.32, 0.0, -0.38],
+    femurFrac: 0.45,
+    limbWid: 0.22,
+    footR: 0.1,
+    mandibleLen: 0.18,
+    antennaLen: 0.5,
+    clubFrac: 0.35,
+    wings: 'none',
+    tuckFrac: 0.45,
+    gait: {
+      strideTrigger: 0.32,
+      strideLead: 0.58,
+      swingMaxSec: 0.13,
+      lift: 0.5,
+      stagger: 0.13,
+      overshoot: 0.1,
+      sway: 0.016,
+      trailHead: 0.22,
+      trailGaster: 0.34,
+    },
+    idle: {
+      waveDur: [0.7, 1.3],
+      waveGap: [0.8, 3.5],
+      waveAmp: 0.35,
+      headEvery: [6, 14],
+      headAmp: 0.12,
+      breatheAmp: 0.03,
+      breatheSec: 1.9,
+    },
+  },
+  // medic (F4): lean worker frame, pale sanitary tint, quick stride —
+  // the caste that runs to casualties
+  medic: {
+    bodyLenTiles: 0.95,
+    headLen: 0.4,
+    headWid: 1.15,
+    gasterLen: 1.0,
+    gasterWid: 1.5,
+    headShape: 'oval',
+    waistNodes: 1,
+    petioleWid: 0.5,
+    postpetioleWid: 0.5,
+    gasterBands: false,
+    legRatio: 0.9,
+    splay: [40, 90, 30],
+    legAttach: [0.32, 0.0, -0.38],
+    femurFrac: 0.45,
+    limbWid: 0.2,
+    footR: 0.09,
+    mandibleLen: 0.18,
+    antennaLen: 0.6,
+    clubFrac: 0.35,
+    wings: 'none',
+    tuckFrac: 0.45,
+    gait: {
+      strideTrigger: 0.36,
+      strideLead: 0.62,
+      swingMaxSec: 0.1,
+      lift: 0.55,
+      stagger: 0.13,
+      overshoot: 0.1,
+      sway: 0.012,
+      trailHead: 0.22,
+      trailGaster: 0.28,
+    },
+    idle: {
+      waveDur: [0.6, 1.2],
+      waveGap: [0.6, 3.0],
+      waveAmp: 0.4,
+      headEvery: [5, 12],
+      headAmp: 0.14,
+      breatheAmp: 0.015,
+      breatheSec: 1.5,
+    },
+  },
   // queen (gyne): orange head, LARGE black muscular mesosoma with wing
   // scars, gaster-dominant black banded gaster
   queen: {
@@ -258,6 +348,14 @@ export const TEAM_PALETTES: Record<number, Record<Caste, Palette>> = {
       thorax: 0xb04a26, head: 0xc1441e, gaster: 0x1e1410, highlight: 0xe8946a,
       limbs: 0xc25e32, outline: 0x120a06, accent: 0xd8bc9e,
     },
+    honey: {
+      thorax: 0xb4692f, head: 0x2a1c14, gaster: 0xd99a2b, highlight: 0xf2c46a,
+      limbs: 0xd08a4e, outline: 0x120a06, accent: 0xf2d898,
+    },
+    medic: {
+      thorax: 0xc4a884, head: 0x2a1c14, gaster: 0x38281e, highlight: 0xe8d4b0,
+      limbs: 0xd8bc9e, outline: 0x120a06, accent: 0xf0e4ce,
+    },
     queen: {
       thorax: 0x1c1815, head: 0xb14a26, gaster: 0x1e1410, highlight: 0x8d867b,
       limbs: 0x6a5a4a, mandible: 0x3a2c22, outline: 0x0c0a09, accent: 0x9a8f7e,
@@ -271,6 +369,14 @@ export const TEAM_PALETTES: Record<number, Record<Caste, Palette>> = {
     soldier: {
       thorax: 0x46628c, head: 0x5070a0, gaster: 0x161c28, highlight: 0x8fb0d4,
       limbs: 0x6a8ab4, outline: 0x0a0e14, accent: 0xb0c0d8,
+    },
+    honey: {
+      thorax: 0x4e6a8e, head: 0x1e2634, gaster: 0x8e7a26, highlight: 0xc0b060,
+      limbs: 0x7a9ac0, outline: 0x0a0e14, accent: 0xd0d0a8,
+    },
+    medic: {
+      thorax: 0x8ea0b4, head: 0x1e2634, gaster: 0x1a222e, highlight: 0xb8cce0,
+      limbs: 0x9ab0c8, outline: 0x0a0e14, accent: 0xd0e0ec,
     },
     queen: {
       thorax: 0x1a2028, head: 0x5070a0, gaster: 0x161c28, highlight: 0x708090,
@@ -286,6 +392,7 @@ export const FOOD_COLORS: Record<string, number> = {
   protein: 0xc05a5a,
   carbs: 0xd4a832,
   water: 0x4a9fd9,
+  honeydew: 0xd9b32b,
 };
 
 /** Mandible open angle (rad) per carried-item width class (dev guide §5:
@@ -296,6 +403,7 @@ export const CARRY_MANDIBLE_OPEN: Record<string, number> = {
   egg: 0.26,
   wood: 0.22,
   wool: 0.24,
+  fallen: 0.3,
 };
 
 /** Bake resolution: texture pixels per thorax unit. 128 keeps parts crisp at

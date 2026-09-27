@@ -7,7 +7,7 @@
 
 use std::fs;
 
-use woa_core::{Command, DevSpawn, FollowMode, GameRules, Sim, Team};
+use woa_core::{Caste, Command, DevSpawn, FollowMode, GameRules, Sim, Team};
 
 enum Step {
     Cmd(Command),
@@ -18,6 +18,7 @@ enum Step {
     Kill(u32),
     SetSoil(u32, u32, u32, u32),
     SetWater(u32),
+    SetHoneydew(u32),
 }
 
 fn main() {
@@ -77,6 +78,15 @@ fn main() {
                     ant: ant()?,
                     egg: obj.get("target")?.as_u64()? as u32,
                 }),
+                "brood" => Step::Cmd(Command::Brood {
+                    ant: ant()?,
+                    caste: match obj.get("kind").and_then(|v| v.as_str()).unwrap_or("0") {
+                        "1" => Caste::Soldier,
+                        "2" => Caste::Honey,
+                        "3" => Caste::Medic,
+                        _ => Caste::Worker,
+                    },
+                }),
                 "follow-all" => Step::Cmd(Command::Follow {
                     leader: ant()?,
                     mode: FollowMode::All,
@@ -106,6 +116,9 @@ fn main() {
                 }
                 "dev-water" => {
                     Step::SetWater(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32)
+                }
+                "dev-honeydew" => {
+                    Step::SetHoneydew(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32)
                 }
                 "dev-kill-spiders" => Step::KillSpiders,
                 "dev-kill" => Step::Kill(obj.get("target")?.as_u64()? as u32),
@@ -173,6 +186,9 @@ fn main() {
                 }
                 Step::SetWater(n) => {
                     sim.dev_set_water(*n);
+                }
+                Step::SetHoneydew(n) => {
+                    sim.dev_set_honeydew(*n);
                 }
             }
             i += 1;
