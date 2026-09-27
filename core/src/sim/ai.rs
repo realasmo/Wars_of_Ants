@@ -188,7 +188,11 @@ impl Sim {
             }
             // walk-to-dig intents: dig the remembered block on arrival
             if let Some((bx, by)) = dig_after {
-                if !self.block_soft(bx, by) {
+                if matches!(self.carry_of(id), Carry::Dirt { blocks: DIRT_CAPACITY }) {
+                    // hands full of spoil: haul it out before digging more
+                    self.set_dig_after(id, None);
+                    self.haul_out_dirt(id);
+                } else if !self.block_soft(bx, by) {
                     self.set_dig_after(id, None);
                 } else if self.block_adjacent(id, bx, by) {
                     self.set_dig_after(id, None);
@@ -259,14 +263,19 @@ impl Sim {
                 }
                 Job::Idle => {
                     if carrying != Carry::None {
-                        match self.pantry_tile() {
-                            Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
-                            None => {
-                                // pantry full: dig out more nest, then deliver
-                                self.ev(format!("pantry full — ant #{id} digs expansion"));
-                                match self.pick_dig_target() {
-                                    Some(t) => self.set_job(id, Job::DigTile(t.0, t.1)),
-                                    None => self.set_retry(id, 100),
+                        if matches!(carrying, Carry::Dirt { .. }) {
+                            // spoil goes to the surface, never into the nest
+                            self.haul_out_dirt(id);
+                        } else {
+                            match self.pantry_tile() {
+                                Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
+                                None => {
+                                    // pantry full: dig out more nest, then deliver
+                                    self.ev(format!("pantry full — ant #{id} digs expansion"));
+                                    match self.pick_dig_target() {
+                                        Some(t) => self.set_job(id, Job::DigTile(t.0, t.1)),
+                                        None => self.set_retry(id, 100),
+                                    }
                                 }
                             }
                         }
@@ -288,6 +297,11 @@ impl Sim {
                     }
                 }
                 Job::DigTile(tx, ty) => {
+                    if matches!(carrying, Carry::Dirt { blocks: DIRT_CAPACITY }) {
+                        // hands full of spoil: haul it out, then come back
+                        self.haul_out_dirt(id);
+                        continue;
+                    }
                     let (bx, by) = block_of(tx, ty);
                     if !self.block_soft(bx, by) {
                         self.set_job(id, Job::Idle);
@@ -502,6 +516,23 @@ impl Sim {
             }
         }
         fallback
+    }
+
+    /// Haul carried dirt out through the entrance and discard it above
+    /// ground (workers' spoil goes to the surface, never back into the
+    /// nest). Walk-to-drop machinery handles the crossing; a surface dirt
+    /// drop discards everything carried.
+    pub(crate) fn haul_out_dirt(&mut self, id: u32) {
+        let Some((ex, ey)) = self.world.entrance else {
+            self.set_retry(id, 100);
+            return;
+        };
+        let dump = (ex + 1, ey + 1);
+        self.set_drop_after(id, Some(dump));
+        if !self.route(id, Layer::Surface, dump) {
+            self.set_drop_after(id, None);
+            self.set_retry(id, 60);
+        }
     }
 
     pub(crate) fn pick_dig_target(&self) -> Option<(u32, u32)> {

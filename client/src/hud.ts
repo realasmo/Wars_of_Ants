@@ -32,7 +32,7 @@ export class Hud {
     el('stat-ants').textContent =
       counts.soldiers > 0 ? `${counts.workers} +${counts.soldiers}S` : String(counts.workers);
     el('stat-eggs').textContent = String(sim.eggCount());
-    el('stat-dug').textContent = String(sim.tilesDug());
+    el('stat-dug').textContent = `${sim.tilesDug()} · map ${sim.w}×${sim.h}`;
     const secs = Math.floor(sim.tickCount / 20);
     el('stat-time').textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     const phase = sim.phase();

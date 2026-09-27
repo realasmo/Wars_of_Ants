@@ -566,10 +566,16 @@ export class Game {
       }
       // carrying something → place/drop it (egg, dirt, resources)
       if (me !== undefined && me.carry.t === 'egg') {
-        // egg: place on the empty target cell — the ant walks there first
+        // egg: place on the empty target cell — the ant walks there first;
+        // but clicking the nest hole while carrying means "bring it home":
+        // skip so the entrance crossing below takes the egg underground
+        const entE = this.sim.entrance;
+        const nearHoleE =
+          entE !== null &&
+          Math.max(Math.abs(tx - (entE[0] + 1)), Math.abs(ty - (entE[1] + 1))) <= 2;
         {
           const kind = this.sim.tileAt(me.layer, tx, ty);
-          if (kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
+          if (!nearHoleE && kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
             this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'egg' });
             this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
             return;

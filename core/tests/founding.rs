@@ -1058,7 +1058,7 @@ fn scouts_discover_sources_and_harvest_takes_time() {
 }
 
 #[test]
-fn spider_drops_protein_and_low_carbs_slow_the_colony() {
+fn spider_drops_protein() {
     let mut s = founded(42);
     for _ in 0..1220 {
         s.tick();
@@ -1092,36 +1092,6 @@ fn spider_drops_protein_and_low_carbs_slow_the_colony() {
         })
         .count();
     assert!(drops > 0, "spider drops protein units");
-
-    // carb slowdown, measured on the open surface with a fresh flying queen:
-    // same 10-tile stretch, starved vs fed
-    let mut f = Sim::new_founding(7, Team::Red);
-    let fq = queen(&f);
-    f.dev_set_food(0);
-    assert!(f.issue(Command::Move {
-        ant: fq.id,
-        x: fq.x + 10.0,
-        y: fq.y
-    }));
-    for _ in 0..40 {
-        f.tick();
-    }
-    let starved = queen(&f).x - 48.5;
-    let mut g = Sim::new_founding(7, Team::Red);
-    let gq = queen(&g);
-    assert!(g.issue(Command::Move {
-        ant: gq.id,
-        x: gq.x + 10.0,
-        y: gq.y
-    }));
-    for _ in 0..40 {
-        g.tick();
-    }
-    let fed = queen(&g).x - 48.5;
-    assert!(
-        fed > starved + 1.0,
-        "well-fed ants outpace starving ones ({fed:.2} vs {starved:.2})"
-    );
 }
 
 #[test]
@@ -1173,4 +1143,105 @@ fn event_log_records_causes_and_discoveries() {
         log3.contains("COLONY DIED") && log3.contains("(combat)"),
         "combat cause recorded: {log3}"
     );
+}
+
+#[test]
+fn worker_dig_collects_dirt_and_capacity_refuses() {
+    let mut s = founded(42);
+    let q = queen(&s);
+    let wid = s.dev_spawn(DevSpawn::Worker, q.x, q.y);
+    let carry = |s: &Sim| {
+        s.snapshot()
+            .into_iter()
+            .find_map(|e| match e {
+                EntitySnap::Ant(a) if a.id == wid => Some(a.carry),
+                _ => None,
+            })
+            .unwrap()
+    };
+    // first commanded dig: the worker walks, digs, and collects one block
+    let ((sx, sy), (tx, ty)) = dig_site(&s);
+    assert!(s.issue(Command::Move {
+        ant: wid,
+        x: sx as f64 + 0.5,
+        y: sy as f64 + 0.5
+    }));
+    for _ in 0..100 {
+        s.tick();
+    }
+    assert!(s.issue(Command::Dig { ant: wid, tx, ty }));
+    for _ in 0..200 {
+        s.tick();
+    }
+    assert_eq!(carry(&s), Carry::Dirt { blocks: 1 }, "worker collects dug dirt");
+    // second block still allowed
+    let ((sx2, sy2), (tx2, ty2)) = dig_site(&s);
+    assert!(s.issue(Command::Move {
+        ant: wid,
+        x: sx2 as f64 + 0.5,
+        y: sy2 as f64 + 0.5
+    }));
+    for _ in 0..100 {
+        s.tick();
+    }
+    assert!(s.issue(Command::Dig { ant: wid, tx: tx2, ty: ty2 }));
+    for _ in 0..200 {
+        s.tick();
+    }
+    assert_eq!(
+        carry(&s),
+        Carry::Dirt { blocks: 2 },
+        "second block fills the worker to capacity"
+    );
+    // at capacity: further digging is refused until the dirt is dumped
+    let ((sx3, sy3), (tx3, ty3)) = dig_site(&s);
+    let _ = (sx3, sy3);
+    assert!(
+        !s.issue(Command::Dig { ant: wid, tx: tx3, ty: ty3 }),
+        "worker dig must be refused at dirt capacity"
+    );
+}
+
+#[test]
+fn idle_workers_haul_dug_dirt_out_to_the_surface() {
+    let mut s = founded(42);
+    // founding worlds never auto-lay (legacy-only), so idle workers dig
+    // through walk-to-target auto-digging: spawn one inside a dirt pocket
+    // below the chamber — any route out digs, collects spoil, and the
+    // first idle tick with dirty hands sends it up to discard above ground
+    let q = queen(&s);
+    let qx = q.x.floor() as u32;
+    let mut py = q.y.floor() as u32 + 3;
+    while s.tile_at(Layer::Underground, qx, py) == EMPTY {
+        py += 2;
+    }
+    assert!(
+        (1..=3).contains(&s.tile_at(Layer::Underground, qx, py)),
+        "found a soft dirt pocket below the chamber"
+    );
+    let wid = s.dev_spawn(DevSpawn::Worker, qx as f64 + 0.5, py as f64 + 0.5);
+    let mut saw_dirt = false;
+    let mut saw_haul = false;
+    for i in 0..2400 {
+        s.tick();
+        if i % 5 != 0 {
+            continue;
+        }
+        for ent in s.snapshot() {
+            if let EntitySnap::Ant(a) = ent {
+                if a.id == wid && matches!(a.carry, Carry::Dirt { .. }) {
+                    saw_dirt = true;
+                    if a.layer == Layer::Surface {
+                        saw_haul = true;
+                    }
+                }
+            }
+        }
+    }
+    assert!(saw_dirt, "worker digging through the pocket collects dirt");
+    assert!(
+        saw_haul,
+        "dirt-laden worker hauls the spoil out to the surface"
+    );
+    let _ = workers(&s);
 }

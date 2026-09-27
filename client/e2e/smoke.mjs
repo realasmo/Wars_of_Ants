@@ -219,12 +219,39 @@ try {
     await page.evaluate(() => window.__woa.step(3));
     s = await state();
     if (s.queen.carry !== 'egg') failures.push(`queen not marked as egg-carrier (carry ${s.queen.carry})`);
-    // place it back on an adjacent empty cell
+    // place it back on an adjacent empty cell — away from the entrance,
+    // where a click means "carry it home" (same rule as food drops)
     const qn = s.queen;
-    await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: qn.x + 1, y: qn.y });
-    await page.evaluate(() => window.__woa.step(3));
-    s = await state();
-    if (s.queen.carry !== 'none') failures.push(`egg not placed (carry ${s.queen.carry})`);
+    const ent0 = s.entrance;
+    const cell = await page.evaluate(({ q, ent }) => {
+      const free = (x, y) => window.__woa.tile(1, x, y) === 0;
+      const far = (x, y) =>
+        ent === null || Math.max(Math.abs(x - (ent[0] + 1)), Math.abs(y - (ent[1] + 1))) > 2;
+      // nearest free cell outside the entrance radius (the drop walks there)
+      const qx = Math.floor(q.x), qy = Math.floor(q.y);
+      let best = null, bd = 99;
+      for (let dy = -4; dy <= 4; dy++) {
+        for (let dx = -4; dx <= 4; dx++) {
+          const x = qx + dx, y = qy + dy;
+          if (!free(x, y) || !far(x, y)) continue;
+          const d = Math.abs(dx) + Math.abs(dy);
+          if (d < bd) { bd = d; best = { x: x + 0.5, y: y + 0.5 }; }
+        }
+      }
+      return best;
+    }, { q: qn, ent: ent0 });
+    if (cell === null) {
+      failures.push('no egg-place cell free of the entrance radius');
+    } else {
+      await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), cell);
+      // the drop walks to the chosen cell — give it time to arrive + place
+      for (let i = 0; i < 40; i++) {
+        await page.evaluate(() => window.__woa.step(5));
+        s = await state();
+        if (s.queen.carry === 'none') break;
+      }
+      if (s.queen.carry !== 'none') failures.push(`egg not placed (carry ${s.queen.carry})`);
+    }
     const log2 = await page.evaluate(() => window.__woa.log());
     const acts2 = [...new Set(log2.events.filter((e) => e.type === 'cmd').map((e) => e.act))];
     if (!acts2.includes('pick-egg')) failures.push('right-click did not pick up an adjacent egg');

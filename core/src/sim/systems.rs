@@ -32,13 +32,6 @@ impl Sim {
             } else {
                 speed
             };
-            // a starving colony moves sluggishly until fed (founding economy;
-            // the legacy test economy is tuned without this)
-            let speed = if self.colony.founding && self.colony.carbs < CARB_LOW {
-                speed * CARB_SLOWDOWN
-            } else {
-                speed
-            };
             let (path, mut next, then_swap) = match state {
                 AntState::Moving {
                     path,
@@ -178,19 +171,17 @@ impl Sim {
                 }
                 self.tiles_epoch += 1;
                 self.dug_tiles += 4;
-                // the founding queen carries excavated dirt out (up to
-                // DIRT_CAPACITY blocks before dumping); workers' spoil
-                // handling is a later wave
-                if caste == Caste::Queen {
-                    if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
-                        let blocks = match *q {
-                            Carry::Dirt { blocks } => blocks,
-                            _ => 0,
-                        };
-                        *q = Carry::Dirt {
-                            blocks: (blocks + 1).min(DIRT_CAPACITY),
-                        };
-                    }
+                // excavated dirt is carried out by every digging caste (up
+                // to DIRT_CAPACITY blocks before dumping) — workers haul
+                // spoil to the surface, the founding queen refills or dumps
+                if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                    let blocks = match *q {
+                        Carry::Dirt { blocks } => blocks,
+                        _ => 0,
+                    };
+                    *q = Carry::Dirt {
+                        blocks: (blocks + 1).min(DIRT_CAPACITY),
+                    };
                 }
                 match resume {
                     Some(b) => {
@@ -486,15 +477,6 @@ impl Sim {
                     self.spawn_egg(tile_center(tile.0, tile.1), Caste::Worker, FOUNDING_EGG_HATCH);
                 }
             }
-        }
-        let slow_now = self.colony.founding && self.colony.carbs < CARB_LOW;
-        if slow_now != self.colony.slowed {
-            self.colony.slowed = slow_now;
-            self.ev(format!(
-                "colony {} (carbs {})",
-                if slow_now { "SLOWED — 60% speed" } else { "back to full speed" },
-                self.colony.carbs
-            ));
         }
         self.colony.lay_cooldown -= DT;
         if self.colony.carbs > 0 {

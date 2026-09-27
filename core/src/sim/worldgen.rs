@@ -141,7 +141,6 @@ impl Sim {
                 team,
                 founding,
                 known: std::collections::BTreeSet::new(),
-                slowed: false,
             },
             config,
             tick: 0,

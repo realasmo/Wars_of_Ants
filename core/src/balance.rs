@@ -100,9 +100,6 @@ pub const SIGHT_RANGE: u32 = 8;
 /// survive; the rest scatter wide.
 pub const SOURCES_NEAR_NEST: u32 = 2;
 pub const SOURCE_MIN_GAP: u32 = 8;
-/// Below this many carbs the whole colony slows down (recovers when fed).
-pub const CARB_LOW: u32 = 3;
-pub const CARB_SLOWDOWN: f64 = 0.6;
 /// Protein dropped by a killed spider.
 pub const PROTEIN_PER_SPIDER: u32 = 8;
 

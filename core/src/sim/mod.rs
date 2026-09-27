@@ -163,8 +163,6 @@ pub struct Colony {
     pub founding: bool,
     /// Source ids discovered by the colony (within sight of any ant).
     pub known: std::collections::BTreeSet<u32>,
-    /// Last carb-slow state (for on/off events).
-    pub slowed: bool,
 }
 
 /// Cap of retained game events (drop-oldest ring via Vec drain).

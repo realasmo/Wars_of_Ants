@@ -45,9 +45,11 @@ impl Sim {
                     && matches!(
                         self.colony.phase,
                         Phase::Founding | Phase::Brood
-                    )
-                    && hands_diggable;
-                if (caste != Caste::Worker && !queen_may_dig)
+                    );
+                // every digging caste obeys the dirt capacity — worker and
+                // queen dig rules are otherwise identical
+                if !hands_diggable
+                    || (caste != Caste::Worker && !queen_may_dig)
                     || pos != Layer::Underground
                     || !self.world.underground.in_bounds(tx, ty)
                 {
