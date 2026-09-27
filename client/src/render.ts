@@ -39,6 +39,9 @@ interface EntityGfx {
   /** Short carry label ('none' | 'dirt×n' | 'egg' | food name). */
   haul: string;
   team: number;
+  /** Queen request badge ('wants carbs' / urgent 'needs carbs!'). */
+  req: Text | null;
+  reqShown: string;
 }
 
 const SOURCE_NAMES: Record<number, string> = {
@@ -134,6 +137,14 @@ function drawSource(g: Graphics, s: Extract<Ent, { kind: 'source' }>) {
       g.circle(-0.3 + i * 0.2, 0, (0.16 - i * 0.01) * (0.6 + 0.4 * k)).fill(0x7aa832);
     }
   }
+}
+
+/** The queen's request badge line: colored by resource, red + imperative
+ * once she is actually hungry (hunger > 0 means the fuse is burning). */
+function requestLabel(ent: AntEnt): { text: string; color: number } | null {
+  if (ent.kind !== 'queen' || ent.request === null) return null;
+  if (ent.hunger > 0) return { text: `needs ${ent.request}!`, color: 0xe8544f };
+  return { text: `wants ${ent.request}`, color: RES_COLORS[ent.request] ?? 0xf0e8da };
 }
 
 function makeLabel(text: string): Text {
@@ -415,16 +426,23 @@ export class Renderer {
         let g: Graphics | null = null;
         let ant: AntView | null = null;
         let hpG: Graphics | null = null;
+        let req: Text | null = null;
         if (isAntKind) {
           ant = new AntView(this.app.renderer, this.antLayers, ent.kind, this.sim.team(), ent.id);
           hpG = new Graphics();
           t.position.set(0, ant.labelY);
           c.addChild(t, hpG);
+          if (ent.kind === 'queen') {
+            // request badge rides above the QUEEN label
+            req = makeLabel('');
+            req.position.set(0, ant.labelY - 0.55);
+            c.addChild(req);
+          }
         } else {
           g = new Graphics();
           c.addChild(g, t);
         }
-        e = { c, g, ant, hpG, t, kind: '', carrying: false, hpBucket: -1, label: '', flying: false, haul: 'none', team: -1 };
+        e = { c, g, ant, hpG, t, kind: '', carrying: false, hpBucket: -1, label: '', flying: false, haul: 'none', team: -1, req, reqShown: '' };
         this.sprites.set(ent.id, e);
         this.entities.addChild(c);
       }
@@ -464,6 +482,18 @@ export class Renderer {
       if (e.label !== label) {
         e.label = label;
         e.t.text = label;
+      }
+      if (e.req !== null) {
+        const rl = isAnt(ent) ? requestLabel(ent) : null;
+        const shown = rl === null ? '' : `${rl.text}|${rl.color}`;
+        if (shown !== e.reqShown) {
+          e.reqShown = shown;
+          e.req.visible = rl !== null;
+          if (rl !== null) {
+            e.req.text = rl.text;
+            e.req.style.fill = rl.color;
+          }
+        }
       }
       e.c.position.set(pos.x, pos.y);
       if (e.ant !== null && isAnt(ent)) {

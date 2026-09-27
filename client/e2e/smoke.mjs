@@ -204,10 +204,30 @@ try {
   console.log('colony:', JSON.stringify({ phase: s.phase, workers: s.workers, dead: s.dead, naturalOrange }));
   if (s.phase !== 4) failures.push(`hatching on orange did not start the colony phase (${s.phase})`);
   if (s.workers < 1) failures.push(`no egg hatched on orange soil (workers ${s.workers})`);
-  // stock carbs: the fight + late windows check combat and stability, not
-  // foraging luck — sparse-source survival is a balance question, not a
-  // regression signal
+  // physical feeding: the queen eats real pantry units now, so abstract
+  // setfood can't protect her — spawn the source trio by the nest (carbs +
+  // water + protein) like the core test does. This is the same "no foraging
+  // luck" guarantee the old setfood(200) gave the fight/late windows.
   await page.evaluate(() => window.__woa.setfood(200));
+  const eTrio = s.entrance;
+  await page.evaluate((e) => {
+    window.__woa.spawn('strawberry', e[0] + 3.5, e[1] + 3.5);
+    window.__woa.spawn('moss', e[0] - 3.5, e[1] + 3.5);
+    window.__woa.spawn('cockroach', e[0] + 0.5, e[1] - 3.5);
+  }, eTrio);
+  await page.evaluate(() => window.__woa.step(3));
+  s = await state();
+  if (s.queen.request !== 'carbs' && s.queen.request !== 'protein' && s.queen.request !== 'water') {
+    failures.push(`queen request not decoded on the wire (got ${JSON.stringify(s.queen.request)})`);
+  }
+  if (s.feeder === null || s.feeder === undefined) {
+    failures.push(`no feeder designated with ${s.workers} workers`);
+  }
+  // squad X-menu must stay hidden until X is pressed (CSS regression: it was
+  // permanently visible once — the .hidden class had no display rule)
+  const squadHidden = await page.evaluate(() => document.getElementById('squadmenu').classList.contains('hidden'));
+  const squadDisplayed = await page.evaluate(() => getComputedStyle(document.getElementById('squadmenu')).display === 'none');
+  if (!squadHidden || !squadDisplayed) failures.push('squad menu visible before the X key');
   // egg transport round-trip with one of the remaining eggs
   const eggState = await state();
   if (eggState.eggs > 0) {

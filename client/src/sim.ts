@@ -152,6 +152,19 @@ export class Sim {
     return this.sim.team();
   }
 
+  /** The designated feeder's id, or null when there is none. */
+  feederId(): number | null {
+    const id = this.sim.feeder_id();
+    return id === 0xffffffff ? null : id;
+  }
+
+  /** What the queen requests next (founding, post-nest), or null. */
+  queenRequest(): { request: string; hunger: number } | null {
+    const q = this.ant(this.queenId() ?? -1);
+    if (q === undefined || q.request === null) return null;
+    return { request: q.request, hunger: q.hunger };
+  }
+
   devSpawn(kind: string, x: number, y: number): number {
     return this.sim.dev_spawn(kind, x, y);
   }

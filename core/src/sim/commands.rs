@@ -258,6 +258,21 @@ impl Sim {
             *q.1 = AntState::Idle;
         }
         self.set_job(ant, Job::Manual);
+        // founding reserves are physical (worker-priorities wave): a stored,
+        // never-spoiling carb pile in the starter chamber — the ledger (set
+        // to START_FOOD at worldgen) and the pile stay in sync, and the
+        // feeder era starts with real food on the floor
+        self.spawn_food_entity(
+            Layer::Underground,
+            (bx + 2, by + 4),
+            START_FOOD,
+            FoodKind::Carbs,
+            true,
+            None,
+        );
+        self.ev(format!(
+            "founding reserves: {START_FOOD} carbs stored in the chamber"
+        ));
         // founding inside a dust patch grants hidden soil blocks of
         // that color near the nest — dig them out
         let patch_soil = self
@@ -634,13 +649,20 @@ impl Sim {
                         continue;
                     }
                     if let Some(&ent) = self.ids.get(&id) {
-                        let follows = self
+                        let back = self
                             .ecs
                             .get::<&WorkerAi>(ent)
-                            .map(|ai| matches!(ai.job, Job::Follow(l) if l == leader))
-                            .unwrap_or(false);
-                        if follows {
-                            self.set_job(id, Job::Idle);
+                            .ok()
+                            .and_then(|ai| match &ai.job {
+                                Job::Follow(l, resume) if *l == leader => {
+                                    Some(resume.as_ref().map(|b| (**b).clone()))
+                                }
+                                _ => None,
+                            });
+                        if let Some(back) = back {
+                            // resume the interrupted activity (Manual ants go
+                            // back to manual, farmers back to farming)
+                            self.set_job(id, back.unwrap_or(Job::Idle));
                             released += 1;
                         }
                     }
@@ -661,7 +683,7 @@ impl Sim {
                             .map(|a| a.caste == Caste::Soldier)
                             .unwrap_or(false);
                         if is_soldier {
-                            self.set_job(id, Job::Follow(leader));
+                            self.recruit(id, leader);
                             joined += 1;
                         }
                     }
@@ -687,7 +709,7 @@ impl Sim {
                                 ant.caste,
                                 pos.layer,
                                 tile_of(pos.p),
-                                matches!(ai.job, Job::Follow(l) if l == leader),
+                                matches!(ai.job, Job::Follow(l, _) if l == leader),
                             )
                         })
                     };
@@ -710,13 +732,26 @@ impl Sim {
                 };
                 let mut joined = 0;
                 for (_, id) in cands.into_iter().take(take) {
-                    self.set_job(id, Job::Follow(leader));
+                    self.recruit(id, leader);
                     joined += 1;
                 }
                 self.ev(format!("ant #{leader} leads {joined} followers"));
                 joined > 0
             }
         }
+    }
+
+    /// Recruit one ant into the leader's squad, remembering the job it
+    /// interrupted — released followers resume it (user spec: busy ants go
+    /// back to their unfinished activity).
+    fn recruit(&mut self, id: u32, leader: u32) {
+        let prev = self
+            .ids
+            .get(&id)
+            .and_then(|&e| self.ecs.get::<&WorkerAi>(e).ok())
+            .map(|ai| ai.job.clone());
+        let resume = prev.map(Box::new);
+        self.set_job(id, Job::Follow(leader, resume));
     }
 
     pub(crate) fn carry_of(&self, id: u32) -> Carry {

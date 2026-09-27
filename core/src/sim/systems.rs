@@ -513,40 +513,60 @@ impl Sim {
             }
         }
         self.colony.lay_cooldown -= DT;
-        // founding grace: the lone queen carries reserves — while no workers
-        // exist there is no possible income, so she neither eats them away
-        // nor starves. The reserves exist to bridge the brood incubation and
-        // reach the first foragers.
-        let grace = self.colony.founding && self.caste_counts().0 == 0;
-        if self.colony.carbs > 0 {
+        if self.colony.founding {
+            // Physical feeding (worker-priorities wave): the queen eats real
+            // units the feeder delivers (or her own mandibles' load). No
+            // automatic store drain — the store counts the pantry, withdraw
+            // removes from it. Hungry at EAT_PERIOD, dead at + STARVE_TIME.
+            // The lone-queen grace still freezes hunger: no workers → no
+            // feeder, and she may not have farmed anything yet.
+            let grace = self.caste_counts().0 == 0;
             if !grace {
-                self.colony.eat_t += DT;
-                if self.colony.eat_t >= EAT_PERIOD {
-                    self.colony.carbs -= 1;
-                    self.colony.eat_t = 0.0;
+                self.colony.hunger_t += DT;
+                let hungry_at = EAT_PERIOD;
+                let prev = self.colony.hunger_t - DT;
+                if self.colony.hunger_t >= hungry_at && prev < hungry_at {
+                    self.ev(format!(
+                        "queen is hungry — wants {} (no delivery)",
+                        super::snapshot::food_name(crate::balance::QUEEN_CRAVING_CYCLE
+                            [self.colony.craving_i])
+                    ));
                 }
-            } else {
-                self.colony.eat_t = 0.0;
-            }
-            self.colony.starve_t = 0.0;
-        } else {
-            self.colony.eat_t = 0.0;
-            if !grace {
-                self.colony.starve_t += DT;
-                if self.colony.starve_t >= STARVE_TIME {
+                if self.colony.hunger_t >= EAT_PERIOD + STARVE_TIME * 0.5
+                    && prev < EAT_PERIOD + STARVE_TIME * 0.5
+                {
+                    self.ev("queen is STARVING".to_string());
+                }
+                if self.colony.hunger_t >= EAT_PERIOD + STARVE_TIME {
                     self.colony.dead = true;
                     let q = self.colony.queen_id;
                     self.kill_cause(q, "starvation");
                     return;
                 }
             }
+            return;
+        }
+        // Legacy founded economy: abstract drain from the carb store.
+        if self.colony.carbs > 0 {
+            self.colony.eat_t += DT;
+            if self.colony.eat_t >= EAT_PERIOD {
+                self.colony.carbs -= 1;
+                self.colony.eat_t = 0.0;
+            }
+            self.colony.starve_t = 0.0;
+        } else {
+            self.colony.eat_t = 0.0;
+            self.colony.starve_t += DT;
+            if self.colony.starve_t >= STARVE_TIME {
+                self.colony.dead = true;
+                let q = self.colony.queen_id;
+                self.kill_cause(q, "starvation");
+                return;
+            }
         }
         // ongoing auto-laying is legacy-mode only: in a founding game the
         // brood comes from the founding script (production redesign is a
         // later wave)
-        if self.colony.founding {
-            return;
-        }
         if self.colony.lay_cooldown <= 0.0 && self.colony.ant_count < self.config.max_ants {
             let (workers, soldiers) = self.caste_counts();
             let want = if self.colony.carbs >= SOLDIER_COST_GREEN

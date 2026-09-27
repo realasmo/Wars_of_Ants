@@ -48,6 +48,15 @@ const FOOD = {
   water: 4,
 } as const;
 
+/** Queen request codes (ant record p6): 0 = none/not the queen, else the
+ * food code of the craved resource. */
+const REQUEST = {
+  none: 0,
+  protein: FOOD.protein,
+  carbs: FOOD.carbs,
+  water: FOOD.water,
+} as const;
+
 // --- decoded shapes ---
 
 export type FoodName = keyof typeof FOOD; // 'green' | 'super' | 'protein' | 'carbs' | 'water'
@@ -76,8 +85,10 @@ export interface AntEnt extends Base {
   /** HP fraction 0..1. */
   hp: number;
   carry: Carry;
-  /** Starvation progress 0..1 (queen only). */
+  /** Starvation progress 0..1 (queen only; 0 until she is hungry). */
   hunger: number;
+  /** What the queen requests next (founding mode, queen only), or null. */
+  request: FoodName | null;
   /** Squad leader this ant follows (X-menu), or null. */
   following: number | null;
 }
@@ -149,7 +160,7 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
   const n = raw[3];
   const ents: Ent[] = [];
   for (let i = 0; i < n; i++) {
-    const o = 4 + i * 11;
+    const o = 4 + i * 12;
     const id = raw[o];
     const kindCode = raw[o + 1];
     const layer = raw[o + 2];
@@ -161,6 +172,7 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
     const p3 = raw[o + 8];
     const p4 = raw[o + 9];
     const p5 = raw[o + 10];
+    const p6 = raw[o + 11];
     if (kindCode === KINDS.queen || kindCode === KINDS.worker || kindCode === KINDS.soldier) {
       const carryTag = p2;
       const carry: Carry =
@@ -170,7 +182,11 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
             ? { t: 'dirt', blocks: p3 }
             : carryTag === CARRY.egg
               ? { t: 'egg' }
-              : { t: 'food', food: foodName(p3) };
+              : carryTag === CARRY.wood
+                ? { t: 'wood' }
+                : carryTag === CARRY.wool
+                  ? { t: 'wool' }
+                  : { t: 'food', food: foodName(p3) };
       ents.push({
         id,
         kind: KIND_BY_CODE[kindCode],
@@ -181,6 +197,7 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
         hp: p1,
         carry,
         hunger: p4,
+        request: p6 > 0.5 ? foodName(p6) : null,
         following: p5 > 0.5 ? p5 - 1 : null,
       });
     } else if (kindCode === KINDS.food) {
@@ -268,6 +285,7 @@ export function assertWireSpec(specJson: string): void {
     ['activity', ACTIVITY],
     ['carry', CARRY],
     ['food', FOOD],
+    ['request', REQUEST],
   ];
   for (const [name, local] of groups) {
     const remote = spec[name] as Record<string, number> | undefined;

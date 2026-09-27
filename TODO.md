@@ -34,16 +34,25 @@ Agent sequencing of the batch (one ticket per wave, playtest-gated):
   egg-friendly soil.
 - **F3 — squad follow — SHIPPED `e0206a0`, silver squad rings** (core + client): worker X-menu (follow-all /
   join-one / release / soldiers-follow), follow-the-leader AI.
+- **P — worker priorities — SHIPPED 2026-09-27** (ticket
+  docs/TICKET-worker-priorities.md): physical queen feeding (rotating
+  craving cycle, one feeder worker, reserves as a real pantry pile,
+  self-feeding from her own mandibles), auto-scout removed (loiter →
+  return home → rest → glance at the nest mouth), followers resume their
+  interrupted job on release, queen request display above her + HUD row,
+  foragers prioritize the craved resource.
 - **F4 — brood production — NEXT** (the big one, absorbs Wave B + part of D):
-  queen X-menu, egg types + costs, worker→soldier conversion, Medic +
-  fallen-ant rescue (needs corpse state — Wave B's corpse system),
-  Honey caste + aphid honeydew economy (needs aphids or a stand-in
-  resource until Wave D).
+  queen X-menu, egg types + costs, worker→soldier conversion (consumes the
+  worker), Medic + fallen-ant rescue (needs corpse state — Wave B's corpse
+  system), Honey caste + nettle-sourced honeydew economy (15–22 units,
+  10s/unit, 4 scattered) until Wave D's aphids; squads: soldiers fight for
+  the leader (attack-click + retaliate), worker followers never fight, the
+  whole squad farms once the leader starts.
 
-Open design questions to settle before/while building F4: does
-"convert from worker" consume an existing worker; where aphid honeydew
-comes from before aphid farming exists; whether followers fight with you
-(F3).
+F4 design settled 2026-09-27: convert-from-worker consumes the existing
+worker; honeydew comes from farming nettle (new map source) until aphids
+exist; followers — soldiers attack what you attack and retaliate when
+you're hit, workers never fight, and the whole squad farms once you start.
 
 ---
 

@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "seed": 20260927,
+  "team": 0,
+  "name": "feeder-demo",
+  "core": "woa-core 0.1.01.52-dev",
+  "cmds": [
+    { "t": 5, "act": "land", "x": 48.5, "y": 48.5 },
+    { "t": 120, "act": "found", "x": 48.5, "y": 48.5 },
+    { "t": 160, "act": "dev-spawn", "kind": "worker", "x": 49.5, "y": 51.5 },
+    { "t": 162, "act": "dev-spawn", "kind": "worker", "x": 50.5, "y": 51.5 },
+    { "t": 164, "act": "dev-spawn", "kind": "worker", "x": 49.5, "y": 52.5 }
+  ]
+}

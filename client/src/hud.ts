@@ -37,6 +37,15 @@ export class Hud {
     el('stat-protein').textContent = String(sim.storeProtein());
     el('stat-carbs').textContent = String(sim.storeCarbs());
     el('stat-water').textContent = String(sim.storeWater());
+    const wants = el('stat-wants');
+    const req = sim.queenRequest();
+    if (req === null) {
+      wants.textContent = '—';
+      wants.style.color = '';
+    } else {
+      wants.textContent = req.hunger > 0 ? `${req.request} NOW` : req.request;
+      wants.style.color = req.hunger > 0 ? '#e8544f' : '';
+    }
     el('stat-ants').textContent =
       counts.soldiers > 0 ? `${counts.workers} +${counts.soldiers}S` : String(counts.workers);
     el('stat-eggs').textContent = String(sim.eggCount());

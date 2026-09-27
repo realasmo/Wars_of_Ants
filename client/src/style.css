@@ -397,7 +397,7 @@ body {
   display: none;
 }
 
-/* X-menu squad panel */
+/* X-menu squad panel — hidden by default, toggled on the X key */
 #squadmenu {
   position: fixed;
   left: 50%;
@@ -412,6 +412,7 @@ body {
   gap: 6px;
   z-index: 40;
 }
+#squadmenu.hidden { display: none; }
 #squadmenu .sq-title {
   color: #d9c27a;
   font: bold 12px monospace;

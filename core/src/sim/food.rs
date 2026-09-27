@@ -232,6 +232,128 @@ impl Sim {
         let q = qo.get()?;
         Some((tile_of(q.1.p), q.0.amount))
     }
+
+    // --- physical queen feeding (worker-priorities wave) ---
+
+    /// What the queen requests right now.
+    pub(crate) fn craving(&self) -> FoodKind {
+        crate::balance::QUEEN_CRAVING_CYCLE
+            [self.colony.craving_i.min(crate::balance::QUEEN_CRAVING_CYCLE.len() - 1)]
+    }
+
+    /// The pantry pile the feeder should withdraw from: the nearest stored
+    /// pile of the craved kind to the queen (tie → lowest id). None when the
+    /// pantry cannot satisfy the craving.
+    pub(crate) fn craving_pile(&self) -> Option<(u32, (u32, u32))> {
+        let craving = self.craving();
+        let q = self.queen_tile();
+        let mut best: Option<(u32, u32)> = None; // (chebyshev dist, id)
+        for &fid in &self.food_ids() {
+            let ent = self.ids[&fid];
+            let (Ok(fp), Ok(ff)) = (self.ecs.get::<&Pos>(ent), self.ecs.get::<&Food>(ent))
+            else {
+                continue;
+            };
+            if !ff.stored || ff.amount == 0 || ff.kind != craving {
+                continue;
+            }
+            if fp.layer != Layer::Underground {
+                continue; // the pantry is underground by definition
+            }
+            let key = (crate::path::chebyshev(tile_of(fp.p), q), fid);
+            if best.map(|b| key < b).unwrap_or(true) {
+                best = Some(key);
+            }
+        }
+        best.map(|(_, fid)| (fid, self.food_info(fid).map(|(t, _)| t).unwrap_or((0, 0))))
+    }
+
+    /// Withdraw one craved unit from a pantry pile into the mandibles: pile
+    /// −1 and store (ledger) −1 — the unit leaves the pantry accounting and
+    /// settles when fed to the queen or re-banked.
+    pub(crate) fn withdraw_pantry(&mut self, id: u32, fid: u32) -> bool {
+        let Some(&fent) = self.ids.get(&fid) else {
+            return false;
+        };
+        let (amount, kind) = match self
+            .ecs
+            .query_one::<&mut Food>(fent)
+            .ok()
+            .and_then(|mut q| q.get().map(|f| (f.amount, f.kind)))
+        {
+            Some(v) => v,
+            None => return false,
+        };
+        if amount == 0 {
+            return false;
+        }
+        match kind {
+            FoodKind::Green | FoodKind::Carbs => {
+                self.colony.carbs = self.colony.carbs.saturating_sub(1)
+            }
+            FoodKind::Super | FoodKind::Protein => {
+                self.colony.protein = self.colony.protein.saturating_sub(1)
+            }
+            FoodKind::Water => self.colony.water = self.colony.water.saturating_sub(1),
+        }
+        if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
+            q.amount = amount - 1;
+        }
+        if let Some(&aent) = self.ids.get(&id) {
+            if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+                *q = Carry::Food(kind);
+            }
+        }
+        self.ev(format!(
+            "ant #{id} withdrew 1 {} from the pantry for the queen",
+            super::snapshot::food_name(kind)
+        ));
+        true
+    }
+
+    /// Feed the queen from the adjacent carrier's mandibles: caller guarantees
+    /// same layer, adjacency, the craved kind carried, and that she is hungry.
+    pub(crate) fn feed_queen(&mut self, feeder: u32) {
+        let Some(&aent) = self.ids.get(&feeder) else {
+            return;
+        };
+        let kind = match self.ecs.get::<&Carry>(aent).map(|c| *c) {
+            Ok(Carry::Food(k)) => k,
+            _ => return,
+        };
+        if kind != self.craving() {
+            return;
+        }
+        if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+            *q = Carry::None;
+        }
+        self.queen_fed(format!("feeder #{feeder}"), kind);
+    }
+
+    /// The queen eats one craved unit (from a feeder or her own mandibles):
+    /// the unit is consumed (caller cleared the carry), hunger resets, the
+    /// craving advances to the next in the cycle.
+    pub(crate) fn queen_fed(&mut self, who: String, fed: FoodKind) {
+        self.colony.hunger_t = 0.0;
+        self.colony.craving_i = (self.colony.craving_i + 1) % crate::balance::QUEEN_CRAVING_CYCLE.len();
+        let next = self.craving();
+        self.ev(format!(
+            "{who} fed the queen 1 {} — next: {}",
+            super::snapshot::food_name(fed),
+            super::snapshot::food_name(next),
+        ));
+    }
+
+    /// The queen's current layer + tile (worker_ai feeds/fetches toward this).
+    pub(crate) fn queen_where(&self) -> (Layer, (u32, u32)) {
+        let Some(&ent) = self.ids.get(&self.colony.queen_id) else {
+            return (Layer::Underground, self.queen_tile());
+        };
+        match self.ecs.get::<&Pos>(ent).map(|p| (p.layer, tile_of(p.p))) {
+            Ok(v) => v,
+            Err(_) => (Layer::Underground, self.queen_tile()),
+        }
+    }
 }
 
 impl Sim {

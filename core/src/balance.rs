@@ -133,13 +133,30 @@ pub const DIG_TIME: f64 = 1.2;
 /// to dig. Radius 3 deadlocks: once that zone is dug out, the pantry stays
 /// full, deliveries halt, and the colony starves beside surface food.
 pub const DIG_EXPAND_RADIUS: u32 = 8;
+/// Time until the founding queen is hungry again after a meal. Hungry past
+/// this, dead at EAT_PERIOD + STARVE_TIME without food (physical feeding,
+/// worker-priorities wave).
 pub const EAT_PERIOD: f64 = 25.0;
+/// The queen's craving cycle (rotating, explicit index in Colony — Carbs
+/// repeats, so position-by-search would alias).
+pub const QUEEN_CRAVING_CYCLE: [crate::components::FoodKind; 4] = [
+    crate::components::FoodKind::Carbs,
+    crate::components::FoodKind::Protein,
+    crate::components::FoodKind::Carbs,
+    crate::components::FoodKind::Water,
+];
 pub const EGG_COST: u32 = 5;
 pub const EGG_TIME: f64 = 45.0;
 pub const LAY_COOLDOWN: f64 = 3.0;
 pub const STARVE_TIME: f64 = 90.0;
 pub const START_FOOD: u32 = 5; // starting carbs
 pub const PILE_AMOUNT: u32 = 45;
+/// Taskless workers: random hops within this radius of where they idled.
+pub const LOITER_RADIUS: u32 = 4;
+/// Loiter hops before heading home.
+pub const LOITER_HOPS: u32 = 3;
+/// Rest in the nest (ticks) between loiter cycles.
+pub const HOME_REST_TICKS: u32 = 300;
 
 pub const SPIDER_AGGRO: f64 = 5.0;
 pub const SPIDER_WANDER: f64 = 8.0;

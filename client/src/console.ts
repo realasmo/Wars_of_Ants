@@ -180,9 +180,12 @@ function run(raw: string): void {
       break;
     case 'state': {
       const s = g.debugState() as Record<string, unknown>;
+      const q = s.queen as Record<string, unknown> | undefined;
+      const feeder = s.feeder === null || s.feeder === undefined ? 'none' : `#${s.feeder}`;
       pushLine(
         `t=${s.tick} phase=${s.phase} P/C/W=${s.protein}/${s.carbs}/${s.water} ` +
-          `workers=${s.workers} eggs=${s.eggs} dead=${s.dead}`,
+          `workers=${s.workers} eggs=${s.eggs} feeder=${feeder} ` +
+          `queen-wants=${q?.request ?? '—'} (hunger ${q?.hunger ?? 0}) dead=${s.dead}`,
         'sys',
       );
       break;

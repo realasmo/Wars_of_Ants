@@ -116,18 +116,30 @@ pub enum AntState {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Job {
     Manual,
     Idle,
     Fetch(u32),
     /// Carry food to the pantry cell (x, y).
     Deliver(u32, u32),
-    /// Wander toward (x, y) looking for undiscovered sources.
-    Scout(u32, u32),
+    /// The designated feeder: withdraw the queen's craved resource from the
+    /// pantry and hand it to her when she turns hungry.
+    Feed,
+    /// Wander a few hops near where the ant idled, then head home and rest.
+    Loiter(u32),
+    /// Walk back into the nest (underground, near the queen).
+    GoHome,
+    /// Walk out for a glance around the nest mouth (keeps near-nest sources
+    /// discoverable without auto-scouting).
+    GoOut,
+    /// Pause in the nest between loiter cycles; ticks down, then GoOut.
+    Rest(u32),
     DigTile(u32, u32),
-    /// Squad follow: keep near the leader ant (X-menu, F3).
-    Follow(u32),
+    /// Squad follow: keep near the leader ant (X-menu, F3). `resume` is the
+    /// job the follower returns to on release/leader death — busy ants
+    /// (farming, feeding, manual control) resume their unfinished activity.
+    Follow(u32, Option<Box<Job>>),
 }
 
 #[derive(Clone, Debug)]

@@ -21,7 +21,7 @@ use wasm_bindgen::prelude::*;
 /// (however slight), WAVE bumps per shipped feature wave, -dev is constant
 /// while the game is in development. Single source of truth: edit this one
 /// line in the same commit as any game change.
-pub const GAME_VERSION: &str = "0.1.00.51-dev";
+pub const GAME_VERSION: &str = "0.1.01.52-dev";
 
 #[wasm_bindgen]
 pub fn game_version() -> String {
@@ -226,6 +226,12 @@ impl WoaSim {
         self.inner.colony.team as u8
     }
 
+    /// The designated feeder's id (u32::MAX when there is none) — debug/UX
+    /// readout; the gameplay path lives in the snapshot.
+    pub fn feeder_id(&self) -> u32 {
+        self.inner.colony.feeder_id.unwrap_or(u32::MAX)
+    }
+
     pub fn tiles_underground(&self) -> Vec<u8> {
         self.inner.tiles(Layer::Underground).to_vec()
     }
@@ -244,19 +250,19 @@ impl WoaSim {
     }
 
     /// Flat snapshot transport: `[tick, dead, carbs, count]` header, then
-    /// stride-11 records `[id, kind, layer, x, y, p0..p5]`. The positional
+    /// stride-12 records `[id, kind, layer, x, y, p0..p6]`. The positional
     /// codes are single-sourced in `sim::snapshot` and exported through
     /// `snapshot_spec()` — the client asserts its decoder against that spec
-    /// at boot. Layout version 2 (see spec).
+    /// at boot. Layout version 3 (see spec).
     pub fn snapshot(&self) -> Vec<f64> {
         use sim::snapshot as wire; // the wire-code module (crate-private)
         let snaps = self.inner.snapshot();
-        let mut v = Vec::with_capacity(4 + snaps.len() * 11);
+        let mut v = Vec::with_capacity(4 + snaps.len() * 12);
         v.push(self.inner.tick as f64);
         v.push(self.inner.colony.dead as u8 as f64);
         v.push(self.inner.colony.carbs as f64);
         v.push(snaps.len() as f64);
-        let mut rec = |id: u32, kind: u8, layer: u8, x: f64, y: f64, p: [f64; 6]| {
+        let mut rec = |id: u32, kind: u8, layer: u8, x: f64, y: f64, p: [f64; 7]| {
             v.extend([
                 id as f64,
                 kind as f64,
@@ -269,6 +275,7 @@ impl WoaSim {
                 p[3],
                 p[4],
                 p[5],
+                p[6],
             ]);
         };
         for s in snaps {
@@ -308,6 +315,10 @@ impl WoaSim {
                             data,
                             a.hunger,
                             a.following.map(|l| l as f64 + 1.0).unwrap_or(0.0),
+                            // p6: the queen's craved resource (food code);
+                            // 0 for everyone else / no craving
+                            a.request.map(wire::food_code).unwrap_or(wire::REQUEST_NONE)
+                                as f64,
                         ],
                     );
                 }
@@ -322,6 +333,7 @@ impl WoaSim {
                             f.amount as f64,
                             wire::food_code(f.kind) as f64,
                             src as f64,
+                            0.0,
                             0.0,
                             0.0,
                             0.0,
@@ -347,6 +359,7 @@ impl WoaSim {
                                 0.0,
                                 0.0,
                                 0.0,
+                                0.0,
                             ],
                         );
                     }
@@ -361,6 +374,7 @@ impl WoaSim {
                         e.hatch_left,
                         if e.caste == Caste::Soldier { 1.0 } else { 0.0 },
                         if e.carried { 1.0 } else { 0.0 },
+                        0.0,
                         0.0,
                         0.0,
                         0.0,
@@ -379,6 +393,7 @@ impl WoaSim {
                         0.0,
                         0.0,
                         0.0,
+                        0.0,
                     ],
                 ),
                 EntitySnap::Collectible(c) => rec(
@@ -387,7 +402,7 @@ impl WoaSim {
                     c.layer as u8,
                     c.x,
                     c.y,
-                    [c.variant as f64, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [c.variant as f64, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 ),
             }
         }

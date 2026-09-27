@@ -389,6 +389,7 @@ export class Game {
       dug: this.sim.tilesDug(),
       layer: this.renderer.activeLayer === 0 ? 'surface' : 'underground',
       playerAnt: this.playerAnt,
+      feeder: this.sim.feederId(),
       queen: qs
         ? {
             id: qs.id,
@@ -397,6 +398,8 @@ export class Game {
             layer: qs.layer === 0 ? 'S' : 'U',
             activity: qs.activity,
             carry: carryLabel(qs.carry),
+            request: qs.request,
+            hunger: +qs.hunger.toFixed(2),
           }
         : null,
       entrance: this.sim.entrance,

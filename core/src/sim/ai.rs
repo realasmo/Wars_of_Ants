@@ -12,6 +12,7 @@ impl Sim {
         if self.colony.dead {
             return;
         }
+        self.designate_feeder();
         let ids = self.ant_ids();
         for id in ids {
             let ent = match self.ids.get(&id) {
@@ -36,7 +37,7 @@ impl Sim {
                     *q.1,
                     (*q.2).clone(),
                     *q.3,
-                    q.4.job,
+                    q.4.job.clone(),
                     q.4.pending,
                     q.4.retry,
                     q.4.attack_after,
@@ -142,6 +143,23 @@ impl Sim {
                         self.set_retry(id, 60);
                     }
                     continue;
+                }
+                // hungry and holding the craved resource: eat straight from
+                // the mandibles (the solo queen farms her own survival; the
+                // fed queen can top herself up when the feeder is absent)
+                if self.colony.hunger_t >= EAT_PERIOD {
+                    if let Carry::Food(k) = carrying {
+                        if k == self.craving() {
+                            if let Some(&aent) = self.ids.get(&id) {
+                                if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+                                    *q = Carry::None;
+                                }
+                            }
+                            let who = "queen".to_string();
+                            self.queen_fed(who, k);
+                            continue;
+                        }
+                    }
                 }
                 // the queen is player-driven and never takes forage jobs,
                 // but she may farm like any ant: stand on food with free
@@ -318,17 +336,180 @@ impl Sim {
                         self.set_job(id, Job::DigTile(t.0, t.1));
                     } else if let Some(fid) = self.best_food() {
                         self.set_job(id, Job::Fetch(fid));
-                    } else if let Some((ex, ey)) = self.world.entrance {
-                        // nothing known: scout outward from the nest
-                        let a = self.rng.range(0.0, std::f64::consts::TAU);
-                        let d = self.rng.range(12.0, 35.0);
-                        let dx = (ex as f64 + a.cos() * d).clamp(2.0, self.config.width as f64 - 3.0)
-                            as u32;
-                        let dy = (ey as f64 + a.sin() * d).clamp(2.0, self.config.height as f64 - 3.0)
-                            as u32;
-                        self.set_job(id, Job::Scout(dx, dy));
                     } else {
-                        self.set_retry(id, 50);
+                        // nothing known to farm: drift where we stand for a
+                        // while, then head home and rest (auto-scouting is
+                        // gone — far sources are found by the player)
+                        self.set_job(id, Job::Loiter(LOITER_HOPS));
+                    }
+                }
+                Job::Feed => {
+                    if matches!(carrying, Carry::Dirt { .. }) {
+                        // spoil picked up en route must go before anything else
+                        self.haul_out_dirt(id);
+                        continue;
+                    }
+                    let craving = self.craving();
+                    let hungry = self.colony.hunger_t >= EAT_PERIOD;
+                    match carrying {
+                        Carry::Food(k) if k == craving => {
+                            let (qlayer, qtile) = self.queen_where();
+                            if qlayer == pos.layer && chebyshev(tile_of(pos.p), qtile) <= 1 {
+                                if hungry {
+                                    self.feed_queen(id);
+                                } else {
+                                    // meal ready — stand by her until hunger hits
+                                    self.set_retry(id, 50);
+                                }
+                            } else if !self.route(id, qlayer, qtile) {
+                                self.set_retry(id, 60);
+                            }
+                        }
+                        Carry::Food(_) => {
+                            // craving moved on (the queen self-fed): re-bank
+                            // this unit, then fetch the new craving
+                            if pos.layer == Layer::Underground {
+                                let tile = tile_of(pos.p);
+                                let on_silver = self.soil_at(Layer::Underground, tile.0, tile.1)
+                                    == SOIL_SILVER;
+                                let near_queen = chebyshev(tile, self.queen_tile()) <= 1;
+                                if (on_silver || near_queen)
+                                    && self.cell_food(Layer::Underground, tile) < FOOD_CELL_CAP
+                                {
+                                    self.store_food(id, tile);
+                                } else if let Some((px, py)) = self.pantry_tile() {
+                                    if tile != (px, py)
+                                        && !self.route(id, Layer::Underground, (px, py))
+                                    {
+                                        self.set_retry(id, 60);
+                                    }
+                                } else {
+                                    self.set_retry(id, 100);
+                                }
+                            } else if let Some((px, py)) = self.pantry_tile() {
+                                if !self.route(id, Layer::Underground, (px, py)) {
+                                    self.set_retry(id, 60);
+                                }
+                            } else {
+                                self.set_retry(id, 100);
+                            }
+                        }
+                        Carry::None => match self.craving_pile() {
+                            Some((fid, ftile)) => {
+                                if pos.layer == Layer::Underground && tile_of(pos.p) == ftile {
+                                    if !self.withdraw_pantry(id, fid) {
+                                        self.set_retry(id, 60);
+                                    }
+                                } else if !self.route(id, Layer::Underground, ftile) {
+                                    self.set_retry(id, 60);
+                                }
+                            }
+                            None => {
+                                // pantry can't satisfy the craving: wait
+                                // beside the queen — her request display is
+                                // the player-facing signal to farm it
+                                let (qlayer, qtile) = self.queen_where();
+                                if qlayer == pos.layer && chebyshev(tile_of(pos.p), qtile) <= 2 {
+                                    self.set_retry(id, 60);
+                                } else if !self.route(id, qlayer, qtile) {
+                                    self.set_retry(id, 60);
+                                }
+                            }
+                        },
+                        // eggs/wood/wool are unreachable for a feeding worker
+                        // (only player commands put them in worker hands, and
+                        // that takes the ant out of the feeder role) — park
+                        // safely rather than act on full hands
+                        _ => {
+                            self.set_retry(id, 100);
+                        }
+                    }
+                }
+                Job::Loiter(hops) => {
+                    if matches!(carrying, Carry::Dirt { .. }) {
+                        self.haul_out_dirt(id);
+                        continue;
+                    }
+                    if let Some(fid) = self.best_food() {
+                        // work appeared while drifting — take it
+                        self.set_job(id, Job::Fetch(fid));
+                        continue;
+                    }
+                    if hops == 0 {
+                        self.set_job(id, Job::GoHome);
+                        continue;
+                    }
+                    // one short hop near the current spot, then pause a beat
+                    let (cx, cy) = (tile_of(pos.p).0 as i32, tile_of(pos.p).1 as i32);
+                    let r = LOITER_RADIUS as i32;
+                    let dx = self.rng.irange(0, 2 * LOITER_RADIUS) as i32 - r;
+                    let dy = self.rng.irange(0, 2 * LOITER_RADIUS) as i32 - r;
+                    let tx = (cx + dx).clamp(1, self.config.width as i32 - 2) as u32;
+                    let ty = (cy + dy).clamp(1, self.config.height as i32 - 2) as u32;
+                    self.set_job(id, Job::Loiter(hops - 1));
+                    if (tx, ty) == (cx as u32, cy as u32) {
+                        self.set_retry(id, 20);
+                    } else if !self.route(id, pos.layer, (tx, ty)) {
+                        // can't wander there — head home instead
+                        self.set_job(id, Job::GoHome);
+                    }
+                }
+                Job::GoHome => {
+                    if matches!(carrying, Carry::Dirt { .. }) {
+                        self.haul_out_dirt(id);
+                        continue;
+                    }
+                    if let Some(fid) = self.best_food() {
+                        self.set_job(id, Job::Fetch(fid));
+                        continue;
+                    }
+                    if pos.layer == Layer::Underground {
+                        // home: rest a stretch before the next glance outside
+                        self.set_job(id, Job::Rest(HOME_REST_TICKS));
+                    } else if let Some((ex, ey)) = self.world.entrance {
+                        if !self.route(id, Layer::Underground, (ex + 1, ey + 3)) {
+                            self.set_retry(id, 60);
+                        }
+                    } else {
+                        self.set_retry(id, 100);
+                    }
+                }
+                Job::GoOut => {
+                    if matches!(carrying, Carry::Dirt { .. }) {
+                        self.haul_out_dirt(id);
+                        continue;
+                    }
+                    if let Some(fid) = self.best_food() {
+                        self.set_job(id, Job::Fetch(fid));
+                        continue;
+                    }
+                    // pop out for a look around the nest mouth — this is how
+                    // near-nest sources stay discoverable without scouting
+                    if let Some((ex, ey)) = self.world.entrance {
+                        let r = LOITER_RADIUS as i32;
+                        let dx = self.rng.irange(0, 2 * LOITER_RADIUS) as i32 - r;
+                        let dy = self.rng.irange(0, 2 * LOITER_RADIUS) as i32 - r;
+                        let tx = (ex as i32 + 1 + dx).clamp(1, self.config.width as i32 - 2) as u32;
+                        let ty = (ey as i32 + 1 + dy).clamp(1, self.config.height as i32 - 2) as u32;
+                        if pos.layer == Layer::Surface && chebyshev(tile_of(pos.p), (ex, ey)) <= LOITER_RADIUS + 2
+                        {
+                            self.set_job(id, Job::Loiter(LOITER_HOPS));
+                        } else if !self.route(id, Layer::Surface, (tx, ty)) {
+                            self.set_retry(id, 60);
+                        }
+                    } else {
+                        self.set_retry(id, 100);
+                    }
+                }
+                Job::Rest(t) => {
+                    if let Some(fid) = self.best_food() {
+                        self.set_job(id, Job::Fetch(fid));
+                        continue;
+                    }
+                    if t <= 1 {
+                        self.set_job(id, Job::GoOut);
+                    } else {
+                        self.set_job(id, Job::Rest(t - 1));
                     }
                 }
                 Job::DigTile(tx, ty) => {
@@ -355,27 +536,13 @@ impl Sim {
                         self.set_retry(id, 60);
                     }
                 }
-                Job::Scout(dx, dy) => {
-                    if pos.layer == Layer::Underground {
-                        // scouting happens on the surface
-                        if !self.route(id, Layer::Surface, (dx, dy)) {
-                            self.set_retry(id, 60);
-                            self.set_job(id, Job::Idle);
-                        }
-                    } else if tile_of(pos.p) == (dx, dy) {
-                        // looked around; let Idle decide the next move
-                        self.set_job(id, Job::Idle);
-                        self.set_retry(id, 10);
-                    } else if !self.route(id, Layer::Surface, (dx, dy)) {
-                        self.set_retry(id, 60);
-                        self.set_job(id, Job::Idle);
-                    }
-                }
-                Job::Follow(leader) => {
+                Job::Follow(leader, resume) => {
                     // squad follow: stay near the leader (cross-layer via the
                     // entrance); manual commands naturally leave the squad
                     let Some(&lent) = self.ids.get(&leader) else {
-                        self.set_job(id, Job::Idle);
+                        // the leader is gone — back to the interrupted job
+                        let back = resume.map(|b| *b).unwrap_or(Job::Idle);
+                        self.set_job(id, back);
                         continue;
                     };
                     let linfo = {
@@ -470,6 +637,48 @@ impl Sim {
         }
     }
 
+    /// Keep exactly one worker assigned to feeding the queen (founding
+    /// mode). The designation holds while the chosen ant is alive, a worker,
+    /// and not tied up by the player (Manual) or a squad (Follow); otherwise
+    /// it passes to the lowest-id such worker — stealing one mid-fetch is
+    /// fine: a carried craved unit goes straight to the queen.
+    fn designate_feeder(&mut self) {
+        if !self.colony.founding {
+            return;
+        }
+        let feeder_ok = |sim: &Sim, id: u32| -> bool {
+            sim.ids.get(&id).is_some_and(|&e| {
+                sim.ecs.get::<&Ant>(e).is_ok_and(|a| a.caste == Caste::Worker)
+                    && sim
+                        .ecs
+                        .get::<&WorkerAi>(e)
+                        .is_ok_and(|ai| !matches!(ai.job, Job::Manual | Job::Follow(..)))
+            })
+        };
+        if self.colony.feeder_id.is_some_and(|id| feeder_ok(self, id)) {
+            return;
+        }
+        let lost = self.colony.feeder_id.filter(|id| self.ids.contains_key(id));
+        let cand = self
+            .ant_ids()
+            .into_iter()
+            .filter(|&id| feeder_ok(self, id))
+            .min();
+        self.colony.feeder_id = cand;
+        if let Some(c) = cand {
+            match lost {
+                Some(old) => {
+                    self.set_job(c, Job::Feed);
+                    self.ev(format!("feeder #{old} unavailable — worker #{c} feeds the queen"));
+                }
+                None => {
+                    self.set_job(c, Job::Feed);
+                    self.ev(format!("worker #{c} is the queen's feeder"));
+                }
+            }
+        }
+    }
+
     /// Sources within sight of any colony ant become known (scouting).
     pub(crate) fn discover(&mut self) {
         if self.colony.dead {
@@ -527,7 +736,8 @@ impl Sim {
 
     pub(crate) fn best_food(&self) -> Option<u32> {
         let entrance = self.world.entrance?;
-        let mut best: Option<(u32, u32, u32)> = None;
+        let craving = self.craving();
+        let mut best: Option<(u32, u32, u32, u32)> = None;
         for &fid in &self.food_ids() {
             let ent = self.ids[&fid];
             let (Ok(fp), Ok(ff)) = (self.ecs.get::<&Pos>(ent), self.ecs.get::<&Food>(ent)) else {
@@ -543,17 +753,29 @@ impl Sim {
                 continue;
             }
             let tile = tile_of(fp.p);
+            // founding: forage what the queen craves first — the physical
+            // feeding economy starves beside full carb piles otherwise.
+            // Legacy keeps the old protein-first key unchanged.
             let super_first = if ff.kind == FoodKind::Super || ff.kind == FoodKind::Protein {
                 0
             } else {
                 1
             };
-            let key = (super_first, manhattan(tile, entrance), fid);
+            let key = if self.colony.founding {
+                (
+                    if ff.kind == craving { 0 } else { 1 },
+                    super_first,
+                    manhattan(tile, entrance),
+                    fid,
+                )
+            } else {
+                (super_first, manhattan(tile, entrance), 0, fid)
+            };
             if best.map(|b| key < b).unwrap_or(true) {
                 best = Some(key);
             }
         }
-        best.map(|(_, _, fid)| fid)
+        best.map(|k| k.3)
     }
 
     /// Where carriers place collected food: the nearest silver cell to the

@@ -8,12 +8,15 @@ Design reference: AntWar.io (see `docs/BASED-ON.md`); world content draft: `docs
 - **Remote (origin):** `git@github.com:realasmo/Wars_of_Ants.git`
 - **SSH key:** `/root/.ssh/key_Wars_of_Ants` (configured via repo-local `core.sshCommand`)
 
-## Current status (2026-09-27) — version 0.1.00.50-dev
+## Current status (2026-09-27) — version 0.1.01.52-dev
 
 **Playable:** title → team select → flying queen → found nest → excavate
 (2×2 blocks, dirt hauling) → orange-soil nursery (egg transport) → first
-workers → scout and harvest finite sources (protein/carbs/water) → survive
-spiders → **squad play** (X-menu: recruit/release followers, silver rings).
+workers → harvest sighted finite sources (protein/carbs/water; foragers
+prioritize what the queen craves) → survive spiders → **squad play**
+(X-menu: recruit/release followers, silver rings, released ants resume
+their interrupted work) → **physical queen feeding** (one feeder worker
+serves her rotating cravings; the request shows above her and in the HUD).
 Engine: deterministic 20 tps core (native + WASM byte-identical), replays
 (v2), e2e playtest suite, in-game dev console (`` ` ``) with a live sim
 event log. Every game change bumps `GAME_VERSION` (menu + corner).
@@ -38,9 +41,25 @@ editing `client/src/art/ants.ts` numbers).
   soldiers / release), followers keep near you and cross layers, silver
   squad rings, replay-logged commands.
 - **F4 (next):** the queen's X-menu — egg types with resource costs
-  (Worker / Soldier / Honey / Medic), worker→soldier conversion, fallen-
-  ant rescue; absorbs Wave B (corpses/healing) and reaches toward the
-  aphid economy.
+  (Worker / Soldier / Honey / Medic), worker→soldier conversion (consumes
+  the worker), fallen-ant rescue; absorbs Wave B (corpses/healing) and
+  reaches toward the aphid economy. Honeydew comes from a new **nettle**
+  source (15–22 units, 10s/unit, 4 scattered); squads: soldiers fight for
+  their leader, the whole squad farms when the leader farms.
+
+**Worker-priorities wave (ticket `docs/TICKET-worker-priorities.md`):**
+the queen eats **real food** now — a rotating craving cycle
+(carbs→protein→carbs→water), one designated **feeder** worker that
+withdraws her craved unit from the pantry and stands by her until she is
+hungry (reassigned when controlled, recruited-then-released feeders resume
+feeding; a hungry queen can also eat her own farmed load). Starvation
+becomes visible: her request shows above her (red + imperative when the
+fuse burns) and in the HUD row. Founding reserves are a physical carb pile
+in the chamber. Auto-scouting is gone: taskless workers drift where they
+were left, then return to rest in the nest and periodically glance around
+the nest mouth (which keeps near-nest sources discoverable) — far sources
+are found by the player. Followers **resume their interrupted job** on
+release.
 
 **Playtest-fix wave:** worker digging now obeys dirt capacity and
 auto-hauls spoil to the surface; eggs can be carried through the entrance;

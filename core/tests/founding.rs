@@ -1020,15 +1020,25 @@ fn scouts_discover_sources_and_harvest_takes_time() {
         .unwrap();
     let amount0 = src.amount;
     // not discovered: no worker fetches it while it's out of sight — verify
-    // via knowledge set indirectly: a nearby ant discovers it instantly
-    let w = s
-        .snapshot()
-        .into_iter()
-        .find_map(|e| match e {
-            EntitySnap::Ant(a) if a.caste == Caste::Worker => Some(a.id),
-            _ => None,
-        })
-        .unwrap();
+    // via knowledge set indirectly: a nearby ant discovers it instantly.
+    // A fresh dev worker does the trip: the founding brood is one ant here
+    // (only one painted orange block hatched) and it IS the feeder — it
+    // stands by the queen holding a withdrawn unit, and a laden worker
+    // can't harvest. Move is same-layer only, so hop the entrance first.
+    let (ex, ey) = s.world.entrance.unwrap();
+    let w = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
+    assert!(s.issue(Command::UseEntrance { ant: w }));
+    let mut surfaced = false;
+    for _ in 0..1200 {
+        s.tick();
+        if let Some(EntitySnap::Ant(a)) = s.snapshot().into_iter().find(|e| e.id() == w) {
+            if a.layer == Layer::Surface {
+                surfaced = true;
+                break;
+            }
+        }
+    }
+    assert!(surfaced, "worker reaches the surface via the entrance");
     assert!(s.issue(Command::Move { ant: w, x: sx, y: sy }));
     for _ in 0..10 {
         s.tick();
@@ -1057,12 +1067,16 @@ fn scouts_discover_sources_and_harvest_takes_time() {
     );
     // finite: AI workers deplete a source placed by the entrance (discovered
     // as they pass) until it despawns. Fresh dev workers: the commanded one
-    // stays Manual forever.
-    s.dev_set_food(999); // keep the colony from starving mid-test
+    // stays Manual forever. The physical queen needs a balanced diet —
+    // spawn a water and a protein source by the entrance too so the craving
+    // cycle (carbs→protein→carbs→water) can actually be fed; abstract
+    // dev carbs no longer keep her alive.
     let (ex, ey) = s.world.entrance.unwrap();
     s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
     s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
     s.dev_spawn(DevSpawn::Source(4), ex as f64 + 3.5, ey as f64 + 3.5);
+    s.dev_spawn(DevSpawn::Source(1), ex as f64 - 3.5, ey as f64 + 3.5);
+    s.dev_spawn(DevSpawn::Source(5), ex as f64 + 0.5, ey as f64 - 3.5);
     let mut gone = false;
     for _ in 0..25000 {
         s.tick();
@@ -1555,4 +1569,266 @@ fn squad_follow_recruits_and_releases() {
         mode: FollowMode::One
     }));
     assert_eq!(follow_count(&s, wid1), 1, "one mode joins exactly one ant");
+}
+
+// --- worker priorities: feeder, physical feeding, loiter, follow-resume ---
+
+fn stored_pile(s: &Sim) -> Option<FoodSnap_> {
+    s.snapshot().into_iter().find_map(|e| match e {
+        EntitySnap::Food(f) if matches!(f.role, FoodRole::Pantry) => Some(FoodSnap_(f)),
+        _ => None,
+    })
+}
+
+// the founding reserves, as a typed snapshot pair (FoodSnap isn't Copy-safe to
+// return by value in a helper — wrap it)
+struct FoodSnap_(FoodSnap);
+impl std::ops::Deref for FoodSnap_ {
+    type Target = FoodSnap;
+    fn deref(&self) -> &FoodSnap {
+        &self.0
+    }
+}
+use woa_core::FoodSnap;
+
+fn job_token(s: &Sim, id: u32) -> String {
+    let canon = s.canonical_state();
+    for part in canon.split('|') {
+        if part.starts_with(&format!("A{id} ")) {
+            let i = part.find(" j").expect("job token");
+            let rest = &part[i + 2..];
+            let end = rest.find(' ').unwrap_or(rest.len());
+            return rest[..end].to_string();
+        }
+    }
+    panic!("ant #{id} not in canonical");
+}
+
+#[test]
+fn founding_reserves_spawn_as_a_physical_pantry_pile() {
+    let s = founded(42);
+    let pile = stored_pile(&s).expect("stored reserves pile");
+    assert_eq!(pile.kind, FoodKind::Carbs);
+    assert_eq!(pile.amount, START_FOOD);
+    assert_eq!(pile.layer, Layer::Underground);
+    // ledger in sync with the physical pile
+    assert_eq!(s.colony.carbs, START_FOOD);
+}
+
+#[test]
+fn feeder_feeds_the_hungry_queen_from_the_pantry() {
+    let mut s = founded(42);
+    let (ex, ey) = s.world.entrance.unwrap();
+    let w1 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
+    let _w2 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 5.0);
+    for _ in 0..5 {
+        s.tick(); // designation runs inside the next worker_ai pass
+    }
+    assert_eq!(s.colony.feeder_id, Some(w1), "lowest-id worker feeds");
+    // make her hungry right now (EAT_PERIOD elapsed)
+    s.colony.hunger_t = 25.0;
+    let mut fed = false;
+    for _ in 0..2000 {
+        s.tick();
+        if s.event_lines().iter().any(|l| l.contains("fed the queen 1 carbs")) {
+            fed = true;
+            break;
+        }
+    }
+    assert!(fed, "the feeder delivers the craved carb unit");
+    assert_eq!(s.colony.craving_i, 1, "craving advanced carbs → protein");
+    assert!(
+        s.colony.hunger_t < 25.0,
+        "hunger reset on feeding ({})",
+        s.colony.hunger_t
+    );
+    // withdraw settles both sides: pile −1 and ledger −1
+    assert_eq!(s.colony.carbs, START_FOOD - 1);
+    let pile = stored_pile(&s).expect("reserves still there (4 left)");
+    assert_eq!(pile.amount, START_FOOD - 1);
+}
+
+#[test]
+fn queen_starves_when_workers_exist_and_the_pantry_cannot_satisfy_her() {
+    let mut s = founded(42);
+    // one worker only (the feeder — it never forages), no known sources, no
+    // reserves: nothing can ever reach her mandibles
+    s.colony.known.clear();
+    let pile_id = s
+        .snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Food(f) if matches!(f.role, FoodRole::Pantry) => Some(f.id),
+            _ => None,
+        })
+        .unwrap();
+    assert!(s.dev_kill(pile_id));
+    let (ex, ey) = s.world.entrance.unwrap();
+    let _w = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
+    s.colony.hunger_t = 110.0; // 5s from death
+    for _ in 0..300 {
+        s.tick();
+    }
+    assert!(s.colony.dead, "queen dies unfed once workers exist");
+    assert!(
+        s.event_lines().iter().any(|l| l.contains("starvation")),
+        "starvation is logged"
+    );
+}
+
+#[test]
+fn hungry_queene_eats_the_craved_unit_from_her_own_mandibles() {
+    let mut s = founded(42);
+    s.colony.known.clear();
+    s.colony.hunger_t = 25.0; // hungry now; craving = carbs
+    let q = queen(&s);
+    // a raspberry by the entrance: she exits, harvests one unit, eats it
+    let (ex, ey) = s.world.entrance.unwrap();
+    s.dev_spawn(DevSpawn::Source(3), ex as f64 + 1.5, ey as f64 + 1.5);
+    assert!(s.issue(Command::UseEntrance { ant: q.id }));
+    for _ in 0..1200 {
+        s.tick();
+        let q = queen(&s);
+        if q.layer == Layer::Surface {
+            break;
+        }
+    }
+    let q = queen(&s);
+    assert_eq!(q.layer, Layer::Surface);
+    assert!(s.issue(Command::Move {
+        ant: q.id,
+        x: ex as f64 + 1.5,
+        y: ey as f64 + 1.5
+    }));
+    let mut ate = false;
+    for _ in 0..3000 {
+        s.tick();
+        if s.event_lines().iter().any(|l| l.contains("queen fed the queen 1 carbs")) {
+            ate = true;
+            break;
+        }
+    }
+    assert!(ate, "a hungry queen eats her own harvest");
+    assert_eq!(s.colony.craving_i, 1, "craving advances on self-feeding");
+}
+
+#[test]
+fn feeder_role_passes_on_when_the_feeder_is_player_controlled() {
+    let mut s = founded(42);
+    let (ex, ey) = s.world.entrance.unwrap();
+    let w1 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
+    let w2 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 5.0);
+    for _ in 0..5 {
+        s.tick();
+    }
+    assert_eq!(s.colony.feeder_id, Some(w1));
+    assert_eq!(job_token(&s, w1), "Feed");
+    // the player takes the feeder: the role must not die with it
+    assert!(s.issue(Command::Move {
+        ant: w1,
+        x: ex as f64 + 1.0,
+        y: ey as f64 + 2.0
+    }));
+    for _ in 0..5 {
+        s.tick();
+    }
+    assert_eq!(s.colony.feeder_id, Some(w2), "role passes to the next worker");
+    assert_eq!(job_token(&s, w1), "Manual");
+    assert_eq!(job_token(&s, w2), "Feed");
+}
+
+#[test]
+fn taskless_workers_loiter_near_the_nest_and_go_home() {
+    let mut s = founded(42);
+    s.colony.known.clear();
+    let (ex, ey) = s.world.entrance.unwrap();
+    s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
+    let mut max_d = 0u32;
+    let mut seen_underground = false;
+    for i in 0..6000 {
+        s.tick();
+        if i % 100 == 0 {
+            for e in s.snapshot() {
+                if let EntitySnap::Ant(a) = e {
+                    if a.caste == Caste::Worker {
+                        let d = a.x.floor().max(0.0) as i32 - ex as i32;
+                        let dy = a.y.floor().max(0.0) as i32 - ey as i32;
+                        max_d = max_d.max(d.unsigned_abs().max(dy.unsigned_abs()));
+                        seen_underground |= a.layer == Layer::Underground;
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        max_d <= 15,
+        "taskless workers stay local (no scouting) — max distance {max_d}"
+    );
+    assert!(
+        seen_underground,
+        "the loiter cycle returns into the nest (rest)"
+    );
+}
+
+#[test]
+fn follow_release_resumes_the_interrupted_activity() {
+    let mut s = founded(42);
+    let (ex, ey) = s.world.entrance.unwrap();
+    let w1 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 4.0);
+    let w2 = s.dev_spawn(DevSpawn::Worker, ex as f64 + 1.0, ey as f64 + 5.0);
+    for _ in 0..5 {
+        s.tick();
+    }
+    assert_eq!(job_token(&s, w1), "Feed");
+    // a known source makes w2 a farmer
+    s.colony.known.clear();
+    s.dev_spawn(DevSpawn::Source(3), ex as f64 + 2.5, ey as f64 + 2.5);
+    for _ in 0..400 {
+        s.tick();
+        if job_token(&s, w2).starts_with("Fetch") {
+            break;
+        }
+    }
+    assert!(
+        job_token(&s, w2).starts_with("Fetch"),
+        "w2 farms the sighted source (got {})",
+        job_token(&s, w2)
+    );
+    // recruit both busy ants; release puts everyone back to work
+    assert!(s.issue(Command::Follow {
+        leader: w1,
+        mode: FollowMode::All
+    }));
+    // w1 leads (keeps Feed); w2 follows with a saved resume
+    assert!(s.issue(Command::Follow {
+        leader: w1,
+        mode: FollowMode::Release
+    }));
+    for _ in 0..5 {
+        s.tick();
+    }
+    assert_eq!(job_token(&s, w1), "Feed", "the leader keeps its own job");
+    assert!(
+        job_token(&s, w2).starts_with("Fetch"),
+        "released follower resumes farming (got {})",
+        job_token(&s, w2)
+    );
+    // a manual ant recruited then released goes back to manual, not autonomy
+    assert!(s.issue(Command::Move {
+        ant: w2,
+        x: ex as f64 + 1.0,
+        y: ey as f64 + 2.0
+    }));
+    assert!(s.issue(Command::Follow {
+        leader: w1,
+        mode: FollowMode::All
+    }));
+    assert!(s.issue(Command::Follow {
+        leader: w1,
+        mode: FollowMode::Release
+    }));
+    for _ in 0..5 {
+        s.tick();
+    }
+    assert_eq!(job_token(&s, w2), "Manual", "manual control survives the squad");
 }

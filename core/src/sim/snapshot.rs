@@ -48,11 +48,15 @@ pub fn food_code(kind: FoodKind) -> u8 {
     }
 }
 
+/// Request codes for p6 (the queen's craving): 0 = none/not the queen, else
+/// the food code of the craved kind.
+pub const REQUEST_NONE: u8 = 0;
+
 /// JSON description of the snapshot wire codes, for the client's boot-time
 /// decoder assertion. Bump `snapshot` when the layout changes.
 pub fn snapshot_spec() -> String {
     format!(
-        "{{\"snapshot\":2,\"stride\":11,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE},\"collectible\":{KIND_COLLECTIBLE}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD},\"wood\":{CARRY_WOOD},\"wool\":{CARRY_WOOL}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}}}}"
+        "{{\"snapshot\":3,\"stride\":12,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE},\"collectible\":{KIND_COLLECTIBLE}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD},\"wood\":{CARRY_WOOD},\"wool\":{CARRY_WOOL}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}},\"request\":{{\"none\":{REQUEST_NONE},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}}}}"
     )
 }
 
@@ -81,8 +85,13 @@ pub struct AntSnap {
     /// HP fraction 0..=1.
     pub hp: f64,
     pub carry: Carry,
-    /// Starvation progress 0..=1 (queen only; 0 for everyone else).
+    /// Starvation progress 0..=1 (queen only; 0 for everyone else). In
+    /// founding mode this is the physical-hunger readout: 0 while satisfied,
+    /// then 0→1 from the moment she turns hungry to her death.
     pub hunger: f64,
+    /// What the queen requests next (founding mode, queen only): the craved
+    /// resource the feeder should bring.
+    pub request: Option<FoodKind>,
     /// Squad leader this ant follows, if any (X-menu, F3).
     pub following: Option<u32>,
 }
@@ -198,6 +207,16 @@ pub(crate) fn source_name(src: u8) -> &'static str {
     }
 }
 
+pub(crate) fn food_name(kind: FoodKind) -> &'static str {
+    match kind {
+        FoodKind::Green => "green",
+        FoodKind::Super => "super",
+        FoodKind::Protein => "protein",
+        FoodKind::Carbs => "carbs",
+        FoodKind::Water => "water",
+    }
+}
+
 impl Sim {
     pub fn snapshot(&self) -> Vec<EntitySnap> {
         let mut rev = std::collections::HashMap::new();
@@ -228,10 +247,32 @@ impl Sim {
                 .ecs
                 .get::<&WorkerAi>(ent)
                 .ok()
-                .and_then(|ai| match ai.job {
-                    Job::Follow(leader) => Some(leader),
+                .and_then(|ai| match &ai.job {
+                    Job::Follow(leader, _) => Some(*leader),
                     _ => None,
                 });
+            let is_founding_queen = ant.caste == Caste::Queen
+                && self.colony.founding
+                && !self.colony.dead
+                // the request matters once there is a pantry to feed her from
+                && self.world.entrance.is_some();
+            let request = is_founding_queen.then(|| {
+                crate::balance::QUEEN_CRAVING_CYCLE[self.colony.craving_i.min(
+                    crate::balance::QUEEN_CRAVING_CYCLE.len() - 1,
+                )]
+            });
+            let hunger = if ant.caste == Caste::Queen {
+                if self.colony.founding {
+                    // physical model: 0 until hungry, then hungry→death
+                    ((self.colony.hunger_t - crate::balance::EAT_PERIOD)
+                        / crate::balance::STARVE_TIME)
+                        .clamp(0.0, 1.0)
+                } else {
+                    self.colony.starve_t / crate::balance::STARVE_TIME
+                }
+            } else {
+                0.0
+            };
             v.push(EntitySnap::Ant(AntSnap {
                 id,
                 caste: ant.caste,
@@ -241,11 +282,8 @@ impl Sim {
                 activity,
                 hp: (combat.hp / combat.max_hp).clamp(0.0, 1.0),
                 carry: *carry,
-                hunger: if ant.caste == Caste::Queen {
-                    self.colony.starve_t / crate::balance::STARVE_TIME
-                } else {
-                    0.0
-                },
+                hunger,
+                request,
                 following,
             }));
         }
@@ -328,7 +366,7 @@ impl Sim {
             .unwrap_or_else(|| "-".to_string());
         let (rng_state, rng_inc) = self.rng.state_pair();
         s.push_str(&format!(
-            "t={};c={} p={} w={} del={} eggs={} dead={} q={} ants={} starve={:.4} eat={:.4} lay={:.4} q_len={} phase={:?}({}) phase_t={:.4} team={:?}({}) ent={};rng={:016x}{:016x};dug={} nid={}",
+            "t={};c={} p={} w={} del={} eggs={} dead={} q={} ants={} starve={:.4} eat={:.4} lay={:.4} q_len={} phase={:?}({}) phase_t={:.4} team={:?}({}) ent={} cr={:?} hu={:.4} fd={:?};rng={:016x}{:016x};dug={} nid={}",
             self.tick,
             c.carbs,
             c.protein,
@@ -348,6 +386,10 @@ impl Sim {
             c.team,
             c.team as u8,
             entrance,
+            crate::balance::QUEEN_CRAVING_CYCLE
+                [c.craving_i.min(crate::balance::QUEEN_CRAVING_CYCLE.len() - 1)],
+            c.hunger_t,
+            c.feeder_id,
             rng_state,
             rng_inc,
             self.dug_tiles,

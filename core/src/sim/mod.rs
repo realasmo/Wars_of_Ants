@@ -184,6 +184,13 @@ pub struct Colony {
     /// True when started via `new_founding`: the founding script (4 eggs,
     /// no auto-laying) governs brood; false in the legacy founded start.
     pub founding: bool,
+    /// Seconds since the founding queen last ate (physical feeding model);
+    /// hungry at EAT_PERIOD, dead at EAT_PERIOD + STARVE_TIME.
+    pub hunger_t: f64,
+    /// Index into QUEEN_CRAVING_CYCLE — what the queen requests next.
+    pub craving_i: usize,
+    /// The designated feeder (founding): one worker whose job is feeding her.
+    pub feeder_id: Option<u32>,
     /// Source ids discovered by the colony (within sight of any ant).
     pub known: std::collections::BTreeSet<u32>,
 }
