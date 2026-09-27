@@ -1,4 +1,4 @@
-import init, { WoaSim, core_version, snapshot_spec } from '../../core/pkg/woa_core.js';
+import init, { WoaSim, core_version, game_version, snapshot_spec } from '../../core/pkg/woa_core.js';
 import { assertWireSpec } from './decode';
 
 let ready = false;
@@ -17,4 +17,8 @@ export { WoaSim };
 
 export function coreVersion(): string {
   return core_version();
+}
+
+export function gameVersion(): string {
+  return game_version();
 }

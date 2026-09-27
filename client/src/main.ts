@@ -1,5 +1,5 @@
 import './style.css';
-import { initCore } from './wasm';
+import { gameVersion, initCore } from './wasm';
 import { Game } from './game';
 import { loadReplay } from './replay';
 import type { Replay } from './replay';
@@ -38,6 +38,12 @@ declare global {
 
 async function main(): Promise<void> {
   await initCore();
+  // game version in the menu and the in-game corner (single source: core)
+  const ver = gameVersion();
+  const mv = document.getElementById('menu-version');
+  if (mv !== null) mv.textContent = ver;
+  const cv = document.getElementById('version');
+  if (cv !== null) cv.textContent = ver;
   const params = new URLSearchParams(window.location.search);
   const replayName = params.get('replay');
   let replay: Replay | null = null;

@@ -160,7 +160,7 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 
 ### Versioning rule
 
-- **Every format that crosses a build, process, or network boundary gets a version number from day one.** Currently versioned: replay format (`version: 1`). Coming before first use: the binary snapshot/protocol (Phase 4), save files, and the WASM↔JS interface (`core_version()` already reports the crate version — surface it in the client HUD/debug output when it matters).
+- **Every format that crosses a build, process, or network boundary gets a version number from day one.** Currently versioned: replay format (`version: 2`), the wire snapshot (layout v2 via `snapshot_spec()`), and the game itself — `GAME_VERSION` in `core/src/lib.rs` (single source; `game_version()` serves it to the client, shown in the main menu and the bottom-left in-game corner). Scheme: `MAJOR.MINOR.WAVE.BUILD-dev` — BUILD bumps on EVERY game change however slight (same commit as the change), WAVE bumps per shipped feature wave. Coming before first use: save files and the Phase-4 binary protocol.
 
 ### Balance table
 

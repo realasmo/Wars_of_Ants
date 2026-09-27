@@ -16,9 +16,21 @@ pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK, SOIL_NONE, SOIL_ORANGE, SOIL_SILV
 
 use wasm_bindgen::prelude::*;
 
+/// The game version, displayed in the main menu and the in-game corner.
+/// Scheme: MAJOR.MINOR.WAVE.BUILD-dev — BUILD bumps on EVERY game change
+/// (however slight), WAVE bumps per shipped feature wave, -dev is constant
+/// while the game is in development. Single source of truth: edit this one
+/// line in the same commit as any game change.
+pub const GAME_VERSION: &str = "0.1.00.50-dev";
+
+#[wasm_bindgen]
+pub fn game_version() -> String {
+    GAME_VERSION.to_string()
+}
+
 #[wasm_bindgen]
 pub fn core_version() -> String {
-    format!("woa-core {}", env!("CARGO_PKG_VERSION"))
+    format!("woa-core {GAME_VERSION}")
 }
 
 /// Wire-code spec for the snapshot transport — the client asserts its
