@@ -99,6 +99,10 @@ pub enum Command {
     /// 2×2 block (or vanishes on the surface), an egg is placed on the
     /// adjacent empty cell, food is dropped as one unit (≤ cap per cell).
     Drop { ant: u32, tx: u32, ty: u32 },
+    /// Squad control (X-menu): the issuing ant is the leader. All/One
+    /// recruit nearby ants, Soldiers recruits every soldier, Release
+    /// disbands the leader's squad.
+    Follow { leader: u32, mode: FollowMode },
     /// Pick up an adjacent egg (keeps its hatch state; carried eggs ride the
     /// carrier and cannot hatch).
     PickEgg { ant: u32, egg: u32 },
@@ -106,6 +110,19 @@ pub enum Command {
 
 /// Spawnable entities for dev tools. Natural layers: spiders/food on the
 /// surface, ants/eggs underground (matching real game behavior).
+/// Squad-follow recruitment mode (X-menu).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FollowMode {
+    /// Every ant within sight of the leader joins the squad.
+    All,
+    /// The nearest ant not already in the squad joins.
+    One,
+    /// Every soldier joins the squad.
+    Soldiers,
+    /// The leader's squad disbands back to idle.
+    Release,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DevSpawn {
     Worker,

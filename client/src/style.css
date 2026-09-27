@@ -396,3 +396,37 @@ body {
 #coords.hidden {
   display: none;
 }
+
+/* X-menu squad panel */
+#squadmenu {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  background: rgba(14, 12, 9, 0.92);
+  border: 1px solid #6a5a3a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 40;
+}
+#squadmenu .sq-title {
+  color: #d9c27a;
+  font: bold 12px monospace;
+  letter-spacing: 2px;
+  text-align: center;
+}
+#squadmenu .sq-btn {
+  background: #2a2318;
+  color: #e8dfc8;
+  border: 1px solid #5a4c30;
+  border-radius: 5px;
+  padding: 6px 10px;
+  font: 12px monospace;
+  cursor: pointer;
+  text-align: left;
+}
+#squadmenu .sq-btn:hover { background: #3a3020; }
+#squadmenu .sq-btn b { color: #d9c27a; margin-right: 6px; }

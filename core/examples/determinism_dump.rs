@@ -7,7 +7,7 @@
 
 use std::fs;
 
-use woa_core::{Command, Config, DevSpawn, Sim, Team};
+use woa_core::{Command, Config, DevSpawn, FollowMode, Sim, Team};
 
 enum Step {
     Cmd(Command),
@@ -76,6 +76,22 @@ fn main() {
                 "pick-egg" => Step::Cmd(Command::PickEgg {
                     ant: ant()?,
                     egg: obj.get("target")?.as_u64()? as u32,
+                }),
+                "follow-all" => Step::Cmd(Command::Follow {
+                    leader: ant()?,
+                    mode: FollowMode::All,
+                }),
+                "follow-one" => Step::Cmd(Command::Follow {
+                    leader: ant()?,
+                    mode: FollowMode::One,
+                }),
+                "follow-soldiers" => Step::Cmd(Command::Follow {
+                    leader: ant()?,
+                    mode: FollowMode::Soldiers,
+                }),
+                "follow-release" => Step::Cmd(Command::Follow {
+                    leader: ant()?,
+                    mode: FollowMode::Release,
                 }),
                 "dev-spawn" => Step::Spawn(
                     DevSpawn::parse(obj.get("kind")?.as_str()?)?,

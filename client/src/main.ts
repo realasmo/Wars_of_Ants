@@ -30,6 +30,7 @@ declare global {
       killspiders: () => void;
       pause: () => void;
       gait: (id: number) => Record<string, unknown> | null;
+      squad: (mode: number) => boolean;
       parts: (id: number) => Record<string, unknown> | null;
     };
   }
@@ -90,6 +91,7 @@ async function main(): Promise<void> {
     killspiders: () => game.debugKillSpiders(),
     pause: () => game.togglePause(),
     gait: (id) => game.debugAnt(id),
+    squad: (mode) => game.debugSquad(mode),
     parts: (id) => game.debugAntParts(id),
   };
 }

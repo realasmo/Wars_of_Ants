@@ -1,5 +1,6 @@
 use woa_core::{
-    Activity, AntSnap, Carry, Caste, Command, DevSpawn, EggSnap, EntitySnap, FoodKind, FoodRole,
+    Activity, AntSnap, Carry, Caste, Command, DevSpawn, EggSnap, EntitySnap, FollowMode, FoodKind,
+    FoodRole,
     Layer, Phase, Sim, Team, DIRT, EMPTY, SOURCES, START_FOOD,
 };
 
@@ -1485,4 +1486,73 @@ fn wood_and_wool_build_pantry_and_nursery_blocks() {
         matches!(e, EntitySnap::Collectible(c) if c.variant == 1)
     });
     assert!(still_there, "dropped wool lies on the ground again");
+}
+
+#[test]
+fn squad_follow_recruits_and_releases() {
+    let mut s = founded(42);
+    let q = queen(&s);
+    let wid1 = s.dev_spawn(DevSpawn::Worker, q.x + 1.0, q.y);
+    let wid2 = s.dev_spawn(DevSpawn::Worker, q.x - 1.0, q.y);
+    let _sid = s.dev_spawn(DevSpawn::Soldier, q.x, q.y + 1.0);
+    let follow_count = |s: &Sim, leader: u32| {
+        s.snapshot()
+            .iter()
+            .filter(|e| matches!(e, EntitySnap::Ant(a) if a.following == Some(leader)))
+            .count()
+    };
+    // all in sight joins nearby workers (and never the queen)
+    assert!(s.issue(Command::Follow {
+        leader: wid1,
+        mode: FollowMode::All
+    }));
+    let n = follow_count(&s, wid1);
+    assert!(n >= 2, "all-in-sight recruits nearby workers (got {n})");
+    let q_follow = s
+        .snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Ant(a) if a.caste == Caste::Queen => Some(a.following),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(q_follow, None, "the queen never follows");
+    // followers converge on the leader over time
+    assert!(s.issue(Command::Move {
+        ant: wid1,
+        x: q.x + 6.0,
+        y: q.y
+    }));
+    for _ in 0..600 {
+        s.tick();
+    }
+    let snaps = s.snapshot();
+    let leader_pos = snaps
+        .iter()
+        .find_map(|e| match e {
+            EntitySnap::Ant(a) if a.id == wid1 => Some((a.x, a.y)),
+            _ => None,
+        })
+        .unwrap();
+    let d = snaps
+        .iter()
+        .find_map(|e| match e {
+            EntitySnap::Ant(a) if a.id == wid2 => {
+                Some(((a.x - leader_pos.0).abs() + (a.y - leader_pos.1).abs()) as f64)
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert!(d < 8.0, "follower keeps near the moving leader (d={d:.1})");
+    // release disbands; one mode joins exactly one
+    assert!(s.issue(Command::Follow {
+        leader: wid1,
+        mode: FollowMode::Release
+    }));
+    assert_eq!(follow_count(&s, wid1), 0, "release disbands the squad");
+    assert!(s.issue(Command::Follow {
+        leader: wid1,
+        mode: FollowMode::One
+    }));
+    assert_eq!(follow_count(&s, wid1), 1, "one mode joins exactly one ant");
 }

@@ -126,6 +126,8 @@ pub enum Job {
     /// Wander toward (x, y) looking for undiscovered sources.
     Scout(u32, u32),
     DigTile(u32, u32),
+    /// Squad follow: keep near the leader ant (X-menu, F3).
+    Follow(u32),
 }
 
 #[derive(Clone, Debug)]

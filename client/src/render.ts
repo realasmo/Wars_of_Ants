@@ -161,6 +161,8 @@ export class Renderer {
   private antLayers: AntLayers = { shadows: new Container(), legs: new Container(), bodies: new Container() };
   private sprites = new Map<number, EntityGfx>();
   private ring = new Graphics();
+  /** silver rings marking the player's squad (gold ring = leader) */
+  private squadRing = new Graphics();
   private entranceMarks: [Text, Text] = [new Text(''), new Text('')];
   private sim: Sim;
   cam = { x: 48, y: 8, zoom: 1 };
@@ -187,7 +189,7 @@ export class Renderer {
     const r = new Renderer(sim, app);
     host.appendChild(app.canvas);
     app.stage.addChild(r.world);
-    r.world.addChild(r.layerC[0], r.layerC[1], r.entities, r.ring);
+    r.world.addChild(r.layerC[0], r.layerC[1], r.entities, r.squadRing, r.ring);
     r.entities.addChild(r.antLayers.shadows, r.antLayers.legs, r.antLayers.bodies);
     r.layerC[0].addChild(r.tileG[0]);
     r.layerC[1].addChild(r.tileG[1]);
@@ -474,6 +476,18 @@ export class Renderer {
           frame.carry = ent.carry;
           e.ant.update(dt, frame);
         }
+      }
+    }
+    this.squadRing.clear();
+    if (playerAnt !== null) {
+      for (const s2 of this.sim.cur.values()) {
+        if (s2.kind === 'egg' || s2.kind === 'food' || s2.kind === 'source' || s2.kind === 'collectible' || s2.kind === 'spider') {
+          continue;
+        }
+        if (s2.following !== playerAnt || s2.layer !== this.activeLayer) continue;
+        this.squadRing
+          .circle(s2.x, s2.y, 0.5)
+          .stroke({ width: 0.05, color: 0xb8bcc4, alpha: 0.85 });
       }
     }
     this.ring.clear();

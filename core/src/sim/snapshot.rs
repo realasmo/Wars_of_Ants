@@ -52,7 +52,7 @@ pub fn food_code(kind: FoodKind) -> u8 {
 /// decoder assertion. Bump `snapshot` when the layout changes.
 pub fn snapshot_spec() -> String {
     format!(
-        "{{\"snapshot\":1,\"stride\":10,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE},\"collectible\":{KIND_COLLECTIBLE}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD},\"wood\":{CARRY_WOOD},\"wool\":{CARRY_WOOL}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}}}}"
+        "{{\"snapshot\":2,\"stride\":11,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE},\"collectible\":{KIND_COLLECTIBLE}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD},\"wood\":{CARRY_WOOD},\"wool\":{CARRY_WOOL}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}}}}"
     )
 }
 
@@ -83,6 +83,8 @@ pub struct AntSnap {
     pub carry: Carry,
     /// Starvation progress 0..=1 (queen only; 0 for everyone else).
     pub hunger: f64,
+    /// Squad leader this ant follows, if any (X-menu, F3).
+    pub following: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -222,6 +224,14 @@ impl Sim {
                     AntState::Harvesting { .. } => Activity::Harvesting,
                 }
             };
+            let following = self
+                .ecs
+                .get::<&WorkerAi>(ent)
+                .ok()
+                .and_then(|ai| match ai.job {
+                    Job::Follow(leader) => Some(leader),
+                    _ => None,
+                });
             v.push(EntitySnap::Ant(AntSnap {
                 id,
                 caste: ant.caste,
@@ -236,6 +246,7 @@ impl Sim {
                 } else {
                     0.0
                 },
+                following,
             }));
         }
         for (ent, (food, pos)) in self.ecs.query::<(&Food, &Pos)>().iter() {

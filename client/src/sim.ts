@@ -123,6 +123,11 @@ export class Sim {
     return this.sim.cmd_drop(id, tx, ty);
   }
 
+  /** Squad control (X-menu): mode 0 all-in-sight, 1 one, 2 soldiers, 3 release. */
+  follow(leader: number, mode: number): boolean {
+    return this.sim.cmd_follow(leader, mode);
+  }
+
   pickEgg(id: number, egg: number): boolean {
     return this.sim.cmd_pick_egg(id, egg);
   }

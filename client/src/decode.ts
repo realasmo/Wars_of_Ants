@@ -78,6 +78,8 @@ export interface AntEnt extends Base {
   carry: Carry;
   /** Starvation progress 0..1 (queen only). */
   hunger: number;
+  /** Squad leader this ant follows (X-menu), or null. */
+  following: number | null;
 }
 
 /** Dropped or banked food pile. */
@@ -147,7 +149,7 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
   const n = raw[3];
   const ents: Ent[] = [];
   for (let i = 0; i < n; i++) {
-    const o = 4 + i * 10;
+    const o = 4 + i * 11;
     const id = raw[o];
     const kindCode = raw[o + 1];
     const layer = raw[o + 2];
@@ -158,6 +160,7 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
     const p2 = raw[o + 7];
     const p3 = raw[o + 8];
     const p4 = raw[o + 9];
+    const p5 = raw[o + 10];
     if (kindCode === KINDS.queen || kindCode === KINDS.worker || kindCode === KINDS.soldier) {
       const carryTag = p2;
       const carry: Carry =
@@ -178,6 +181,7 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
         hp: p1,
         carry,
         hunger: p4,
+        following: p5 > 0.5 ? p5 - 1 : null,
       });
     } else if (kindCode === KINDS.food) {
       ents.push({

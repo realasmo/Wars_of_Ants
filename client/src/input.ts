@@ -18,6 +18,7 @@ export class Input {
   onCycleAnt: () => void = () => {};
   onToggleLayer: () => void = () => {};
   onToggleDev: () => void = () => {};
+  onSquadKey: (code: string) => void = () => {};
   onTogglePerf: () => void = () => {};
   onEscape: () => void = () => {};
   /** Wheel zoom; anchored at the followed ant while controlling. */
@@ -127,8 +128,15 @@ export class Input {
       } else if (e.code === 'F3') {
         e.preventDefault();
         this.onTogglePerf();
+      } else if (e.code === 'KeyX') {
+        this.onSquadKey('KeyX');
       } else if (e.code === 'Escape') {
         this.onEscape();
+      } else if (
+        (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3' || e.code === 'Digit4') &&
+        !document.getElementById('squadmenu')?.classList.contains('hidden')
+      ) {
+        this.onSquadKey(e.code);
       }
     });
 

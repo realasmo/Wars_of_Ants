@@ -371,6 +371,32 @@ impl Sim {
                         self.set_job(id, Job::Idle);
                     }
                 }
+                Job::Follow(leader) => {
+                    // squad follow: stay near the leader (cross-layer via the
+                    // entrance); manual commands naturally leave the squad
+                    let Some(&lent) = self.ids.get(&leader) else {
+                        self.set_job(id, Job::Idle);
+                        continue;
+                    };
+                    let linfo = {
+                        let mut lq = self.ecs.query_one::<(&Pos, &AntState)>(lent).unwrap();
+                        lq.get().map(|(lpos, _)| (lpos.layer, tile_of(lpos.p)))
+                    };
+                    let Some((llayer, ltile)) = linfo else {
+                        self.set_job(id, Job::Idle);
+                        continue;
+                    };
+                    if llayer == pos.layer {
+                        if chebyshev(tile_of(pos.p), ltile) > 2 {
+                            if !self.route(id, llayer, ltile) {
+                                self.set_retry(id, 30);
+                            }
+                        }
+                        // close enough: hold position with the squad
+                    } else if !self.route(id, llayer, ltile) {
+                        self.set_retry(id, 30);
+                    }
+                }
                 Job::Fetch(fid) => {
                     if !self.ids.contains_key(&fid) {
                         self.set_job(id, Job::Idle);

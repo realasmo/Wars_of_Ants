@@ -1,7 +1,7 @@
 //! Player commands: validation, walk-to-act intents, routing, and the
 //! founding ritual.
 
-use super::{Command, Phase, Sim};
+use super::{Command, FollowMode, Phase, Sim};
 use crate::balance::*;
 use crate::components::*;
 use crate::math::Vec2;
@@ -168,6 +168,7 @@ impl Sim {
                 }
                 true
             }
+            Command::Follow { leader, mode } => self.apply_follow(leader, mode),
             Command::PickEgg { ant, egg } => {
                 if !self.is_ant(ant) {
                     return false;
@@ -607,6 +608,113 @@ impl Sim {
                         true
                     }
                 }
+            }
+        }
+    }
+
+    /// Squad recruitment (X-menu). Sight range matches source discovery so
+    /// "visible range" is one consistent rule.
+    pub(crate) fn apply_follow(&mut self, leader: u32, mode: FollowMode) -> bool {
+        if !self.is_ant(leader) {
+            return false;
+        }
+        let (ltile, llayer) = {
+            let Some(&ent) = self.ids.get(&leader) else { return false };
+            match self.ecs.query_one::<(&Pos,)>(ent).unwrap().get() {
+                Some(q) => (tile_of(q.0.p), q.0.layer),
+                None => return false,
+            }
+        };
+        let ids = self.ant_ids();
+        match mode {
+            FollowMode::Release => {
+                let mut released = 0;
+                for id in ids {
+                    if id == leader {
+                        continue;
+                    }
+                    if let Some(&ent) = self.ids.get(&id) {
+                        let follows = self
+                            .ecs
+                            .get::<&WorkerAi>(ent)
+                            .map(|ai| matches!(ai.job, Job::Follow(l) if l == leader))
+                            .unwrap_or(false);
+                        if follows {
+                            self.set_job(id, Job::Idle);
+                            released += 1;
+                        }
+                    }
+                }
+                self.ev(format!("ant #{leader} released {released} followers"));
+                released > 0
+            }
+            FollowMode::Soldiers => {
+                let mut joined = 0;
+                for id in ids {
+                    if id == leader {
+                        continue;
+                    }
+                    if let Some(&ent) = self.ids.get(&id) {
+                        let is_soldier = self
+                            .ecs
+                            .get::<&Ant>(ent)
+                            .map(|a| a.caste == Caste::Soldier)
+                            .unwrap_or(false);
+                        if is_soldier {
+                            self.set_job(id, Job::Follow(leader));
+                            joined += 1;
+                        }
+                    }
+                }
+                self.ev(format!("ant #{leader} leads {joined} soldiers"));
+                joined > 0
+            }
+            FollowMode::All | FollowMode::One => {
+                // candidates: same layer, within sight, not the leader
+                let mut cands: Vec<(u32, u32)> = Vec::new();
+                for id in ids {
+                    if id == leader {
+                        continue;
+                    }
+                    let Some(&ent) = self.ids.get(&id) else { continue };
+                    let info = {
+                        let mut aq = self
+                            .ecs
+                            .query_one::<(&Ant, &Pos, &WorkerAi)>(ent)
+                            .unwrap();
+                        aq.get().map(|(ant, pos, ai)| {
+                            (
+                                ant.caste,
+                                pos.layer,
+                                tile_of(pos.p),
+                                matches!(ai.job, Job::Follow(l) if l == leader),
+                            )
+                        })
+                    };
+                    let Some((caste, layer, tile, follows)) = info else {
+                        continue;
+                    };
+                    // the queen never joins a squad (she is player-driven)
+                    if caste == Caste::Queen || layer != llayer || follows {
+                        continue;
+                    }
+                    let d = chebyshev(tile, ltile);
+                    if d <= SIGHT_RANGE {
+                        cands.push((d, id));
+                    }
+                }
+                cands.sort_by_key(|(d, _)| *d);
+                let take = match mode {
+                    FollowMode::One => 1,
+                    _ => cands.len(),
+                };
+                let mut joined = 0;
+                for (_, id) in cands.into_iter().take(take) {
+                    self.set_job(id, Job::Follow(leader));
+                    joined += 1;
+                }
+                self.ev(format!("ant #{leader} leads {joined} followers"));
+                joined > 0
             }
         }
     }

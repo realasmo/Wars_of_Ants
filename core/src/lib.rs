@@ -9,8 +9,8 @@ mod world;
 pub use balance::{SourceSpec, UnitStats, SOURCES, START_FOOD};
 pub use components::{AntState, Carry, Caste, FoodKind, Layer, WorkerAi};
 pub use sim::{
-    Activity, AntSnap, Colony, Command, Config, DevSpawn, EggSnap, EntitySnap, FoodRole,
-    FoodSnap, Phase, Sim, SpiderSnap, Team, DT, TPS,
+    Activity, AntSnap, Colony, Command, Config, DevSpawn, EggSnap, EntitySnap, FollowMode,
+    FoodRole, FoodSnap, Phase, Sim, SpiderSnap, Team, DT, TPS,
 };
 pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK, SOIL_NONE, SOIL_ORANGE, SOIL_SILVER};
 
@@ -93,6 +93,18 @@ impl WoaSim {
     pub fn cmd_dump(&mut self, ant: u32, tx: u32, ty: u32) -> bool {
         // legacy name for dropping the carried item (dirt semantics kept)
         self.inner.issue(Command::Drop { ant, tx, ty })
+    }
+
+    /// Squad control (X-menu): `mode` 0 all-in-sight, 1 nearest one,
+    /// 2 all soldiers, 3 release. The issuing ant leads.
+    pub fn cmd_follow(&mut self, leader: u32, mode: u32) -> bool {
+        let mode = match mode {
+            0 => FollowMode::All,
+            1 => FollowMode::One,
+            2 => FollowMode::Soldiers,
+            _ => FollowMode::Release,
+        };
+        self.inner.issue(Command::Follow { leader, mode })
     }
 
     pub fn cmd_drop(&mut self, ant: u32, tx: u32, ty: u32) -> bool {
@@ -220,19 +232,19 @@ impl WoaSim {
     }
 
     /// Flat snapshot transport: `[tick, dead, carbs, count]` header, then
-    /// stride-10 records `[id, kind, layer, x, y, p0..p4]`. The positional
+    /// stride-11 records `[id, kind, layer, x, y, p0..p5]`. The positional
     /// codes are single-sourced in `sim::snapshot` and exported through
     /// `snapshot_spec()` — the client asserts its decoder against that spec
-    /// at boot. Layout version 1 (see spec).
+    /// at boot. Layout version 2 (see spec).
     pub fn snapshot(&self) -> Vec<f64> {
         use sim::snapshot as wire; // the wire-code module (crate-private)
         let snaps = self.inner.snapshot();
-        let mut v = Vec::with_capacity(4 + snaps.len() * 10);
+        let mut v = Vec::with_capacity(4 + snaps.len() * 11);
         v.push(self.inner.tick as f64);
         v.push(self.inner.colony.dead as u8 as f64);
         v.push(self.inner.colony.carbs as f64);
         v.push(snaps.len() as f64);
-        let mut rec = |id: u32, kind: u8, layer: u8, x: f64, y: f64, p: [f64; 5]| {
+        let mut rec = |id: u32, kind: u8, layer: u8, x: f64, y: f64, p: [f64; 6]| {
             v.extend([
                 id as f64,
                 kind as f64,
@@ -244,6 +256,7 @@ impl WoaSim {
                 p[2],
                 p[3],
                 p[4],
+                p[5],
             ]);
         };
         for s in snaps {
@@ -282,6 +295,7 @@ impl WoaSim {
                             tag as f64,
                             data,
                             a.hunger,
+                            a.following.map(|l| l as f64 + 1.0).unwrap_or(0.0),
                         ],
                     );
                 }
@@ -296,6 +310,7 @@ impl WoaSim {
                             f.amount as f64,
                             wire::food_code(f.kind) as f64,
                             src as f64,
+                            0.0,
                             0.0,
                             0.0,
                         ],
@@ -319,6 +334,7 @@ impl WoaSim {
                                 spoil,
                                 0.0,
                                 0.0,
+                                0.0,
                             ],
                         );
                     }
@@ -335,6 +351,7 @@ impl WoaSim {
                         if e.carried { 1.0 } else { 0.0 },
                         0.0,
                         0.0,
+                        0.0,
                     ],
                 ),
                 EntitySnap::Spider(p) => rec(
@@ -349,6 +366,7 @@ impl WoaSim {
                         0.0,
                         0.0,
                         0.0,
+                        0.0,
                     ],
                 ),
                 EntitySnap::Collectible(c) => rec(
@@ -357,7 +375,7 @@ impl WoaSim {
                     c.layer as u8,
                     c.x,
                     c.y,
-                    [c.variant as f64, 0.0, 0.0, 0.0, 0.0],
+                    [c.variant as f64, 0.0, 0.0, 0.0, 0.0, 0.0],
                 ),
             }
         }

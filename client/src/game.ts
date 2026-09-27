@@ -56,6 +56,7 @@ export class Game {
     this.input.onToggleDev = () => this.dev.toggle();
     this.input.onTogglePerf = () => this.hud.togglePerf();
     this.input.onEscape = () => this.dev.setPlacement(null);
+    this.input.onSquadKey = (code) => this.squadKey(code);
     this.dev = new DevPanel({
       onFood: () => this.debugSetFood(50),
       onSuper: () => this.debugSetSuper(5),
@@ -64,6 +65,11 @@ export class Game {
       onFF: () => this.debugStep(200),
       onPauseState: () => this.paused,
       onCoords: () => this.toggleCoords(),
+    });
+    document.querySelectorAll('#squadmenu .sq-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.issueFollow(Number((b as HTMLElement).dataset.sq));
+      });
     });
     this.playerAnt = this.initialAnt();
     this.log.push({ type: 'start', seed, workers: sim.workers().length });
@@ -115,6 +121,44 @@ export class Game {
   debugKey(code: string): void {
     if (code === 'Tab') this.toggleLayer();
     else if (code === 'KeyC') this.cycleAnt();
+  }
+
+  // --- squad X-menu (F3 wave) ---
+  private squadOpen = false;
+
+  private squadKey(code: string): void {
+    if (code === 'KeyX') {
+      // worker (or soldier) leaders only — the queen's X-menu is the F4
+      // brood menu, not built yet
+      const me = this.playerAnt !== null ? this.sim.ant(this.playerAnt) : undefined;
+      if (me === undefined || me.kind === 'queen') return;
+      this.squadOpen = !this.squadOpen;
+      document.getElementById('squadmenu')?.classList.toggle('hidden', !this.squadOpen);
+      return;
+    }
+    const map: Record<string, number> = { Digit1: 0, Digit2: 1, Digit3: 3, Digit4: 2 };
+    const mode = map[code];
+    if (mode === undefined) return;
+    this.issueFollow(mode);
+  }
+
+  private issueFollow(mode: number): void {
+    if (this.playerAnt === null || this.sim.dead || this.replay !== null) return;
+    const acts = ['follow-all', 'follow-one', 'follow-soldiers', 'follow-release'];
+    if (this.sim.follow(this.playerAnt, mode)) {
+      this.log.push({ type: 'cmd', act: acts[mode], ant: this.playerAnt });
+    }
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+    this.squadOpen = false;
+    document.getElementById('squadmenu')?.classList.add('hidden');
+  }
+
+  /** e2e hook: open/click the squad menu programmatically. */
+  debugSquad(mode: number): boolean {
+    if (this.playerAnt === null) return false;
+    const ok = this.sim.follow(this.playerAnt, mode);
+    if (ok) this.log.push({ type: 'cmd', act: ['follow-all', 'follow-one', 'follow-soldiers', 'follow-release'][mode], ant: this.playerAnt });
+    return ok;
   }
 
   debugLog(): Record<string, unknown> {
@@ -820,6 +864,10 @@ export class Game {
       else if (c.act === 'dump' || c.act === 'drop')
         this.sim.drop(c.ant ?? 0, c.tx ?? 0, c.ty ?? 0);
       else if (c.act === 'pick-egg') this.sim.pickEgg(c.ant ?? 0, c.target ?? 0);
+      else if (c.act === 'follow-all') this.sim.follow(c.ant ?? 0, 0);
+      else if (c.act === 'follow-one') this.sim.follow(c.ant ?? 0, 1);
+      else if (c.act === 'follow-soldiers') this.sim.follow(c.ant ?? 0, 2);
+      else if (c.act === 'follow-release') this.sim.follow(c.ant ?? 0, 3);
       else if (c.act === 'dev-spawn') this.sim.devSpawn(String(c.kind), c.x ?? 0, c.y ?? 0);
       else if (c.act === 'dev-food') this.sim.devSetFood(Number(c.n ?? 0));
       else if (c.act === 'dev-super') this.sim.devSetSuper(Number(c.n ?? 0));
