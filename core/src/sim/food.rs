@@ -3,7 +3,7 @@
 
 use super::Sim;
 use crate::balance::{FOOD_CELL_CAP, SourceSpec};
-use crate::components::{Carry, Food, FoodKind, Layer, Pos};
+use crate::components::{Carry, Collectible, CollectibleVariant, Food, FoodKind, Layer, Pos};
 use crate::math::Vec2;
 use crate::path::tile_of;
 use crate::world::{tile_center, EMPTY};
@@ -231,5 +231,45 @@ impl Sim {
         let mut qo = self.ecs.query_one::<(&Food, &Pos)>(ent).ok()?;
         let q = qo.get()?;
         Some((tile_of(q.1.p), q.0.amount))
+    }
+}
+
+impl Sim {
+    /// Spawn a nest-building collectible on the surface.
+    pub(crate) fn spawn_collectible(&mut self, p: Vec2, variant: CollectibleVariant) -> u32 {
+        let id = self.fresh_id();
+        let ent = self.ecs.spawn((
+            Collectible { variant },
+            Pos { p, layer: Layer::Surface },
+        ));
+        self.ids.insert(id, ent);
+        id
+    }
+
+    /// A collectible lying on this surface tile, if any.
+    pub(crate) fn collectible_on_tile(
+        &self,
+        tile: (u32, u32),
+    ) -> Option<(u32, CollectibleVariant)> {
+        for (&id, &ent) in self.ids.iter() {
+            let Ok(c) = self.ecs.get::<&Collectible>(ent) else { continue };
+            let Ok(pos) = self.ecs.get::<&Pos>(ent) else { continue };
+            if pos.layer == Layer::Surface && tile_of(pos.p) == tile {
+                return Some((id, c.variant));
+            }
+        }
+        None
+    }
+
+    /// Instant pickup: the collectible leaves the map and fills mandibles.
+    pub(crate) fn take_collectible(&mut self, id: u32, variant: CollectibleVariant) -> Carry {
+        if let Some(&ent) = self.ids.get(&id) {
+            let _ = self.ecs.despawn(ent);
+            self.ids.remove(&id);
+        }
+        match variant {
+            CollectibleVariant::Wood => Carry::Wood,
+            CollectibleVariant::Wool => Carry::Wool,
+        }
     }
 }

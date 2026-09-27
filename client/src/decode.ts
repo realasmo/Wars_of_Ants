@@ -19,6 +19,7 @@ const KINDS = {
   spider: 4,
   food: 5,
   source: 6,
+  collectible: 7,
 } as const;
 
 const ACTIVITY = {
@@ -35,6 +36,8 @@ const CARRY = {
   dirt: 1,
   egg: 2,
   food: 3,
+  wood: 4,
+  wool: 5,
 } as const;
 
 const FOOD = {
@@ -55,7 +58,9 @@ export type Carry =
   | { t: 'none' }
   | { t: 'dirt'; blocks: number }
   | { t: 'egg' }
-  | { t: 'food'; food: FoodName };
+  | { t: 'food'; food: FoodName }
+  | { t: 'wood' }
+  | { t: 'wool' };
 
 interface Base {
   id: number;
@@ -101,6 +106,12 @@ export interface EggEnt extends Base {
   carried: boolean;
 }
 
+/** Wet wood / dry wool collectible (nest-building, F2). */
+export interface CollectibleEnt extends Base {
+  kind: 'collectible';
+  variant: 'wood' | 'wool';
+}
+
 export interface SpiderEnt extends Base {
   kind: 'spider';
   /** HP fraction 0..1. */
@@ -108,7 +119,7 @@ export interface SpiderEnt extends Base {
   hunting: boolean;
 }
 
-export type Ent = AntEnt | FoodEnt | SourceEnt | EggEnt | SpiderEnt;
+export type Ent = AntEnt | FoodEnt | SourceEnt | EggEnt | SpiderEnt | CollectibleEnt;
 
 export interface Snapshot {
   tick: number;
@@ -200,6 +211,15 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
         hatchLeft: p0,
         caste: p1 > 0.5 ? 'soldier' : 'worker',
         carried: p2 > 0.5,
+      });
+    } else if (kindCode === KINDS.collectible) {
+      ents.push({
+        id,
+        kind: 'collectible',
+        layer,
+        x,
+        y,
+        variant: p0 > 0.5 ? 'wool' : 'wood',
       });
     } else if (kindCode === KINDS.spider) {
       ents.push({

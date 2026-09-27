@@ -115,6 +115,10 @@ pub enum DevSpawn {
     Spider,
     Food,
     SuperFood,
+    /// Wet wood collectible (food-storage block).
+    Wood,
+    /// Dry wool collectible (egg-friendly block).
+    Wool,
     /// A map source by visual type 1..6.
     Source(u8),
 }
@@ -129,6 +133,8 @@ impl DevSpawn {
             "spider" => DevSpawn::Spider,
             "food" => DevSpawn::Food,
             "super" => DevSpawn::SuperFood,
+            "wood" => DevSpawn::Wood,
+            "wool" => DevSpawn::Wool,
             "moss" => DevSpawn::Source(1),
             "mushroom" => DevSpawn::Source(2),
             "raspberry" => DevSpawn::Source(3),
@@ -244,6 +250,14 @@ impl Sim {
             DevSpawn::Spider => self.spawn_spider(p),
             DevSpawn::Food => self.spawn_food(p, PILE_AMOUNT, FoodKind::Green),
             DevSpawn::SuperFood => self.spawn_food(p, SUPER_PER_SPIDER, FoodKind::Super),
+            DevSpawn::Wood => {
+                let id = self.spawn_collectible(Vec2::new(x, y), CollectibleVariant::Wood);
+                return id;
+            }
+            DevSpawn::Wool => {
+                let id = self.spawn_collectible(Vec2::new(x, y), CollectibleVariant::Wool);
+                return id;
+            }
             DevSpawn::Source(src) => match SOURCES.iter().find(|s| s.src == src) {
                 Some(spec) => {
                     let amount = (spec.amount.0 + spec.amount.1) / 2;

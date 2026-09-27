@@ -102,6 +102,10 @@ pub const SOURCES_NEAR_NEST: u32 = 2;
 pub const SOURCE_MIN_GAP: u32 = 8;
 /// Protein dropped by a killed spider.
 pub const PROTEIN_PER_SPIDER: u32 = 8;
+/// Surface collectibles per founding map: wet wood (food-storage block)
+/// and dry wool (egg-friendly block).
+pub const WOOD_COUNT: u32 = 4;
+pub const WOOL_COUNT: u32 = 4;
 
 // --- soil / food logistics ---
 

@@ -294,6 +294,8 @@ export const CARRY_MANDIBLE_OPEN: Record<string, number> = {
   dirt: 0.16,
   food: 0.2,
   egg: 0.26,
+  wood: 0.22,
+  wool: 0.24,
 };
 
 /** Bake resolution: texture pixels per thorax unit. 128 keeps parts crisp at

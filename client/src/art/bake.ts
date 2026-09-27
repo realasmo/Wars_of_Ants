@@ -276,6 +276,27 @@ export function itemPart(renderer: PixiRenderer, kind: 'dirt' | 'egg' | string):
       rx: 0.13,
       ry: 0.2,
     };
+  } else if (kind === 'wood') {
+    part = {
+      ...bake(renderer, (g) => {
+        g.roundRect(u(-0.26), u(-0.09), u(0.52), u(0.18), u(0.07)).fill(0x5e4326)
+          .stroke({ width: o, color: 0x33230f });
+        g.circle(u(-0.26), 0, u(0.085)).fill(0x8a6d4a).stroke({ width: o, color: 0x33230f });
+        g.circle(u(0.26), 0, u(0.085)).fill(0x8a6d4a).stroke({ width: o, color: 0x33230f });
+      }),
+      rx: 0.28,
+      ry: 0.14,
+    };
+  } else if (kind === 'wool') {
+    part = {
+      ...bake(renderer, (g) => {
+        g.circle(u(-0.1), u(0.02), u(0.12)).fill(0xe4ded2).stroke({ width: o, color: 0x9a917f });
+        g.circle(u(0.09), u(0.05), u(0.13)).fill(0xded6c8).stroke({ width: o, color: 0x9a917f });
+        g.circle(u(0), u(-0.08), u(0.1)).fill(0xe9e3d8).stroke({ width: o, color: 0x9a917f });
+      }),
+      rx: 0.24,
+      ry: 0.2,
+    };
   } else {
     const color = FOOD_COLORS[kind] ?? FOOD_COLORS.green;
     part = {

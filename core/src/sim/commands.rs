@@ -39,7 +39,7 @@ impl Sim {
                 let hands_diggable = match carrying {
                     Carry::None => true,
                     Carry::Dirt { blocks } => blocks < DIRT_CAPACITY,
-                    Carry::Egg | Carry::Food(_) => false,
+                    Carry::Egg | Carry::Food(_) | Carry::Wood | Carry::Wool => false,
                 };
                 let queen_may_dig = caste == Caste::Queen
                     && self.colony.founding
@@ -426,7 +426,7 @@ impl Sim {
         };
         match carrying {
             Carry::None => false,
-            Carry::Dirt { .. } => match layer {
+            Carry::Dirt { .. } | Carry::Wood | Carry::Wool => match layer {
                 Layer::Surface => true,
                 Layer::Underground => {
                     let (bx, by) = block_of(tx, ty);
@@ -443,13 +443,13 @@ impl Sim {
     /// carried items walk to the tile itself.
     pub(crate) fn route_for_drop(&mut self, ant: u32, tx: u32, ty: u32) -> bool {
         let layer = self.ant_layer(ant);
-        let dirt = self
+        let blockwise = self
             .ids
             .get(&ant)
             .and_then(|&e| self.ecs.get::<&Carry>(e).ok())
-            .map(|c| matches!(&*c, Carry::Dirt { .. }))
+            .map(|c| matches!(&*c, Carry::Dirt { .. } | Carry::Wood | Carry::Wool))
             .unwrap_or(false);
-        if layer == Layer::Underground && dirt {
+        if layer == Layer::Underground && blockwise {
             let (bx, by) = block_of(tx, ty);
             self.route_to_block(ant, bx, by)
         } else {
@@ -558,6 +558,55 @@ impl Sim {
                     *q = Carry::None;
                 }
                 true
+            }
+            Carry::Wood | Carry::Wool => {
+                // nest-building collectibles: underground they convert one
+                // fully-empty block into food-storage (wood/silver) or
+                // egg-friendly (wool/orange) soil; on the surface they are
+                // simply set back down for later
+                let variant = match carrying {
+                    Carry::Wood => CollectibleVariant::Wood,
+                    _ => CollectibleVariant::Wool,
+                };
+                match layer {
+                    Layer::Surface => {
+                        if !self.grid_of(layer).in_bounds(tx, ty)
+                            || chebyshev(self.ant_tile(ant), (tx, ty)) > 1
+                        {
+                            return false;
+                        }
+                        self.spawn_collectible(tile_center(tx, ty), variant);
+                        if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                            *q = Carry::None;
+                        }
+                        true
+                    }
+                    Layer::Underground => {
+                        let (bx, by) = block_of(tx, ty);
+                        if !self.block_in_bounds(bx, by)
+                            || !self.block_empty(bx, by)
+                            || !self.block_adjacent(ant, bx, by)
+                        {
+                            return false;
+                        }
+                        let soil = match variant {
+                            CollectibleVariant::Wood => crate::world::SOIL_SILVER,
+                            CollectibleVariant::Wool => crate::world::SOIL_ORANGE,
+                        };
+                        self.set_soil_block(Layer::Underground, bx, by, soil);
+                        self.ev(format!(
+                            "ant #{ant} built a {} block at ({bx},{by})",
+                            match variant {
+                                CollectibleVariant::Wood => "food-storage",
+                                CollectibleVariant::Wool => "nursery",
+                            }
+                        ));
+                        if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                            *q = Carry::None;
+                        }
+                        true
+                    }
+                }
             }
         }
     }

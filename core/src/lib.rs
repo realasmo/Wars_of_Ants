@@ -12,7 +12,7 @@ pub use sim::{
     Activity, AntSnap, Colony, Command, Config, DevSpawn, EggSnap, EntitySnap, FoodRole,
     FoodSnap, Phase, Sim, SpiderSnap, Team, DT, TPS,
 };
-pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK};
+pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK, SOIL_NONE, SOIL_ORANGE, SOIL_SILVER};
 
 use wasm_bindgen::prelude::*;
 
@@ -267,6 +267,8 @@ impl WoaSim {
                         Carry::Dirt { blocks } => (wire::CARRY_DIRT, blocks as f64),
                         Carry::Egg => (wire::CARRY_EGG, 0.0),
                         Carry::Food(f) => (wire::CARRY_FOOD, wire::food_code(f) as f64),
+                        Carry::Wood => (wire::CARRY_WOOD, 0.0),
+                        Carry::Wool => (wire::CARRY_WOOL, 0.0),
                     };
                     rec(
                         a.id,
@@ -348,6 +350,14 @@ impl WoaSim {
                         0.0,
                         0.0,
                     ],
+                ),
+                EntitySnap::Collectible(c) => rec(
+                    c.id,
+                    wire::KIND_COLLECTIBLE,
+                    c.layer as u8,
+                    c.x,
+                    c.y,
+                    [c.variant as f64, 0.0, 0.0, 0.0, 0.0],
                 ),
             }
         }

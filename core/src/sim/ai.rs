@@ -148,7 +148,14 @@ impl Sim {
                 // mandibles → visibly work it; a full haul banks on silver
                 // soil (pantry cells) when she walks over one
                 if carrying == Carry::None && pos.layer == Layer::Surface {
-                    if let Some(fid) = self.food_on_tile(tile_of(pos.p)) {
+                    if let Some((cid, variant)) = self.collectible_on_tile(tile_of(pos.p)) {
+                        let carry = self.take_collectible(cid, variant);
+                        if let Some(&aent) = self.ids.get(&id) {
+                            if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+                                *q = carry;
+                            }
+                        }
+                    } else if let Some(fid) = self.food_on_tile(tile_of(pos.p)) {
                         self.set_state(id, AntState::Harvesting { target: fid });
                     }
                 } else if pos.layer == Layer::Underground && matches!(carrying, Carry::Food(_)) {
@@ -248,6 +255,16 @@ impl Sim {
             match job {
                 Job::Manual => {
                     if pos.layer == Layer::Surface && carrying == Carry::None {
+                        // collectibles (wood/wool) are instant pickups
+                        if let Some((cid, variant)) = self.collectible_on_tile(tile_of(pos.p)) {
+                            let carry = self.take_collectible(cid, variant);
+                            if let Some(&aent) = self.ids.get(&id) {
+                                if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+                                    *q = carry;
+                                }
+                            }
+                            continue;
+                        }
                         // stand on food → visibly work it (Harvesting drives
                         // the mandible animation and fills hands on pickup)
                         if let Some(fid) = self.food_on_tile(tile_of(pos.p)) {

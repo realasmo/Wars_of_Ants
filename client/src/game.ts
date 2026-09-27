@@ -571,7 +571,7 @@ export class Game {
         this.hud.flashHint(
           me.carry.t === 'egg'
             ? 'Mandibles hold the egg — place it on an EMPTY cell first (right-click), then dig'
-            : 'Mandibles full of food — drop it first, then dig',
+            : `Mandibles hold the ${me.carry.t} — place or drop it first, then dig`,
         );
         this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
         return;
@@ -626,6 +626,37 @@ export class Game {
           return;
         }
         // invalid placement → fall through (walk / entrance / dig-refused)
+      }
+      if (me !== undefined && (me.carry.t === 'wood' || me.carry.t === 'wool')) {
+        // nest-building collectibles: underground converts an empty adjacent
+        // block into food storage (wood/silver) or nursery soil (wool/orange);
+        // above ground they are set back down
+        if (me.layer === 1) {
+          const bx = tx & ~1;
+          const by = ty & ~1;
+          let emptyBlock = true;
+          for (let dy = 0; dy < 2; dy++) {
+            for (let dx = 0; dx < 2; dx++) {
+              if (this.sim.tileAt(1, bx + dx, by + dy) !== 0) emptyBlock = false;
+            }
+          }
+          if (emptyBlock && this.sim.drop(this.playerAnt, tx, ty)) {
+            this.log.push({
+              type: 'cmd',
+              act: 'drop',
+              ant: this.playerAnt,
+              tx,
+              ty,
+              note: me.carry.t === 'wood' ? 'food-storage block' : 'nursery block',
+            });
+            this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+            return;
+          }
+        } else if (this.sim.tileAt(0, tx, ty) === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
+          this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'set down' });
+          this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+          return;
+        }
       }
       if (me !== undefined && me.carry.t === 'food') {
         // resource unit: drop it on the empty target cell (spoils off

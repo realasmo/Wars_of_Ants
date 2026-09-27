@@ -16,6 +16,7 @@ pub const KIND_EGG: u8 = 3;
 pub const KIND_SPIDER: u8 = 4;
 pub const KIND_FOOD: u8 = 5;
 pub const KIND_SOURCE: u8 = 6;
+pub const KIND_COLLECTIBLE: u8 = 7;
 
 pub const ACT_IDLE: u8 = 0;
 pub const ACT_MOVING: u8 = 1;
@@ -23,6 +24,8 @@ pub const ACT_DIGGING: u8 = 2;
 pub const ACT_FIGHTING: u8 = 3;
 pub const ACT_FLYING: u8 = 4;
 pub const ACT_HARVESTING: u8 = 5;
+pub const CARRY_WOOD: u8 = 4;
+pub const CARRY_WOOL: u8 = 5;
 
 pub const CARRY_NONE: u8 = 0;
 pub const CARRY_DIRT: u8 = 1;
@@ -49,7 +52,7 @@ pub fn food_code(kind: FoodKind) -> u8 {
 /// decoder assertion. Bump `snapshot` when the layout changes.
 pub fn snapshot_spec() -> String {
     format!(
-        "{{\"snapshot\":1,\"stride\":10,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}}}}"
+        "{{\"snapshot\":1,\"stride\":10,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE},\"collectible\":{KIND_COLLECTIBLE}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD},\"wood\":{CARRY_WOOD},\"wool\":{CARRY_WOOL}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}}}}"
     )
 }
 
@@ -136,6 +139,7 @@ pub enum EntitySnap {
     Food(FoodSnap),
     Egg(EggSnap),
     Spider(SpiderSnap),
+    Collectible(CollectibleSnap),
 }
 
 impl EntitySnap {
@@ -145,6 +149,7 @@ impl EntitySnap {
             EntitySnap::Food(e) => e.id,
             EntitySnap::Egg(e) => e.id,
             EntitySnap::Spider(e) => e.id,
+            EntitySnap::Collectible(e) => e.id,
         }
     }
 
@@ -154,6 +159,7 @@ impl EntitySnap {
             EntitySnap::Food(e) => e.layer,
             EntitySnap::Egg(e) => e.layer,
             EntitySnap::Spider(e) => e.layer,
+            EntitySnap::Collectible(e) => e.layer,
         }
     }
 
@@ -163,8 +169,19 @@ impl EntitySnap {
             EntitySnap::Food(e) => (e.x, e.y),
             EntitySnap::Egg(e) => (e.x, e.y),
             EntitySnap::Spider(e) => (e.x, e.y),
+            EntitySnap::Collectible(e) => (e.x, e.y),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CollectibleSnap {
+    pub id: u32,
+    pub layer: crate::components::Layer,
+    pub x: f64,
+    pub y: f64,
+    /// 0 = wet wood (food-storage block), 1 = dry wool (egg-friendly block).
+    pub variant: u8,
 }
 
 pub(crate) fn source_name(src: u8) -> &'static str {
@@ -242,6 +259,19 @@ impl Sim {
                 amount: food.amount,
                 kind: food.kind,
                 role,
+            }));
+        }
+        for (ent, (coll, pos)) in self.ecs.query::<(&Collectible, &Pos)>().iter() {
+            let Some(&id) = rev.get(&ent) else { continue };
+            v.push(EntitySnap::Collectible(CollectibleSnap {
+                id,
+                layer: pos.layer,
+                x: pos.p.x,
+                y: pos.p.y,
+                variant: match coll.variant {
+                    CollectibleVariant::Wood => 0,
+                    CollectibleVariant::Wool => 1,
+                },
             }));
         }
         for (ent, (egg, pos)) in self.ecs.query::<(&Egg, &Pos)>().iter() {
@@ -378,6 +408,12 @@ impl Sim {
                         p.y,
                         p.hp,
                         self.canonical_predator(p.id),
+                    ));
+                }
+                EntitySnap::Collectible(c) => {
+                    s.push_str(&format!(
+                        "|K{} L{} {:+.4},{:+.4} v{}",
+                        c.id, c.layer as u8, c.x, c.y, c.variant
                     ));
                 }
             }

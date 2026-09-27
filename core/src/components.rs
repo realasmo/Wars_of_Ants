@@ -46,6 +46,24 @@ pub enum Carry {
     Egg,
     /// One unit of food.
     Food(FoodKind),
+    /// Wet wood — place in the nest to build one food-storage (silver) block.
+    Wood,
+    /// Dry wool — place in the nest to build one egg-friendly (orange) block.
+    Wool,
+}
+
+/// Surface collectibles hauled home for nest building (user TODO F2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollectibleVariant {
+    Wood,
+    Wool,
+}
+
+/// A map collectible lying on the ground until an ant with free mandibles
+/// picks it up by standing on it.
+#[derive(Clone, Copy, Debug)]
+pub struct Collectible {
+    pub variant: CollectibleVariant,
 }
 
 #[derive(Clone, Debug)]

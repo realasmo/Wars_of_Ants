@@ -4,7 +4,7 @@
 
 use super::{Colony, Config, Patch, Phase, Sim, Team};
 use crate::balance::*;
-use crate::components::{Caste, FoodKind, Layer};
+use crate::components::{Caste, CollectibleVariant, FoodKind, Layer};
 use crate::math::Vec2;
 use crate::world::tile_center;
 use crate::rng::Rng;
@@ -206,6 +206,30 @@ impl Sim {
                             near_count += 1;
                         }
                         break;
+                    }
+                }
+            }
+            // nest-building collectibles: wet wood + dry wool scattered on
+            // the surface, clear of the food sources (F2)
+            for (count, variant) in [
+                (WOOD_COUNT, CollectibleVariant::Wood),
+                (WOOL_COUNT, CollectibleVariant::Wool),
+            ] {
+                'cplace: for _ in 0..count {
+                    for _ in 0..60 {
+                        let px = sim.rng.irange(4, w - 5);
+                        let py = sim.rng.irange(4, h - 5);
+                        let too_close = placed.iter().any(|&(x, y)| {
+                            let dx = (x.max(px) - x.min(px)) as i32;
+                            let dy = (y.max(py) - y.min(py)) as i32;
+                            dx.max(dy) < 3
+                        });
+                        if too_close {
+                            continue;
+                        }
+                        sim.spawn_collectible(Vec2::new(px as f64 + 0.5, py as f64 + 0.5), variant);
+                        placed.push((px, py));
+                        continue 'cplace;
                     }
                 }
             }

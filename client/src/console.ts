@@ -114,7 +114,7 @@ function run(raw: string): void {
   switch (cmd) {
     case 'help':
       pushLine(
-        'spawn <kind> [x y] — worker soldier egg spider moss mushroom raspberry strawberry cockroach caterpillar\n' +
+        'spawn <kind> [x y] — worker soldier egg spider wood wool moss mushroom raspberry strawberry cockroach caterpillar\n' +
           'setfood <n> | setsuper <n> | setwater <n> — stores\n' +
           'soil <layer> <x> <y> <0|1|2> — paint soil block (orange=1 silver=2)\n' +
           'kill <id> | killspiders | pause | step <n>\n' +

@@ -285,5 +285,9 @@ export function carryLabel(c: AntEnt['carry']): string {
       return 'egg';
     case 'food':
       return c.food;
+    case 'wood':
+      return 'wood';
+    case 'wool':
+      return 'wool';
   }
 }

@@ -1319,3 +1319,170 @@ fn queen_farms_and_banks_on_silver() {
     assert_eq!(queen(&s).carry, Carry::None, "queen banks her haul");
     assert!(s.colony.carbs > before, "the banked unit lands in the store");
 }
+
+#[test]
+fn wood_and_wool_spawn_on_founding_maps() {
+    let s = founded(42);
+    let mut wood = 0;
+    let mut wool = 0;
+    for e in s.snapshot() {
+        if let EntitySnap::Collectible(c) = e {
+            if c.variant == 0 {
+                wood += 1;
+            } else {
+                wool += 1;
+            }
+        }
+    }
+    assert!(wood >= 1, "wet wood spawns (found {wood})");
+    assert!(wool >= 1, "dry wool spawns (found {wool})");
+}
+
+#[test]
+fn wood_and_wool_build_pantry_and_nursery_blocks() {
+    let mut s = founded(42);
+    let q = queen(&s);
+    let wid = s.dev_spawn(DevSpawn::Worker, q.x, q.y);
+    let (ex, ey) = s.world.entrance.unwrap();
+    let carry = |s: &Sim| {
+        s.snapshot()
+            .into_iter()
+            .find_map(|e| match e {
+                EntitySnap::Ant(a) if a.id == wid => Some(a.carry),
+                _ => None,
+            })
+            .unwrap()
+    };
+
+    // ---- wood → one food-storage (silver) block ----
+    s.dev_spawn(DevSpawn::Wood, ex as f64 + 1.5, ey as f64 - 1.5);
+    assert!(s.issue(Command::UseEntrance { ant: wid }));
+    for _ in 0..400 {
+        s.tick();
+        let out = s
+            .snapshot()
+            .into_iter()
+            .any(|e| matches!(e, EntitySnap::Ant(a) if a.id == wid && a.layer == Layer::Surface));
+        if out {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: wid,
+        x: ex as f64 + 1.5,
+        y: ey as f64 - 1.5
+    }));
+    for _ in 0..300 {
+        s.tick();
+        if matches!(carry(&s), Carry::Wood) {
+            break;
+        }
+    }
+    assert!(matches!(carry(&s), Carry::Wood), "worker picks up wet wood");
+    // home, then place it on an empty chamber-adjacent block
+    assert!(s.issue(Command::UseEntrance { ant: wid }));
+    for _ in 0..400 {
+        s.tick();
+        let in_ = s
+            .snapshot()
+            .into_iter()
+            .any(|e| matches!(e, EntitySnap::Ant(a) if a.id == wid && a.layer == Layer::Underground));
+        if in_ {
+            break;
+        }
+    }
+    // find an empty frontier block to convert
+    let target = {
+        let q0 = queen(&s);
+        let (qx, qy) = (q0.x.floor() as u32, q0.y.floor() as u32);
+        let mut found = None;
+        'search: for r in 1..=6u32 {
+            for dy in -(r as i32)..=(r as i32) {
+                for dx in -(r as i32)..=(r as i32) {
+                    let (x, y) = ((qx as i32 + dx) as u32, (qy as i32 + dy) as u32);
+                    let (bx, by) = (x & !1, y & !1);
+                    let mut empty = true;
+                    for ddy in 0..2 {
+                        for ddx in 0..2 {
+                            if s.tile_at(Layer::Underground, bx + ddx, by + ddy) != EMPTY {
+                                empty = false;
+                            }
+                        }
+                    }
+                    if empty && (bx, by) != (ex & !1, ey & !1) {
+                        found = Some((bx, by));
+                        break 'search;
+                    }
+                }
+            }
+        }
+        found.expect("an empty block near the chamber")
+    };
+    let (bx, by) = target;
+    assert!(s.issue(Command::Move {
+        ant: wid,
+        x: bx as f64 + 1.5,
+        y: by as f64 + 1.5
+    }));
+    for _ in 0..300 {
+        s.tick();
+    }
+    assert!(s.issue(Command::Drop { ant: wid, tx: bx, ty: by }));
+    for _ in 0..200 {
+        s.tick();
+        if carry(&s) == Carry::None {
+            break;
+        }
+    }
+    assert_eq!(carry(&s), Carry::None, "wood placed");
+    let w = s.world.underground.w;
+    assert_eq!(
+        s.world.soil_underground[(by * w + bx) as usize],
+        woa_core::SOIL_SILVER,
+        "wet wood builds a food-storage block"
+    );
+
+    // ---- wool → nursery (orange), set back down on the surface ----
+    s.dev_spawn(DevSpawn::Wool, ex as f64 + 1.5, ey as f64 - 1.5);
+    assert!(s.issue(Command::UseEntrance { ant: wid }));
+    for _ in 0..400 {
+        s.tick();
+        let out = s
+            .snapshot()
+            .into_iter()
+            .any(|e| matches!(e, EntitySnap::Ant(a) if a.id == wid && a.layer == Layer::Surface));
+        if out {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: wid,
+        x: ex as f64 + 1.5,
+        y: ey as f64 - 1.5
+    }));
+    for _ in 0..300 {
+        s.tick();
+        if matches!(carry(&s), Carry::Wool) {
+            break;
+        }
+    }
+    assert!(matches!(carry(&s), Carry::Wool), "worker picks up dry wool");
+    // set it back down on the ground (reversible) — one tile aside, since
+    // a collectible dropped under the ant's feet is re-picked immediately
+    assert!(s.issue(Command::Drop {
+        ant: wid,
+        tx: ex + 2,
+        ty: ey - 2
+    }));
+    for _ in 0..100 {
+        s.tick();
+        if carry(&s) == Carry::None {
+            break;
+        }
+    }
+    assert_eq!(carry(&s), Carry::None, "wool set back down");
+    let still_there = s.snapshot().into_iter().any(|e| {
+        matches!(e, EntitySnap::Collectible(c) if c.variant == 1)
+    });
+    assert!(still_there, "dropped wool lies on the ground again");
+}

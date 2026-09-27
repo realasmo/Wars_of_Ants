@@ -1,6 +1,7 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import type { Sim, Ent } from './sim';
 import { isAnt, lerpPos } from './sim';
+import type { AntEnt } from './sim';
 import { AntView, type AntFrame, type AntLayers } from './art/antView';
 
 const SURFACE_COLORS: Record<number, number> = {
@@ -72,6 +73,8 @@ function labelText(s: Ent): string {
       return s.caste === 'soldier' ? 'egg(S)' : 'egg';
     case 'source':
       return SOURCE_NAMES[s.src] ?? 'source';
+    case 'collectible':
+      return s.variant;
     case 'food':
       return s.food === 'super' ? 'SUPER' : s.food;
     default:
@@ -80,7 +83,7 @@ function labelText(s: Ent): string {
 }
 
 /** Short carry tag for the redraw change-check ('none' | 'dirt' | 'egg' | food). */
-function haulLabel(c: { t: 'none' } | { t: 'dirt'; blocks: number } | { t: 'egg' } | { t: 'food'; food: string }): string {
+function haulLabel(c: AntEnt['carry']): string {
   switch (c.t) {
     case 'none':
       return 'none';
@@ -90,6 +93,10 @@ function haulLabel(c: { t: 'none' } | { t: 'dirt'; blocks: number } | { t: 'egg'
       return 'egg';
     case 'food':
       return c.food;
+    case 'wood':
+      return 'wood';
+    case 'wool':
+      return 'wool';
   }
 }
 
@@ -349,6 +356,18 @@ export class Renderer {
     } else if (s.kind === 'egg') {
       const soldier = s.caste === 'soldier';
       g.ellipse(0, 0, soldier ? 0.19 : 0.16, soldier ? 0.28 : 0.24).fill(soldier ? 0xbfd0e8 : 0xe8dcc8);
+    } else if (s.kind === 'collectible') {
+      if (s.variant === 'wood') {
+        // wet wood: a short brown log with pale end grain
+        g.roundRect(-0.28, -0.11, 0.56, 0.22, 0.09).fill(0x5e4326).stroke({ width: 0.04, color: 0x33230f });
+        g.circle(-0.28, 0, 0.1).fill(0x8a6d4a).stroke({ width: 0.035, color: 0x33230f });
+        g.circle(0.28, 0, 0.1).fill(0x8a6d4a).stroke({ width: 0.035, color: 0x33230f });
+      } else {
+        // dry wool: a pale fluffy tuft
+        g.circle(-0.12, 0.03, 0.14).fill(0xe4ded2).stroke({ width: 0.035, color: 0x9a917f });
+        g.circle(0.1, 0.06, 0.15).fill(0xded6c8).stroke({ width: 0.035, color: 0x9a917f });
+        g.circle(0, -0.1, 0.12).fill(0xe9e3d8).stroke({ width: 0.035, color: 0x9a917f });
+      }
     } else if (s.kind === 'spider') {
       g.moveTo(-0.35, -0.1).lineTo(-0.85, -0.4).stroke({ width: 0.07, color: 0x23232e });
       g.moveTo(-0.32, 0.12).lineTo(-0.8, 0.45).stroke({ width: 0.07, color: 0x23232e });
