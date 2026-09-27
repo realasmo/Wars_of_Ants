@@ -29,6 +29,8 @@ declare global {
       kill: (id: number) => boolean;
       killspiders: () => void;
       pause: () => void;
+      gait: (id: number) => Record<string, unknown> | null;
+      parts: (id: number) => Record<string, unknown> | null;
     };
   }
 }
@@ -87,6 +89,8 @@ async function main(): Promise<void> {
     kill: (id) => game.debugKill(id),
     killspiders: () => game.debugKillSpiders(),
     pause: () => game.togglePause(),
+    gait: (id) => game.debugAnt(id),
+    parts: (id) => game.debugAntParts(id),
   };
 }
 

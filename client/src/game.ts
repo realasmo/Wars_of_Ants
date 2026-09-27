@@ -292,6 +292,16 @@ export class Game {
     return this.renderer.pixelAt(x, y);
   }
 
+  /** Gait telemetry for e2e: feet in world space, swing/planted state. */
+  debugAnt(id: number): Record<string, unknown> | null {
+    return this.renderer.antDebug(id);
+  }
+
+  /** Body-sprite placement for e2e render debugging. */
+  debugAntParts(id: number): Record<string, unknown> | null {
+    return this.renderer.antPartsDebug(id);
+  }
+
   debugTile(layer: number, x: number, y: number): number {
     return this.sim.tileAt(layer, x, y);
   }
@@ -705,7 +715,7 @@ export class Game {
     if (this.sim.consumeDirty(this.renderer.activeLayer)) {
       this.renderer.drawTiles(this.renderer.activeLayer);
     }
-    this.renderer.renderEntities(this.acc * TPS, this.playerAnt);
+    this.renderer.renderEntities(this.acc * TPS, dt, this.playerAnt);
     if (this.perfStart === 0) this.perfStart = now;
     if (now - this.perfStart >= 500) {
       const secs = (now - this.perfStart) / 1000;

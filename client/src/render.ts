@@ -1,6 +1,7 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import type { Sim, Ent } from './sim';
 import { isAnt, lerpPos } from './sim';
+import { AntView, type AntFrame, type AntLayers } from './art/antView';
 
 const SURFACE_COLORS: Record<number, number> = {
   0: 0x4a6741,
@@ -20,15 +21,14 @@ const UNDER_COLORS: Record<number, number> = {
 
 const BASE_PX = 30;
 
-/** Team body palettes: [queen body, queen head, worker body, worker head, soldier body, soldier head]. */
-const TEAM_COLORS: Record<number, number[]> = {
-  0: [0x8e2f3c, 0x5e1e27, 0x9c6b3c, 0x6e4826, 0x3d2b1f, 0x7a2a2a],
-  1: [0x3c5a8e, 0x27405e, 0x4a6b9c, 0x2e486e, 0x2b3542, 0x2a4a7a],
-};
-
 interface EntityGfx {
   c: Container;
-  g: Graphics;
+  /** Graphics path (non-ants); null once the entity is an ant rig */
+  g: Graphics | null;
+  /** procedural-ant rig (queen/worker/soldier); null for non-ants */
+  ant: AntView | null;
+  /** axis-aligned HP bar for ants (lives outside the rotating rig) */
+  hpG: Graphics | null;
   t: Text;
   kind: string;
   carrying: boolean;
@@ -150,6 +150,8 @@ export class Renderer {
   private layerC: Container[] = [new Container(), new Container()];
   private tileG: Graphics[] = [new Graphics(), new Graphics()];
   private entities = new Container();
+  /** shared z-planes for ant rigs — same-texture sprites batch together */
+  private antLayers: AntLayers = { shadows: new Container(), legs: new Container(), bodies: new Container() };
   private sprites = new Map<number, EntityGfx>();
   private ring = new Graphics();
   private entranceMarks: [Text, Text] = [new Text(''), new Text('')];
@@ -167,7 +169,10 @@ export class Renderer {
     const params = new URLSearchParams(window.location.search);
     await app.init({
       background: 0x0b0a08,
-      antialias: true,
+      // No canvas MSAA: ant parts are pre-rendered into textures (AA baked
+      // at 128 px/unit) and tiles are flat rects, while software rasterizers
+      // pay 4x shading for multisampling — fill rate is the crowd budget.
+      antialias: false,
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
       preserveDrawingBuffer: params.get('e2e') === '1',
@@ -176,6 +181,7 @@ export class Renderer {
     host.appendChild(app.canvas);
     app.stage.addChild(r.world);
     r.world.addChild(r.layerC[0], r.layerC[1], r.entities, r.ring);
+    r.entities.addChild(r.antLayers.shadows, r.antLayers.legs, r.antLayers.bodies);
     r.layerC[0].addChild(r.tileG[0]);
     r.layerC[1].addChild(r.tileG[1]);
     window.addEventListener('resize', () => {
@@ -333,34 +339,9 @@ export class Renderer {
     this.world.position.set(screen.width / 2 - this.cam.x * s, screen.height / 2 - this.cam.y * s);
   }
 
-  private drawEntity(g: Graphics, s: Ent, team: number): void {
-    const pal = TEAM_COLORS[team] ?? TEAM_COLORS[0];
+  private drawEntity(g: Graphics, s: Ent): void {
     g.clear();
-    if (s.kind === 'queen') {
-      if (s.activity === 'flying') {
-        // wings while the founding queen is airborne
-        g.moveTo(-0.1, -0.1).lineTo(-0.55, -0.5).stroke({ width: 0.09, color: 0xd8cfc0, alpha: 0.55 });
-        g.moveTo(0.1, -0.1).lineTo(0.55, -0.5).stroke({ width: 0.09, color: 0xd8cfc0, alpha: 0.55 });
-      }
-      g.circle(0, 0, 0.5).fill(pal[0]);
-      g.circle(0, -0.45, 0.22).fill(pal[1]);
-      if (s.carry.t === 'dirt') {
-        // excavated dirt hauled by the founding queen
-        g.circle(0.3, 0.12, 0.13).fill(0x8a6d4a);
-      }
-    } else if (s.kind === 'worker') {
-      g.ellipse(0, 0, 0.34, 0.24).fill(pal[2]);
-      g.circle(0, -0.26, 0.14).fill(pal[3]);
-      if (s.carry.t === 'food') {
-        g.circle(0.2, 0.05, 0.13).fill(RES_COLORS[s.carry.food] ?? 0x3fa34d);
-      }
-    } else if (s.kind === 'soldier') {
-      g.ellipse(0, 0, 0.4, 0.3).fill(pal[4]);
-      g.circle(0, -0.32, 0.18).fill(pal[5]);
-      if (s.carry.t === 'food') {
-        g.circle(0.24, 0.06, 0.14).fill(RES_COLORS[s.carry.food] ?? 0x3fa34d);
-      }
-    } else if (s.kind === 'food') {
+    if (s.kind === 'food') {
       const r = 0.18 + 0.1 * Math.min(1, s.amount / 6);
       g.circle(0, 0, r).fill(RES_COLORS[s.food] ?? 0x3fa34d);
     } else if (s.kind === 'source') {
@@ -378,89 +359,127 @@ export class Renderer {
       g.circle(-0.08, -0.32, 0.05).fill(0xb03a3a);
       g.circle(0.08, -0.32, 0.05).fill(0xb03a3a);
     }
-    if (isAnt(s) && s.carry.t === 'egg') {
-      // carried egg rides along
-      g.circle(0.3, 0.14, 0.12).fill(0xe8dcc8);
-    }
-    if ((isAnt(s) || s.kind === 'spider') && s.hp < 0.98) {
+    if (s.kind === 'spider' && s.hp < 0.98) {
       g.rect(-0.4, -0.62, 0.8, 0.1).fill(0x30100e);
       g.rect(-0.4, -0.62, 0.8 * Math.max(0, s.hp), 0.1).fill(0x3fbf4f);
     }
   }
 
-  renderEntities(alpha: number, playerAnt: number | null): void {
+  renderEntities(alpha: number, dt: number, playerAnt: number | null): void {
     for (const [id, e] of this.sprites) {
       if (!this.sim.cur.has(id)) {
+        if (e.ant !== null) e.ant.destroy();
         this.entities.removeChild(e.c);
         e.c.destroy({ children: true });
         this.sprites.delete(id);
       }
     }
     const layer = this.activeLayer;
-    for (const s of this.sim.cur.values()) {
-      let e = this.sprites.get(s.id);
+    // viewport (world tiles) for culling rig updates of off-screen ants
+    const s = this.scale();
+    const screen = this.app.renderer.screen;
+    const margin = 4;
+    const vx0 = this.cam.x - screen.width / 2 / s - margin;
+    const vx1 = this.cam.x + screen.width / 2 / s + margin;
+    const vy0 = this.cam.y - screen.height / 2 / s - margin;
+    const vy1 = this.cam.y + screen.height / 2 / s + margin;
+    const frame: AntFrame = { x: 0, y: 0, activity: 'idle', carry: { t: 'none' } };
+    for (const ent of this.sim.cur.values()) {
+      let e = this.sprites.get(ent.id);
       if (!e) {
         const c = new Container();
-        const g = new Graphics();
-        const t = makeLabel(labelText(s));
+        const isAntKind = isAnt(ent);
+        const t = makeLabel(labelText(ent));
         t.position.set(0, -0.85);
-        c.addChild(g, t);
-        e = { c, g, t, kind: '', carrying: false, hpBucket: -1, label: '', flying: false, haul: 'none', team: -1 };
-        this.sprites.set(s.id, e);
+        let g: Graphics | null = null;
+        let ant: AntView | null = null;
+        let hpG: Graphics | null = null;
+        if (isAntKind) {
+          ant = new AntView(this.app.renderer, this.antLayers, ent.kind, this.sim.team(), ent.id);
+          hpG = new Graphics();
+          t.position.set(0, ant.labelY);
+          c.addChild(t, hpG);
+        } else {
+          g = new Graphics();
+          c.addChild(g, t);
+        }
+        e = { c, g, ant, hpG, t, kind: '', carrying: false, hpBucket: -1, label: '', flying: false, haul: 'none', team: -1 };
+        this.sprites.set(ent.id, e);
         this.entities.addChild(c);
       }
       // carried eggs ride their carrier — draw the dot there instead
-      if (s.kind === 'egg' && s.carried) {
+      if (ent.kind === 'egg' && ent.carried) {
         e.c.visible = false;
         continue;
       }
-      const carrying = isAnt(s) && s.carry.t !== 'none';
-      const hpBucket = Math.floor((isAnt(s) || s.kind === 'spider' ? s.hp : 1) * 8);
-      const label = labelText(s);
-      const flying = isAnt(s) && s.activity === 'flying';
-      const haul = isAnt(s) ? haulLabel(s.carry) : 'none';
+      const onLayer = ent.layer === layer;
+      e.c.visible = onLayer;
+      const p = this.sim.prev.get(ent.id) ?? ent;
+      const pos = lerpPos(p, ent, Math.min(1, Math.max(0, alpha)));
+      const carrying = isAnt(ent) && ent.carry.t !== 'none';
+      const hpBucket = Math.floor((isAnt(ent) || ent.kind === 'spider' ? ent.hp : 1) * 8);
+      const label = labelText(ent);
+      const flying = isAnt(ent) && ent.activity === 'flying';
+      const haul = isAnt(ent) ? haulLabel(ent.carry) : 'none';
       const team = this.sim.team();
-      if (
-        e.kind !== s.kind ||
-        e.carrying !== carrying ||
-        e.hpBucket !== hpBucket ||
-        e.flying !== flying ||
-        e.haul !== haul ||
-        e.team !== team
-      ) {
-        e.kind = s.kind;
+      if (e.kind !== ent.kind || e.carrying !== carrying || e.hpBucket !== hpBucket || e.flying !== flying || e.haul !== haul || e.team !== team) {
+        e.kind = ent.kind;
         e.carrying = carrying;
         e.hpBucket = hpBucket;
         e.flying = flying;
         e.haul = haul;
         e.team = team;
-        this.drawEntity(e.g, s, team);
+        if (e.g !== null) this.drawEntity(e.g, ent);
+        // ant rigs redraw only their axis-aligned HP bar here
+        if (e.hpG !== null && isAnt(ent)) {
+          e.hpG.clear();
+          if (ent.hp < 0.98) {
+            e.hpG.position.set(0, 0);
+            e.hpG.rect(-0.4, -0.72, 0.8, 0.1).fill(0x30100e);
+            e.hpG.rect(-0.4, -0.72, 0.8 * Math.max(0, ent.hp), 0.1).fill(0x3fbf4f);
+          }
+        }
       }
       if (e.label !== label) {
         e.label = label;
         e.t.text = label;
       }
-      const p = this.sim.prev.get(s.id) ?? s;
-      const pos = lerpPos(p, s, Math.min(1, Math.max(0, alpha)));
       e.c.position.set(pos.x, pos.y);
-      e.c.visible = s.layer === layer;
-      if (s.kind === 'worker' && s.activity === 'digging') {
-        e.g.rotation = Math.sin(s.x * 7 + s.y * 3) * 0.4;
-      } else {
-        e.g.rotation = 0;
+      if (e.ant !== null && isAnt(ent)) {
+        if (!onLayer || pos.x < vx0 || pos.x > vx1 || pos.y < vy0 || pos.y > vy1) {
+          e.ant.deactivate(); // feet replant when it reappears
+        } else {
+          frame.x = pos.x;
+          frame.y = pos.y;
+          frame.activity = ent.activity;
+          frame.carry = ent.carry;
+          e.ant.update(dt, frame);
+        }
       }
     }
     this.ring.clear();
     if (playerAnt !== null) {
-      const s = this.sim.cur.get(playerAnt);
-      if (s && s.layer === this.activeLayer) {
-        const p = this.sim.prev.get(playerAnt) ?? s;
-        const pos = lerpPos(p, s, Math.min(1, Math.max(0, alpha)));
+      const s2 = this.sim.cur.get(playerAnt);
+      if (s2 && s2.layer === this.activeLayer) {
+        const p = this.sim.prev.get(playerAnt) ?? s2;
+        const pos = lerpPos(p, s2, Math.min(1, Math.max(0, alpha)));
         this.ring
           .circle(pos.x, pos.y, 0.5)
           .stroke({ width: 0.06, color: 0xd9c27a });
       }
     }
+  }
+
+  /** e2e/debug: gait telemetry for one ant (feet in world space, swings). */
+  antDebug(id: number): Record<string, unknown> | null {
+    const e = this.sprites.get(id);
+    return e !== undefined && e.ant !== null ? e.ant.debug() : null;
+  }
+
+  /** e2e/debug: body-sprite placement for one ant. */
+  antPartsDebug(id: number): Record<string, unknown> | null {
+    const e = this.sprites.get(id);
+    return e !== undefined && e.ant !== null ? e.ant.partsDebug() : null;
   }
 
   pixelAt(worldX: number, worldY: number): number[] {
@@ -481,10 +500,14 @@ export class Renderer {
   reset(sim: Sim): void {
     this.sim = sim;
     for (const [, e] of this.sprites) {
+      if (e.ant !== null) e.ant.destroy();
       this.entities.removeChild(e.c);
       e.c.destroy({ children: true });
     }
     this.sprites.clear();
+    this.antLayers.shadows.removeChildren();
+    this.antLayers.legs.removeChildren();
+    this.antLayers.bodies.removeChildren();
     this.drawTiles(0);
     this.drawTiles(1);
     if (sim.foundingMode) {

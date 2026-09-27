@@ -7,6 +7,15 @@
 > docs/AUDIT.md): workers don't fight back, best_food ignores colony needs,
 > Fetch delivers one unit per trip.
 
+> Procedural-ants ticket SHIPPED 2026-09-27 (client-only rendering wave —
+> `client/src/art/`: ants.ts config, bake.ts part textures, gait.ts
+> planted-feet solver, antView.ts rig). Verification: e2e/gait.mjs (planted
+> feet, tripod alternation, ripple stagger, idle antennae) + smoke suite +
+> GLM-Vision QC loop. Perf note: SwiftShader proxy is fill-rate bound
+> (~4× placeholder pixels; main thread 90% idle) — check ?perf=1 on real
+> hardware; worst-frame parity with the pre-change baseline is expected
+> there, not under software rasterization.
+
 Wave B shape (decide details against playtesting):
 - water heals (HP regen / Medic mechanic — pick one)
 - corpses: dead ants become harvestable protein (design decision needed:

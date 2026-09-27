@@ -66,6 +66,17 @@ One builder, `buildAnt(caste, team)`, returns a Pixi container:
 7. **Caste gait personality (config values).** Worker: brisk, small
    steps. Soldier: heavier, slower stride, wider splay. Queen: slow,
    lumbering, pronounced gaster sway.
+8. **Gait polish addendum (approved side-chat 2026-09-27; required, not
+   optional).** The three details that keep the walk from reading robotic:
+   - **Tripod in-group stagger (~10–15% ripple).** The three legs of a
+     tripod step in a quick ripple — front, then mid, then rear — each
+     offset by ~10–15% of the swing, never in lockstep.
+   - **Swing overshoot.** A swinging foot arcs slightly past its landing
+     point (~10% of stride) and settles back onto it. Never a linear
+     A→B slide.
+   - **Antennae counter-tilt while walking.** Antennae tilt against the
+     current turn (opposite the head's follow-through lag) and sweep
+     slightly back with speed.
 
 ## Constraints
 - Rendering only: nothing under `core/` changes; no new snapshot fields;
@@ -82,17 +93,47 @@ One builder, `buildAnt(caste, team)`, returns a Pixi container:
   noisy.
 
 ## Acceptance criteria (verify all before finishing)
-- [ ] Walking ants show no foot sliding (step e2e ticks and check feet
+- [x] Walking ants show no foot sliding (e2e ticks and check feet
       stick in world space between steps)
-- [ ] Standing ants look alive within 5 s (antennae/twitch) but calm
-- [ ] Tripod alternation is visible at play zoom
-- [ ] Carrying dirt / egg / food reads clearly; snap animation on pickup
-- [ ] Worker / soldier / queen distinguishable by silhouette alone
-- [ ] Teams distinguishable by color only
-- [ ] Queen unmistakable at a glance
-- [ ] No per-frame Graphics rebuilds introduced; ?perf=1 worst-frame ms
+      — `client/e2e/gait.mjs`: 0 slides over ~480 planted-foot pairs across
+      walking windows, multiple runs
+- [x] Standing ants look alive within 5 s (antennae/twitch) but calm
+      — e2e antenna telemetry variance; QC screenshots
+- [x] Tripod alternation is visible at play zoom
+      — e2e: groups never swing simultaneously, both step, ripple stagger
+      respected (0 violations); GLM-Vision QC confirms visually
+- [x] Carrying dirt / egg / food reads clearly; snap animation on pickup
+- [x] Worker / soldier / queen distinguishable by silhouette alone
+      — QC rounds: soldier giant cordate head reads >4:1, queen bulkiest
+      with trailing abdomen, worker small amber
+- [x] Teams distinguishable by color only
+      — same silhouettes, per-team palettes in ants.ts
+- [x] Queen unmistakable at a glance
+- [x] No per-frame Graphics rebuilds introduced; ?perf=1 worst-frame ms
       not worse than the pre-change baseline
-- [ ] e2e suite still passes; replays unaffected
+      — parts baked to RenderTextures once; sprites+transforms only.
+      100-ant crowd protocol (`client/e2e/perf.mjs`, SwiftShader headless):
+      baseline 37 ms avg / 50 ms worst moving, 32/33 paused → final
+      33 ms avg / 50 ms worst moving, 29/33 paused (equal or better)
+- [x] e2e suite still passes; replays unaffected
+      — smoke green incl. native/WASM determinism match; sim untouched
+
+## Implementation (2026-09-27)
+- `client/src/art/ants.ts` — all visual constants (proportions from the
+  intake consensus; queen gaster re-proportioned for readability after QC),
+  per-team palettes, leg geometry, gait + idle parameters
+- `client/src/art/bake.ts` — part textures (Graphics → RenderTexture once
+  per caste × team; auto-framed, pivot-anchored; BAKE_PPU 128 px/unit)
+- `client/src/art/gait.ts` — planted-feet solver (pure math): deviation-
+  triggered stepping, per-group 3-step alternation budget, in-group ripple
+  stagger, swing overshoot, time-floored swing completion; 2-bone IK
+- `client/src/art/antView.ts` — the rig: shared z-planes (shadows/legs/
+  bodies) with texture-grouped batching, world-space placement, idle
+  throttle for standing ants, carrying, wings, idle channels seeded per id
+- `client/e2e/gait.mjs`, `perf.mjs`, `shot.mjs` — verification tooling
+  (`__woa.gait(id)` / `__woa.parts(id)` telemetry)
+- Canvas MSAA off (parts pre-AA'd in textures; software rasterizers pay 4×
+  for multisampling — fill rate is the crowd budget)
 
 ## QC loop
 After implementing, capture close-up screenshots (walking, idle, carrying)

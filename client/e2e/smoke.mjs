@@ -99,6 +99,7 @@ try {
   // --- land (RMB), walk, found the nest (RMB) ---
   s = await state();
   await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: s.queen.x, y: s.queen.y });
+  await page.evaluate(() => window.__woa.step(3)); // let the command land before reading state
   s = await state();
   if (s.phase !== 1) failures.push(`land did not enter grounded phase (${s.phase})`);
   await page.evaluate((p) => window.__woa.click(p.x, p.y, 0), { x: s.queen.x + 4, y: s.queen.y });
