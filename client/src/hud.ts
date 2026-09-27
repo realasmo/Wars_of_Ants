@@ -1,7 +1,15 @@
-import type { Sim } from './sim';
+import type { AntEnt, Sim } from './sim';
 
 function el(id: string): HTMLElement {
   return document.getElementById(id) as HTMLElement;
+}
+
+/** Carry suffix for the controlling line: ' · egg' etc., so a full-handed
+ * ant is always visible (a refused dig is silent otherwise). */
+function carrySuffix(a: AntEnt): string {
+  if (a.carry.t === 'none') return '';
+  if (a.carry.t === 'dirt') return ` · dirt×${a.carry.blocks}`;
+  return ` · ${a.carry.t}`;
 }
 
 const HELP_COLONY =
@@ -49,8 +57,8 @@ export class Hud {
       : 'colony';
     el('ctrl-ant').textContent = snap
       ? snap.kind === 'queen'
-        ? `queen (${state})`
-        : `ant #${playerAnt} (${state})`
+        ? `queen (${state}${carrySuffix(snap)})`
+        : `ant #${playerAnt} (${state}${carrySuffix(snap)})`
       : 'spectating';
     el('ctrl-layer').textContent = layer === 0 ? 'Surface' : 'Underground';
     this.setHelp(
@@ -62,6 +70,18 @@ export class Hud {
     if (text === this.helpText) return;
     this.helpText = text;
     el('help').innerHTML = text;
+  }
+
+  /** Temporarily replace the help bar with an action hint (refusals etc.). */
+  private hintTimer: ReturnType<typeof setTimeout> | null = null;
+
+  flashHint(text: string, ms = 2200): void {
+    if (this.hintTimer !== null) clearTimeout(this.hintTimer);
+    el('help').textContent = text;
+    this.hintTimer = setTimeout(() => {
+      this.hintTimer = null;
+      el('help').innerHTML = this.helpText;
+    }, ms);
   }
 
   showDead(sim: Sim, onRestart: () => void): void {

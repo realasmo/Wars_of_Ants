@@ -564,6 +564,18 @@ export class Game {
         this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
         return;
       }
+      // digging with an egg/food in the mandibles is refused by the core —
+      // explain instead of silently walking into the wall (dirt falls
+      // through to the refill branch below)
+      if (layer === 1 && soft && me !== undefined && me.carry.t !== 'none' && me.carry.t !== 'dirt') {
+        this.hud.flashHint(
+          me.carry.t === 'egg'
+            ? 'Mandibles hold the egg — place it on an EMPTY cell first (right-click), then dig'
+            : 'Mandibles full of food — drop it first, then dig',
+        );
+        this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+        return;
+      }
       // carrying something → place/drop it (egg, dirt, resources)
       if (me !== undefined && me.carry.t === 'egg') {
         // egg: place on the empty target cell — the ant walks there first;
@@ -578,6 +590,10 @@ export class Game {
           if (!nearHoleE && kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
             this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'egg' });
             this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+            return;
+          }
+          if (!nearHoleE && kind !== 0) {
+            this.hud.flashHint('Eggs are placed on empty cells — this tile is solid; dig it out first (empty mandibles)');
             return;
           }
         }
