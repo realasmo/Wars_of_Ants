@@ -41,7 +41,9 @@ pub enum FoodKind {
 pub enum Carry {
     None,
     /// Excavated dirt blocks (the founding queen hauls up to DIRT_CAPACITY).
-    Dirt { blocks: u32 },
+    Dirt {
+        blocks: u32,
+    },
     /// A brood egg; the egg entity itself rides along (`Egg::carried_by`).
     Egg,
     /// One unit of food.

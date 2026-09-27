@@ -2,7 +2,6 @@
 //! founding ritual.
 
 use super::{Command, FollowMode, Phase, Sim};
-use crate::balance::*;
 use crate::components::*;
 use crate::math::Vec2;
 use crate::path::{chebyshev, find_path, smooth_path, tile_of};
@@ -15,8 +14,8 @@ impl Sim {
                 if !self.is_ant(ant) {
                     return false;
                 }
-                let tx = x.floor().clamp(0.0, self.config.width as f64 - 1.0) as u32;
-                let ty = y.floor().clamp(0.0, self.config.height as f64 - 1.0) as u32;
+                let tx = x.floor().clamp(0.0, self.rules.width as f64 - 1.0) as u32;
+                let ty = y.floor().clamp(0.0, self.rules.height as f64 - 1.0) as u32;
                 let layer = self.ant_layer(ant);
                 self.set_job(ant, Job::Manual);
                 self.set_drop_after(ant, None); // a new order supersedes auto-haul intents
@@ -38,15 +37,12 @@ impl Sim {
                 };
                 let hands_diggable = match carrying {
                     Carry::None => true,
-                    Carry::Dirt { blocks } => blocks < DIRT_CAPACITY,
+                    Carry::Dirt { blocks } => blocks < self.rules.dirt_capacity,
                     Carry::Egg | Carry::Food(_) | Carry::Wood | Carry::Wool => false,
                 };
                 let queen_may_dig = caste == Caste::Queen
                     && self.colony.founding
-                    && matches!(
-                        self.colony.phase,
-                        Phase::Founding | Phase::Brood
-                    );
+                    && matches!(self.colony.phase, Phase::Founding | Phase::Brood);
                 // every digging caste obeys the dirt capacity — worker and
                 // queen dig rules are otherwise identical
                 if !hands_diggable
@@ -115,8 +111,8 @@ impl Sim {
                 if ant != self.colony.queen_id || self.colony.phase != Phase::Flight {
                     return false;
                 }
-                let tx = x.floor().clamp(0.0, self.config.width as f64 - 1.0) as u32;
-                let ty = y.floor().clamp(0.0, self.config.height as f64 - 1.0) as u32;
+                let tx = x.floor().clamp(0.0, self.rules.width as f64 - 1.0) as u32;
+                let ty = y.floor().clamp(0.0, self.rules.height as f64 - 1.0) as u32;
                 self.set_job(ant, Job::Manual);
                 if self.ant_tile(ant) == (tx, ty) {
                     self.colony.phase = Phase::Grounded;
@@ -138,8 +134,8 @@ impl Sim {
                 if self.ant_layer(ant) != Layer::Surface {
                     return false;
                 }
-                let tx = x.floor().clamp(0.0, self.config.width as f64 - 1.0) as u32;
-                let ty = y.floor().clamp(0.0, self.config.height as f64 - 1.0) as u32;
+                let tx = x.floor().clamp(0.0, self.rules.width as f64 - 1.0) as u32;
+                let ty = y.floor().clamp(0.0, self.rules.height as f64 - 1.0) as u32;
                 self.set_job(ant, Job::Manual);
                 if self.ant_tile(ant) == (tx, ty) {
                     return self.try_found_nest(ant, tx, ty);
@@ -176,15 +172,11 @@ impl Sim {
                 let Some(&eent) = self.ids.get(&egg) else {
                     return false;
                 };
-                let (egg_carried, etile, elayer) = match self
-                    .ecs
-                    .query_one::<(&Egg, &Pos)>(eent)
-                    .unwrap()
-                    .get()
-                {
-                    Some(q) => (q.0.carried_by, tile_of(q.1.p), q.1.layer),
-                    None => return false,
-                };
+                let (egg_carried, etile, elayer) =
+                    match self.ecs.query_one::<(&Egg, &Pos)>(eent).unwrap().get() {
+                        Some(q) => (q.0.carried_by, tile_of(q.1.p), q.1.layer),
+                        None => return false,
+                    };
                 let aent = self.ids[&ant];
                 let hands_free = self
                     .ecs
@@ -223,7 +215,7 @@ impl Sim {
         // the 2×2 entrance hole plus a 4×4 starter chamber below it
         // must fit inside the rock border ring
         let (bx, by) = block_of(x, y);
-        if bx < 2 || by < 2 || bx + 3 > self.config.width - 3 || by + 5 > self.config.height - 3 {
+        if bx < 2 || by < 2 || bx + 3 > self.rules.width - 3 || by + 5 > self.rules.height - 3 {
             return false;
         }
         let mut carved = 0u32;
@@ -260,18 +252,19 @@ impl Sim {
         self.set_job(ant, Job::Manual);
         // founding reserves are physical (worker-priorities wave): a stored,
         // never-spoiling carb pile in the starter chamber — the ledger (set
-        // to START_FOOD at worldgen) and the pile stay in sync, and the
+        // to self.rules.start_food at worldgen) and the pile stay in sync, and the
         // feeder era starts with real food on the floor
         self.spawn_food_entity(
             Layer::Underground,
             (bx + 2, by + 4),
-            START_FOOD,
+            self.rules.start_food,
             FoodKind::Carbs,
             true,
             None,
         );
+        let start = self.rules.start_food;
         self.ev(format!(
-            "founding reserves: {START_FOOD} carbs stored in the chamber"
+            "founding reserves: {start} carbs stored in the chamber"
         ));
         // founding inside a dust patch grants hidden soil blocks of
         // that color near the nest — dig them out
@@ -281,7 +274,9 @@ impl Sim {
             .find(|p| x >= p.x0 && x < p.x1 && y >= p.y0 && y < p.y1)
             .map(|p| p.soil);
         if let Some(soil) = patch_soil {
-            let grants = self.rng.irange(PATCH_GRANT_MIN, PATCH_GRANT_MAX);
+            let grants = self
+                .rng
+                .irange(self.rules.patch_grant_min, self.rules.patch_grant_max);
             let mut placed = 0u32;
             for _ in 0..80 {
                 if placed >= grants {
@@ -291,7 +286,11 @@ impl Sim {
                 let dy = self.rng.irange(0, 16) as i32 - 8;
                 let gx = (bx as i32 + dx) & !1;
                 let gy = (by as i32 + dy) & !1;
-                if gx < 2 || gy < 2 || gx + 1 >= self.config.width as i32 - 2 || gy + 1 >= self.config.height as i32 - 2 {
+                if gx < 2
+                    || gy < 2
+                    || gx + 1 >= self.rules.width as i32 - 2
+                    || gy + 1 >= self.rules.height as i32 - 2
+                {
                     continue;
                 }
                 let (gx, gy) = (gx as u32, gy as u32);
@@ -306,7 +305,7 @@ impl Sim {
             }
         }
         self.colony.phase = Phase::Founding;
-        self.colony.phase_t = FOUNDING_TIME;
+        self.colony.phase_t = self.rules.founding_time;
         self.ev(format!("nest founded at ({bx},{by}) — 60s excavation"));
         true
     }
@@ -387,12 +386,16 @@ impl Sim {
         let mut cands: Vec<((u32, u32), u32)> = Vec::new();
         for dy in -1i32..=2 {
             for dx in -1i32..=2 {
-                if dx >= 0 && dx <= 1 && dy >= 0 && dy <= 1 {
+                if (0..=1).contains(&dx) && (0..=1).contains(&dy) {
                     continue; // inside the block
                 }
                 let x = bx as i32 + dx;
                 let y = by as i32 + dy;
-                if x < 1 || y < 1 || x >= self.config.width as i32 - 1 || y >= self.config.height as i32 - 1 {
+                if x < 1
+                    || y < 1
+                    || x >= self.rules.width as i32 - 1
+                    || y >= self.rules.height as i32 - 1
+                {
                     continue;
                 }
                 let (x, y) = (x as u32, y as u32);
@@ -433,10 +436,7 @@ impl Sim {
         let Some(&ent) = self.ids.get(&ant) else {
             return false;
         };
-        let (carrying, layer) = match self.ecs.query_one::<(&Carry, &Pos)>(ent)
-            .unwrap()
-            .get()
-        {
+        let (carrying, layer) = match self.ecs.query_one::<(&Carry, &Pos)>(ent).unwrap().get() {
             Some(q) => (*q.0, q.1.layer),
             None => return false,
         };
@@ -479,10 +479,7 @@ impl Sim {
             Some(&e) => e,
             None => return false,
         };
-        let (carrying, layer) = match self.ecs.query_one::<(&Carry, &Pos)>(ent)
-            .unwrap()
-            .get()
-        {
+        let (carrying, layer) = match self.ecs.query_one::<(&Carry, &Pos)>(ent).unwrap().get() {
             Some(q) => (*q.0, q.1.layer),
             None => return false,
         };
@@ -508,7 +505,9 @@ impl Sim {
                     }
                     for dy in 0..2 {
                         for dx in 0..2 {
-                            self.world.underground.set(bx + dx, by + dy, crate::world::DIRT);
+                            self.world
+                                .underground
+                                .set(bx + dx, by + dy, crate::world::DIRT);
                         }
                     }
                     self.tiles_epoch += 1;
@@ -565,11 +564,11 @@ impl Sim {
                 let tile = (tx, ty);
                 if !self.grid_of(layer).in_bounds(tx, ty)
                     || chebyshev(self.ant_tile(ant), tile) > 1
-                    || self.cell_food(layer, tile) >= FOOD_CELL_CAP
+                    || self.cell_food(layer, tile) >= self.rules.food_cell_cap
                 {
                     return false;
                 }
-                self.spawn_unit_food(layer, tile, kind, Some(SPOIL_TIME));
+                self.spawn_unit_food(layer, tile, kind, Some(self.rules.spoil_time));
                 if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
                     *q = Carry::None;
                 }
@@ -634,7 +633,9 @@ impl Sim {
             return false;
         }
         let (ltile, llayer) = {
-            let Some(&ent) = self.ids.get(&leader) else { return false };
+            let Some(&ent) = self.ids.get(&leader) else {
+                return false;
+            };
             match self.ecs.query_one::<(&Pos,)>(ent).unwrap().get() {
                 Some(q) => (tile_of(q.0.p), q.0.layer),
                 None => return false,
@@ -649,16 +650,16 @@ impl Sim {
                         continue;
                     }
                     if let Some(&ent) = self.ids.get(&id) {
-                        let back = self
-                            .ecs
-                            .get::<&WorkerAi>(ent)
-                            .ok()
-                            .and_then(|ai| match &ai.job {
-                                Job::Follow(l, resume) if *l == leader => {
-                                    Some(resume.as_ref().map(|b| (**b).clone()))
-                                }
-                                _ => None,
-                            });
+                        let back =
+                            self.ecs
+                                .get::<&WorkerAi>(ent)
+                                .ok()
+                                .and_then(|ai| match &ai.job {
+                                    Job::Follow(l, resume) if *l == leader => {
+                                        Some(resume.as_ref().map(|b| (**b).clone()))
+                                    }
+                                    _ => None,
+                                });
                         if let Some(back) = back {
                             // resume the interrupted activity (Manual ants go
                             // back to manual, farmers back to farming)
@@ -698,12 +699,11 @@ impl Sim {
                     if id == leader {
                         continue;
                     }
-                    let Some(&ent) = self.ids.get(&id) else { continue };
+                    let Some(&ent) = self.ids.get(&id) else {
+                        continue;
+                    };
                     let info = {
-                        let mut aq = self
-                            .ecs
-                            .query_one::<(&Ant, &Pos, &WorkerAi)>(ent)
-                            .unwrap();
+                        let mut aq = self.ecs.query_one::<(&Ant, &Pos, &WorkerAi)>(ent).unwrap();
                         aq.get().map(|(ant, pos, ai)| {
                             (
                                 ant.caste,
@@ -721,7 +721,7 @@ impl Sim {
                         continue;
                     }
                     let d = chebyshev(tile, ltile);
-                    if d <= SIGHT_RANGE {
+                    if d <= self.rules.sight_range {
                         cands.push((d, id));
                     }
                 }
@@ -773,7 +773,10 @@ impl Sim {
             .ecs
             .query_one::<(&Egg, &Pos)>(eent)
             .ok()
-            .and_then(|mut q| q.get().map(|q| (q.0.carried_by.is_none(), tile_of(q.1.p), q.1.layer)))
+            .and_then(|mut q| {
+                q.get()
+                    .map(|q| (q.0.carried_by.is_none(), tile_of(q.1.p), q.1.layer))
+            })
             .map(|(free, tile, _)| {
                 free && self.carry_of(id) == Carry::None && chebyshev(self.ant_tile(id), tile) <= 1
             })
@@ -794,5 +797,4 @@ impl Sim {
         self.set_pick_after(id, None);
         self.set_job(id, Job::Manual);
     }
-
 }

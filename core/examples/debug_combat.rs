@@ -1,11 +1,11 @@
-use woa_core::{Caste, Command, Config, EntitySnap, FoodKind, Sim};
+use woa_core::{Caste, Command, EntitySnap, FoodKind, GameRules, Sim};
 
 fn main() {
-    let cfg = Config {
+    let cfg = GameRules {
         spiders: 1,
         start_workers: 8,
         food_clusters: 4,
-        ..Config::default()
+        ..GameRules::default()
     };
     let mut s = Sim::new(23, cfg);
     let spider = s
@@ -32,8 +32,7 @@ fn main() {
         }
         s.tick();
         if soldier_tick.is_none()
-            && s
-                .snapshot()
+            && s.snapshot()
                 .iter()
                 .any(|e| matches!(e, EntitySnap::Ant(a) if a.caste == Caste::Soldier))
         {
@@ -41,7 +40,10 @@ fn main() {
         }
     }
     let snap = s.snapshot();
-    let spiders = snap.iter().filter(|e| matches!(e, EntitySnap::Spider(_))).count();
+    let spiders = snap
+        .iter()
+        .filter(|e| matches!(e, EntitySnap::Spider(_)))
+        .count();
     let super_piles: Vec<u32> = snap
         .iter()
         .filter_map(|e| match e {
@@ -57,7 +59,10 @@ fn main() {
         .iter()
         .filter(|e| matches!(e, EntitySnap::Ant(a) if a.caste == Caste::Soldier))
         .count();
-    let eggs = snap.iter().filter(|e| matches!(e, EntitySnap::Egg(_))).count();
+    let eggs = snap
+        .iter()
+        .filter(|e| matches!(e, EntitySnap::Egg(_)))
+        .count();
     println!(
         "soldier_first_seen={:?} spiders_alive={} super_piles={:?} workers={} soldiers={} eggs={} dead={} food={} super_store={} eggs_laid={} delivered={}",
         soldier_tick,

@@ -2,7 +2,6 @@
 //! part of determinism: reordering changes every seed's future.
 
 use super::{snapshot::source_name, Phase, Sim, DT};
-use crate::balance::*;
 use crate::components::*;
 use crate::math::Vec2;
 use crate::path::tile_of;
@@ -28,7 +27,7 @@ impl Sim {
             };
             // the founding queen flies faster than any ant walks
             let speed = if caste == Caste::Queen && self.colony.phase == Phase::Flight {
-                QUEEN_FLY_SPEED
+                self.rules.queen_fly_speed
             } else {
                 speed
             };
@@ -121,21 +120,21 @@ impl Sim {
     pub(crate) fn harvesting(&mut self) {
         let ids = self.ant_ids();
         for id in ids {
-            let Some(&ent) = self.ids.get(&id) else { continue };
+            let Some(&ent) = self.ids.get(&id) else {
+                continue;
+            };
             let state = match self.ecs.get::<&AntState>(ent) {
                 Ok(q) => (*q).clone(),
                 Err(_) => continue,
             };
-            let AntState::Harvesting { target } = state else { continue };
+            let AntState::Harvesting { target } = state else {
+                continue;
+            };
             let Some(&fent) = self.ids.get(&target) else {
                 self.set_state(id, AntState::Idle);
                 continue;
             };
-            let amount = self
-                .ecs
-                .get::<&Food>(fent)
-                .map(|f| f.amount)
-                .unwrap_or(0);
+            let amount = self.ecs.get::<&Food>(fent).map(|f| f.amount).unwrap_or(0);
             if amount == 0 {
                 self.set_state(id, AntState::Idle);
                 continue;
@@ -192,9 +191,9 @@ impl Sim {
                 .map(|a| a.caste)
                 .unwrap_or(Caste::Worker);
             let dig_time = if caste == Caste::Queen {
-                QUEEN_DIG_TIME
+                self.rules.queen_dig_time
             } else {
-                DIG_TIME
+                self.rules.dig_time
             };
             progress += DT;
             if progress >= dig_time {
@@ -206,7 +205,7 @@ impl Sim {
                 self.tiles_epoch += 1;
                 self.dug_tiles += 4;
                 // excavated dirt is carried out by every digging caste (up
-                // to DIRT_CAPACITY blocks before dumping) — workers haul
+                // to self.rules.dirt_capacity blocks before dumping) — workers haul
                 // spoil to the surface, the founding queen refills or dumps
                 if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
                     let blocks = match *q {
@@ -214,7 +213,7 @@ impl Sim {
                         _ => 0,
                     };
                     *q = Carry::Dirt {
-                        blocks: (blocks + 1).min(DIRT_CAPACITY),
+                        blocks: (blocks + 1).min(self.rules.dirt_capacity),
                     };
                 }
                 match resume {
@@ -286,7 +285,7 @@ impl Sim {
             let mut new_t = atk_t;
             let d = tpos.p - new_pos.p;
             let dist = d.len();
-            if dist > ANT_RANGE {
+            if dist > self.rules.ant_range {
                 if pos.layer == Layer::Underground {
                     // below ground a straight line would glide through dirt
                     // and rock: route instead. The Fighting state ends here;
@@ -375,7 +374,9 @@ impl Sim {
                             continue;
                         }
                         let d = (ap.p - pos.p).len();
-                        if d <= SPIDER_AGGRO && best.map(|(bd, _)| d < bd).unwrap_or(true) {
+                        if d <= self.rules.spider_aggro
+                            && best.map(|(bd, _)| d < bd).unwrap_or(true)
+                        {
                             best = Some((d, aid));
                         }
                     }
@@ -394,7 +395,7 @@ impl Sim {
                     };
                     let d = tp.p - new_pos.p;
                     let dist = d.len();
-                    if dist > SPIDER.range {
+                    if dist > self.rules.spider.range {
                         let step = pred.speed * DT;
                         if dist > step {
                             new_pos.p = new_pos.p + d * (step / dist);
@@ -425,12 +426,12 @@ impl Sim {
                         let dx = self.rng.range(-1.0, 1.0);
                         let dy = self.rng.range(-1.0, 1.0);
                         let len = (dx * dx + dy * dy).sqrt().max(0.001);
-                        let dist = self.rng.range(0.0, SPIDER_WANDER);
+                        let dist = self.rng.range(0.0, self.rules.spider_wander);
                         let hx = pred.home.0 as f64 + 0.5 + dx / len * dist;
                         let hy = pred.home.1 as f64 + 0.5 + dy / len * dist;
                         pred.dest = Some((
-                            hx.clamp(1.0, self.config.width as f64 - 2.0),
-                            hy.clamp(1.0, self.config.height as f64 - 2.0),
+                            hx.clamp(1.0, self.rules.width as f64 - 2.0),
+                            hy.clamp(1.0, self.rules.height as f64 - 2.0),
                         ));
                         pred.wander_t = self.rng.range(3.0, 6.0);
                     }
@@ -484,9 +485,10 @@ impl Sim {
         for pid in dead_predators {
             let ent = self.ids[&pid];
             let p = self.ecs.get::<&Pos>(ent).map(|q| q.p).unwrap_or_default();
-            self.ev(format!("spider #{pid} died → {PROTEIN_PER_SPIDER} protein"));
+            let drop = self.rules.protein_per_spider;
+            self.ev(format!("spider #{pid} died → {drop} protein"));
             self.kill(pid);
-            self.spawn_food(p, PROTEIN_PER_SPIDER, FoodKind::Protein);
+            self.spawn_food(p, self.rules.protein_per_spider, FoodKind::Protein);
         }
     }
 
@@ -501,12 +503,16 @@ impl Sim {
                 self.colony.phase = Phase::Brood;
                 self.colony.phase_t = 0.0;
                 self.ev("founding time over — brood laid".to_string());
-                for _ in 0..FOUNDING_EGGS {
+                for _ in 0..self.rules.founding_eggs {
                     let Some(tile) = self.free_egg_tile() else {
                         break;
                     };
                     self.colony.eggs_laid += 1;
-                    self.spawn_egg(tile_center(tile.0, tile.1), Caste::Worker, FOUNDING_EGG_HATCH);
+                    self.spawn_egg(
+                        tile_center(tile.0, tile.1),
+                        Caste::Worker,
+                        self.rules.founding_egg_hatch,
+                    );
                 }
             }
         }
@@ -515,27 +521,26 @@ impl Sim {
             // Physical feeding (worker-priorities wave): the queen eats real
             // units the feeder delivers (or her own mandibles' load). No
             // automatic store drain — the store counts the pantry, withdraw
-            // removes from it. Hungry at EAT_PERIOD, dead at + STARVE_TIME.
+            // removes from it. Hungry at self.rules.eat_period, dead at + self.rules.starve_time.
             // The lone-queen grace still freezes hunger: no workers → no
             // feeder, and she may not have farmed anything yet.
             let grace = self.caste_counts().0 == 0;
             if !grace {
                 self.colony.hunger_t += DT;
-                let hungry_at = EAT_PERIOD;
+                let hungry_at = self.rules.eat_period;
                 let prev = self.colony.hunger_t - DT;
                 if self.colony.hunger_t >= hungry_at && prev < hungry_at {
                     self.ev(format!(
                         "queen is hungry — wants {} (no delivery)",
-                        super::snapshot::food_name(crate::balance::QUEEN_CRAVING_CYCLE
-                            [self.colony.craving_i])
+                        super::snapshot::food_name(self.rules.craving_cycle[self.colony.craving_i])
                     ));
                 }
-                if self.colony.hunger_t >= EAT_PERIOD + STARVE_TIME * 0.5
-                    && prev < EAT_PERIOD + STARVE_TIME * 0.5
+                if self.colony.hunger_t >= self.rules.eat_period + self.rules.starve_time * 0.5
+                    && prev < self.rules.eat_period + self.rules.starve_time * 0.5
                 {
                     self.ev("queen is STARVING".to_string());
                 }
-                if self.colony.hunger_t >= EAT_PERIOD + STARVE_TIME {
+                if self.colony.hunger_t >= self.rules.eat_period + self.rules.starve_time {
                     self.colony.dead = true;
                     let q = self.colony.queen_id;
                     self.kill_cause(q, "starvation");
@@ -547,7 +552,7 @@ impl Sim {
         // Legacy founded economy: abstract drain from the carb store.
         if self.colony.carbs > 0 {
             self.colony.eat_t += DT;
-            if self.colony.eat_t >= EAT_PERIOD {
+            if self.colony.eat_t >= self.rules.eat_period {
                 self.colony.carbs -= 1;
                 self.colony.eat_t = 0.0;
             }
@@ -555,7 +560,7 @@ impl Sim {
         } else {
             self.colony.eat_t = 0.0;
             self.colony.starve_t += DT;
-            if self.colony.starve_t >= STARVE_TIME {
+            if self.colony.starve_t >= self.rules.starve_time {
                 self.colony.dead = true;
                 let q = self.colony.queen_id;
                 self.kill_cause(q, "starvation");
@@ -565,14 +570,14 @@ impl Sim {
         // ongoing auto-laying is legacy-mode only: in a founding game the
         // brood comes from the founding script (production redesign is a
         // later wave)
-        if self.colony.lay_cooldown <= 0.0 && self.colony.ant_count < self.config.max_ants {
+        if self.colony.lay_cooldown <= 0.0 && self.colony.ant_count < self.rules.max_ants {
             let (workers, soldiers) = self.caste_counts();
-            let want = if self.colony.carbs >= SOLDIER_COST_GREEN
-                && self.colony.protein >= SOLDIER_COST_SUPER
+            let want = if self.colony.carbs >= self.rules.soldier_cost_green
+                && self.colony.protein >= self.rules.soldier_cost_super
                 && soldiers * 2 < workers
             {
                 Some(Caste::Soldier)
-            } else if self.colony.carbs >= EGG_COST {
+            } else if self.colony.carbs >= self.rules.egg_cost {
                 Some(Caste::Worker)
             } else {
                 None
@@ -582,15 +587,15 @@ impl Sim {
                     Some(tile) => {
                         match caste {
                             Caste::Soldier => {
-                                self.colony.carbs -= SOLDIER_COST_GREEN;
-                                self.colony.protein -= SOLDIER_COST_SUPER;
+                                self.colony.carbs -= self.rules.soldier_cost_green;
+                                self.colony.protein -= self.rules.soldier_cost_super;
                             }
-                            Caste::Worker => self.colony.carbs -= EGG_COST,
+                            Caste::Worker => self.colony.carbs -= self.rules.egg_cost,
                             Caste::Queen => {}
                         }
                         self.colony.eggs_laid += 1;
-                        self.colony.lay_cooldown = LAY_COOLDOWN;
-                        self.spawn_egg(tile_center(tile.0, tile.1), caste, EGG_TIME);
+                        self.colony.lay_cooldown = self.rules.lay_cooldown;
+                        self.spawn_egg(tile_center(tile.0, tile.1), caste, self.rules.egg_time);
                     }
                     None => {
                         if self.colony.dig_queue.len() < 3 {
@@ -611,25 +616,17 @@ impl Sim {
             let Some(&eent) = self.ids.get(&eid) else {
                 continue;
             };
-            let carried_by = self
-                .ecs
-                .get::<&Egg>(eent)
-                .ok()
-                .and_then(|e| e.carried_by);
+            let carried_by = self.ecs.get::<&Egg>(eent).ok().and_then(|e| e.carried_by);
             let Some(carrier) = carried_by else {
                 continue;
             };
-            let cpos = self.ids.get(&carrier).and_then(|&ce| {
-                self.ecs.get::<&Pos>(ce).ok().map(|p| (p.p, p.layer))
-            });
+            let cpos = self
+                .ids
+                .get(&carrier)
+                .and_then(|&ce| self.ecs.get::<&Pos>(ce).ok().map(|p| (p.p, p.layer)));
             match cpos {
                 Some((p, layer)) => {
-                    if let Some(q) = self
-                        .ecs
-                        .query_one::<(&mut Pos,)>(eent)
-                        .unwrap()
-                        .get()
-                    {
+                    if let Some(q) = self.ecs.query_one::<(&mut Pos,)>(eent).unwrap().get() {
                         q.0.p = p;
                         q.0.layer = layer;
                     }
@@ -646,15 +643,11 @@ impl Sim {
                 Some(&e) => e,
                 None => continue,
             };
-            let (hatch, caste, carried, pos) = match self
-                .ecs
-                .query_one::<(&Egg, &Pos)>(ent)
-                .unwrap()
-                .get()
-            {
-                Some(q) => (q.0.hatch, q.0.caste, q.0.carried_by, *q.1),
-                None => continue,
-            };
+            let (hatch, caste, carried, pos) =
+                match self.ecs.query_one::<(&Egg, &Pos)>(ent).unwrap().get() {
+                    Some(q) => (q.0.hatch, q.0.caste, q.0.carried_by, *q.1),
+                    None => continue,
+                };
             let hatch_prev = hatch;
             let hatch = hatch - DT;
             // transformation happens only on an empty orange cell — ready
@@ -670,10 +663,13 @@ impl Sim {
             if hatch <= 0.0
                 && carried.is_none()
                 && on_orange
-                && self.colony.ant_count < self.config.max_ants
+                && self.colony.ant_count < self.rules.max_ants
             {
                 let p = pos.p;
-                self.ev(format!("egg #{id} hatched on orange at ({:.0},{:.0})", p.x, p.y));
+                self.ev(format!(
+                    "egg #{id} hatched on orange at ({:.0},{:.0})",
+                    p.x, p.y
+                ));
                 self.kill(id);
                 self.spawn_ant(caste, p, Layer::Underground);
                 // the first hatched worker ends the founding script
@@ -696,15 +692,11 @@ impl Sim {
         let ids = self.food_ids();
         for id in ids {
             let ent = self.ids[&id];
-            let (amount, spoil, pos, harvest_t, src) = match self
-                .ecs
-                .query_one::<(&Food, &Pos)>(ent)
-                .unwrap()
-                .get()
-            {
-                Some(q) => (q.0.amount, q.0.spoil, *q.1, q.0.harvest_t, q.0.src),
-                None => continue,
-            };
+            let (amount, spoil, pos, harvest_t, src) =
+                match self.ecs.query_one::<(&Food, &Pos)>(ent).unwrap().get() {
+                    Some(q) => (q.0.amount, q.0.spoil, *q.1, q.0.harvest_t, q.0.src),
+                    None => continue,
+                };
             if amount == 0 {
                 self.colony.known.remove(&id);
                 if harvest_t > 0.0 {

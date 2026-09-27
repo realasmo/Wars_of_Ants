@@ -1,7 +1,7 @@
-use woa_core::{Caste, Config, DevSpawn, EntitySnap, Layer, Sim};
+use woa_core::{Caste, DevSpawn, EntitySnap, GameRules, Layer, Sim};
 
 fn sim() -> Sim {
-    Sim::new(7, Config::default())
+    Sim::new(7, GameRules::default())
 }
 
 #[test]
@@ -19,10 +19,7 @@ fn dev_spawn_spider_lands_on_surface_at_position() {
         .find(|e| e.id() == id)
         .expect("spawned spider in snapshot");
     assert!(matches!(spawned, EntitySnap::Spider(_)));
-    assert_eq!(
-        spawned.layer(),
-        Layer::Surface
-    );
+    assert_eq!(spawned.layer(), Layer::Surface);
     let (x, y) = spawned.pos();
     assert!((x - 20.5).abs() < 1e-9 && (y - 12.5).abs() < 1e-9);
     assert_eq!(

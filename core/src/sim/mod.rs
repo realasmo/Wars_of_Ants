@@ -18,38 +18,15 @@ pub use snapshot::{
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use crate::balance::*;
 use crate::components::*;
 use crate::math::Vec2;
 use crate::path::tile_of;
 use crate::rng::Rng;
+use crate::rules::GameRules;
 use crate::world::World;
 
 pub const TPS: u32 = 20;
 pub const DT: f64 = 1.0 / TPS as f64;
-
-#[derive(Clone)]
-pub struct Config {
-    pub width: u32,
-    pub height: u32,
-    pub start_workers: u32,
-    pub food_clusters: u32,
-    pub max_ants: u32,
-    pub spiders: u32,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            width: 96,
-            height: 96,
-            start_workers: 3,
-            food_clusters: 6,
-            max_ants: 24,
-            spiders: 2,
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Team {
@@ -85,27 +62,58 @@ pub struct Patch {
 
 #[derive(Clone, Debug)]
 pub enum Command {
-    Move { ant: u32, x: f64, y: f64 },
+    Move {
+        ant: u32,
+        x: f64,
+        y: f64,
+    },
     /// Dig the aligned 2×2 block containing (tx, ty). If the ant is not
     /// adjacent yet it walks there first and digs on arrival.
-    Dig { ant: u32, tx: u32, ty: u32 },
-    Attack { ant: u32, target: u32 },
-    UseEntrance { ant: u32 },
+    Dig {
+        ant: u32,
+        tx: u32,
+        ty: u32,
+    },
+    Attack {
+        ant: u32,
+        target: u32,
+    },
+    UseEntrance {
+        ant: u32,
+    },
     /// Flying queen flies to (x, y), then lands there.
-    Land { ant: u32, x: f64, y: f64 },
+    Land {
+        ant: u32,
+        x: f64,
+        y: f64,
+    },
     /// Grounded queen walks to (x, y), then founds the nest at that tile.
-    FoundNest { ant: u32, x: f64, y: f64 },
+    FoundNest {
+        ant: u32,
+        x: f64,
+        y: f64,
+    },
     /// Drop the carried item at (tx, ty): dirt fills the adjacent fully-empty
     /// 2×2 block (or vanishes on the surface), an egg is placed on the
     /// adjacent empty cell, food is dropped as one unit (≤ cap per cell).
-    Drop { ant: u32, tx: u32, ty: u32 },
+    Drop {
+        ant: u32,
+        tx: u32,
+        ty: u32,
+    },
     /// Squad control (X-menu): the issuing ant is the leader. All/One
     /// recruit nearby ants, Soldiers recruits every soldier, Release
     /// disbands the leader's squad.
-    Follow { leader: u32, mode: FollowMode },
+    Follow {
+        leader: u32,
+        mode: FollowMode,
+    },
     /// Pick up an adjacent egg (keeps its hatch state; carried eggs ride the
     /// carrier and cannot hatch).
-    PickEgg { ant: u32, egg: u32 },
+    PickEgg {
+        ant: u32,
+        egg: u32,
+    },
 }
 
 /// Spawnable entities for dev tools. Natural layers: spiders/food on the
@@ -185,9 +193,9 @@ pub struct Colony {
     /// no auto-laying) governs brood; false in the legacy founded start.
     pub founding: bool,
     /// Seconds since the founding queen last ate (physical feeding model);
-    /// hungry at EAT_PERIOD, dead at EAT_PERIOD + STARVE_TIME.
+    /// hungry at self.rules.eat_period, dead at self.rules.eat_period + self.rules.starve_time.
     pub hunger_t: f64,
-    /// Index into QUEEN_CRAVING_CYCLE — what the queen requests next.
+    /// Index into self.rules.craving_cycle — what the queen requests next.
     pub craving_i: usize,
     /// The designated feeder (founding): one worker whose job is feeding her.
     pub feeder_id: Option<u32>,
@@ -203,7 +211,9 @@ pub struct Sim {
     pub ecs: hecs::World,
     pub rng: Rng,
     pub colony: Colony,
-    pub config: Config,
+    /// The complete ruleset this sim runs under (tuning data, not code —
+    /// see `rules.rs`; folded into the canonical digest).
+    pub rules: GameRules,
     pub tick: u64,
     /// Capped sim-side event log: everything the game did, newest last.
     pub events: VecDeque<String>,
@@ -229,13 +239,15 @@ pub struct Sim {
 
 impl Sim {
     /// Legacy founded start: pre-dug nest, queen + `start_workers` workers.
-    pub fn new(seed: u64, config: Config) -> Sim {
-        Self::build(seed, config, false, Team::Red)
+    pub fn new(seed: u64, rules: GameRules) -> Sim {
+        Self::build(seed, rules, false, Team::Red)
     }
 
     /// Founding start: a lone queen flying over the surface at map center.
+    /// Runs under the default ruleset (the admin panel wave adds rule
+    /// injection; nothing passes overrides yet).
     pub fn new_founding(seed: u64, team: Team) -> Sim {
-        Self::build(seed, Config::default(), true, team)
+        Self::build(seed, GameRules::default(), true, team)
     }
 
     pub fn issue(&mut self, cmd: Command) -> bool {
@@ -269,26 +281,23 @@ impl Sim {
         match what {
             DevSpawn::Worker => self.spawn_ant(Caste::Worker, p, Layer::Underground),
             DevSpawn::Soldier => self.spawn_ant(Caste::Soldier, p, Layer::Underground),
-            DevSpawn::EggWorker => self.spawn_egg(p, Caste::Worker, EGG_TIME),
-            DevSpawn::EggSoldier => self.spawn_egg(p, Caste::Soldier, EGG_TIME),
+            DevSpawn::EggWorker => self.spawn_egg(p, Caste::Worker, self.rules.egg_time),
+            DevSpawn::EggSoldier => self.spawn_egg(p, Caste::Soldier, self.rules.egg_time),
             DevSpawn::Spider => self.spawn_spider(p),
-            DevSpawn::Food => self.spawn_food(p, PILE_AMOUNT, FoodKind::Green),
-            DevSpawn::SuperFood => self.spawn_food(p, SUPER_PER_SPIDER, FoodKind::Super),
-            DevSpawn::Wood => {
-                let id = self.spawn_collectible(Vec2::new(x, y), CollectibleVariant::Wood);
-                return id;
-            }
-            DevSpawn::Wool => {
-                let id = self.spawn_collectible(Vec2::new(x, y), CollectibleVariant::Wool);
-                return id;
-            }
-            DevSpawn::Source(src) => match SOURCES.iter().find(|s| s.src == src) {
-                Some(spec) => {
-                    let amount = (spec.amount.0 + spec.amount.1) / 2;
-                    self.spawn_source(p, spec, amount)
+            DevSpawn::Food => self.spawn_food(p, self.rules.pile_amount, FoodKind::Green),
+            DevSpawn::SuperFood => self.spawn_food(p, self.rules.super_per_spider, FoodKind::Super),
+            DevSpawn::Wood => self.spawn_collectible(Vec2::new(x, y), CollectibleVariant::Wood),
+            DevSpawn::Wool => self.spawn_collectible(Vec2::new(x, y), CollectibleVariant::Wool),
+            DevSpawn::Source(src) => {
+                let spec = self.rules.sources.iter().find(|s| s.src == src).copied();
+                match spec {
+                    Some(spec) => {
+                        let amount = (spec.amount.0 + spec.amount.1) / 2;
+                        self.spawn_source(p, &spec, amount)
+                    }
+                    None => self.spawn_food(p, self.rules.pile_amount, FoodKind::Green),
                 }
-                None => self.spawn_food(p, PILE_AMOUNT, FoodKind::Green),
-            },
+            }
         }
     }
 
@@ -313,7 +322,7 @@ impl Sim {
             Layer::Underground
         };
         let (bx, by) = crate::world::block_of(x, y);
-        if bx + 1 < self.config.width && by + 1 < self.config.height {
+        if bx + 1 < self.rules.width && by + 1 < self.rules.height {
             let soil = match soil {
                 1 => crate::world::SOIL_ORANGE,
                 2 => crate::world::SOIL_SILVER,
@@ -356,7 +365,7 @@ impl Sim {
 
     pub(crate) fn spawn_ant(&mut self, caste: Caste, p: Vec2, layer: Layer) -> u32 {
         let id = self.fresh_id();
-        let st = stats_for(caste);
+        let st = self.rules.stats_for(caste);
         let ent = self.ecs.spawn((
             Ant {
                 caste,
@@ -427,11 +436,11 @@ impl Sim {
         let home = (p.x.floor() as u32, p.y.floor() as u32);
         let ent = self.ecs.spawn((
             Predator {
-                hp: SPIDER.hp,
-                max_hp: SPIDER.hp,
-                dmg: SPIDER.dmg,
-                speed: SPIDER.speed,
-                atk_cd: SPIDER.atk_cd,
+                hp: self.rules.spider.hp,
+                max_hp: self.rules.spider.hp,
+                dmg: self.rules.spider.dmg,
+                speed: self.rules.spider.speed,
+                atk_cd: self.rules.spider.atk_cd,
                 atk_t: 0.0,
                 home,
                 wander_t: 0.0,
@@ -458,7 +467,11 @@ impl Sim {
                 self.ecs.get::<&Pos>(ent),
                 self.ecs.get::<&Food>(ent).is_ok(),
             ) {
-                let key = (pos.layer as u8, pos.p.x.floor() as u32, pos.p.y.floor() as u32);
+                let key = (
+                    pos.layer as u8,
+                    pos.p.x.floor() as u32,
+                    pos.p.y.floor() as u32,
+                );
                 if let Some(set) = self.food_tiles.get_mut(&key) {
                     set.remove(&id);
                     if set.is_empty() {

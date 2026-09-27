@@ -7,7 +7,7 @@
 
 use std::fs;
 
-use woa_core::{Command, Config, DevSpawn, FollowMode, Sim, Team};
+use woa_core::{Command, DevSpawn, FollowMode, GameRules, Sim, Team};
 
 enum Step {
     Cmd(Command),
@@ -98,9 +98,15 @@ fn main() {
                     obj.get("x")?.as_f64()?,
                     obj.get("y")?.as_f64()?,
                 ),
-                "dev-food" => Step::SetFood(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32),
-                "dev-super" => Step::SetSuper(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32),
-                "dev-water" => Step::SetWater(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32),
+                "dev-food" => {
+                    Step::SetFood(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32)
+                }
+                "dev-super" => {
+                    Step::SetSuper(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32)
+                }
+                "dev-water" => {
+                    Step::SetWater(obj.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32)
+                }
                 "dev-kill-spiders" => Step::KillSpiders,
                 "dev-kill" => Step::Kill(obj.get("target")?.as_u64()? as u32),
                 "dev-soil" => Step::SetSoil(
@@ -118,10 +124,7 @@ fn main() {
                 other => panic!("determinism_dump: unknown replay act {other:?} at t={t}"),
             };
             let _ = || -> Option<u32> { Some(obj.get("ant")?.as_u64()? as u32) };
-            let step = match step {
-                Step::Cmd(c) => Step::Cmd(c),
-                s => s,
-            };
+
             Some((t, step))
         })
         .collect();
@@ -134,7 +137,7 @@ fn main() {
         };
         Sim::new_founding(seed, team)
     } else {
-        Sim::new(seed, Config::default())
+        Sim::new(seed, GameRules::default())
     };
     let mut i = 0usize;
     for _ in 0..ticks {

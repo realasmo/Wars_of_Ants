@@ -230,8 +230,7 @@ impl Sim {
             .iter()
         {
             let Some(&id) = rev.get(&ent) else { continue };
-            let activity = if ant.caste == Caste::Queen
-                && self.colony.phase == super::Phase::Flight
+            let activity = if ant.caste == Caste::Queen && self.colony.phase == super::Phase::Flight
             {
                 Activity::Flying
             } else {
@@ -257,18 +256,18 @@ impl Sim {
                 // the request matters once there is a pantry to feed her from
                 && self.world.entrance.is_some();
             let request = is_founding_queen.then(|| {
-                crate::balance::QUEEN_CRAVING_CYCLE[self.colony.craving_i.min(
-                    crate::balance::QUEEN_CRAVING_CYCLE.len() - 1,
-                )]
+                self.rules.craving_cycle[self
+                    .colony
+                    .craving_i
+                    .min(self.rules.craving_cycle.len() - 1)]
             });
             let hunger = if ant.caste == Caste::Queen {
                 if self.colony.founding {
                     // physical model: 0 until hungry, then hungry→death
-                    ((self.colony.hunger_t - crate::balance::EAT_PERIOD)
-                        / crate::balance::STARVE_TIME)
+                    ((self.colony.hunger_t - self.rules.eat_period) / self.rules.starve_time)
                         .clamp(0.0, 1.0)
                 } else {
-                    self.colony.starve_t / crate::balance::STARVE_TIME
+                    self.colony.starve_t / self.rules.starve_time
                 }
             } else {
                 0.0
@@ -297,7 +296,7 @@ impl Sim {
                 FoodRole::Loose {
                     spoil: food
                         .spoil
-                        .map(|t| (t / crate::balance::SPOIL_TIME).clamp(0.0, 1.0)),
+                        .map(|t| (t / self.rules.spoil_time).clamp(0.0, 1.0)),
                 }
             };
             v.push(EntitySnap::Food(FoodSnap {
@@ -366,7 +365,7 @@ impl Sim {
             .unwrap_or_else(|| "-".to_string());
         let (rng_state, rng_inc) = self.rng.state_pair();
         s.push_str(&format!(
-            "t={};c={} p={} w={} del={} eggs={} dead={} q={} ants={} starve={:.4} eat={:.4} lay={:.4} q_len={} phase={:?}({}) phase_t={:.4} team={:?}({}) ent={} cr={:?} hu={:.4} fd={:?};rng={:016x}{:016x};dug={} nid={}",
+            "t={};c={} p={} w={} del={} eggs={} dead={} q={} ants={} starve={:.4} eat={:.4} lay={:.4} q_len={} phase={:?}({}) phase_t={:.4} team={:?}({}) ent={} cr={:?} hu={:.4} fd={:?};rng={:016x}{:016x};dug={} nid={} rules={:016x}",
             self.tick,
             c.carbs,
             c.protein,
@@ -386,14 +385,15 @@ impl Sim {
             c.team,
             c.team as u8,
             entrance,
-            crate::balance::QUEEN_CRAVING_CYCLE
-                [c.craving_i.min(crate::balance::QUEEN_CRAVING_CYCLE.len() - 1)],
+            self.rules.craving_cycle
+                [c.craving_i.min(self.rules.craving_cycle.len() - 1)],
             c.hunger_t,
             c.feeder_id,
             rng_state,
             rng_inc,
             self.dug_tiles,
             self.next_id,
+            self.rules.digest(),
         ));
         s.push_str(&format!(
             ";grid={:016x} {:016x} soil={:016x} {:016x}",
@@ -402,10 +402,7 @@ impl Sim {
             fnv(&self.world.soil_surface),
             fnv(&self.world.soil_underground),
         ));
-        s.push_str(&format!(
-            ";known={:?}",
-            c.known.iter().collect::<Vec<_>>()
-        ));
+        s.push_str(&format!(";known={:?}", c.known.iter().collect::<Vec<_>>()));
         for e in self.snapshot() {
             match e {
                 EntitySnap::Ant(a) => {
@@ -525,11 +522,7 @@ impl Sim {
                 resume,
             } => (
                 "digging".into(),
-                format!(
-                    " {tx},{ty} p{:.4} r{}",
-                    progress,
-                    resume.is_some()
-                ),
+                format!(" {tx},{ty} p{:.4} r{}", progress, resume.is_some()),
             ),
             AntState::Fighting { target } => ("fighting".into(), format!(" t{target}")),
         }
@@ -545,8 +538,15 @@ impl Sim {
         let a = &*ai;
         format!(
             " j{:?} r{} pen{:?} atk{:?} dig{:?} drp{:?} pick{:?} land{} fnd{:?}",
-            a.job, a.retry, a.pending, a.attack_after, a.dig_after, a.drop_after, a.pick_after,
-            a.land_after, a.found_after,
+            a.job,
+            a.retry,
+            a.pending,
+            a.attack_after,
+            a.dig_after,
+            a.drop_after,
+            a.pick_after,
+            a.land_after,
+            a.found_after,
         )
     }
 
@@ -570,7 +570,15 @@ impl Sim {
         let p = &*p;
         format!(
             " hp{:.4}/{:.4} d{} cd{} t{} home{},{} w{:.4} d{:?} t{:?}",
-            p.hp, p.max_hp, p.dmg, p.atk_cd, p.atk_t, p.home.0, p.home.1, p.wander_t, p.dest,
+            p.hp,
+            p.max_hp,
+            p.dmg,
+            p.atk_cd,
+            p.atk_t,
+            p.home.0,
+            p.home.1,
+            p.wander_t,
+            p.dest,
             p.target,
         )
     }
@@ -578,7 +586,7 @@ impl Sim {
 
 /// FNV-1a over raw bytes — stable across platforms and toolchains, unlike
 /// std's DefaultHasher. Folds the big tile/soil grids into the digest.
-fn fnv(bytes: &[u8]) -> u64 {
+pub(crate) fn fnv(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
         h ^= b as u64;

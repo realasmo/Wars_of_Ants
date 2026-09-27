@@ -2,7 +2,6 @@
 //! foraging/pantry logistics decisions, scouting and source discovery.
 
 use super::{Phase, Sim};
-use crate::balance::*;
 use crate::components::*;
 use crate::path::{chebyshev, manhattan, tile_of};
 use crate::world::{block_of, EMPTY, SOIL_SILVER};
@@ -20,7 +19,21 @@ impl Sim {
                 None => continue,
             };
             #[allow(clippy::type_complexity)]
-            let (caste, pos, state, carrying, job, pending, retry, attack_after, dig_after, drop_after, pick_after, land_after, found_after) = {
+            let (
+                caste,
+                pos,
+                state,
+                carrying,
+                job,
+                pending,
+                retry,
+                attack_after,
+                dig_after,
+                drop_after,
+                pick_after,
+                land_after,
+                found_after,
+            ) = {
                 let mut qo = match self
                     .ecs
                     .query_one::<(&Ant, &Pos, &AntState, &Carry, &WorkerAi)>(ent)
@@ -147,7 +160,7 @@ impl Sim {
                 // hungry and holding the craved resource: eat straight from
                 // the mandibles (the solo queen farms her own survival; the
                 // fed queen can top herself up when the feeder is absent)
-                if self.colony.hunger_t >= EAT_PERIOD {
+                if self.colony.hunger_t >= self.rules.eat_period {
                     if let Carry::Food(k) = carrying {
                         if k == self.craving() {
                             if let Some(&aent) = self.ids.get(&id) {
@@ -179,7 +192,7 @@ impl Sim {
                 } else if pos.layer == Layer::Underground && matches!(carrying, Carry::Food(_)) {
                     let tile = tile_of(pos.p);
                     if self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER
-                        && self.cell_food(Layer::Underground, tile) < FOOD_CELL_CAP
+                        && self.cell_food(Layer::Underground, tile) < self.rules.food_cell_cap
                     {
                         self.store_food(id, tile);
                     }
@@ -230,7 +243,8 @@ impl Sim {
             }
             // walk-to-dig intents: dig the remembered block on arrival
             if let Some((bx, by)) = dig_after {
-                if matches!(self.carry_of(id), Carry::Dirt { blocks: DIRT_CAPACITY }) {
+                if matches!(self.carry_of(id), Carry::Dirt { blocks } if blocks == self.rules.dirt_capacity)
+                {
                     // hands full of spoil: haul it out before digging more
                     self.set_dig_after(id, None);
                     self.haul_out_dirt(id);
@@ -296,10 +310,7 @@ impl Sim {
                         // farming resumes clean-handed on the next click
                         self.haul_out_dirt(id);
                     } else if pos.layer == Layer::Underground
-                        && matches!(
-                            carrying,
-                            Carry::Food(FoodKind::Green | FoodKind::Super)
-                        )
+                        && matches!(carrying, Carry::Food(FoodKind::Green | FoodKind::Super))
                     {
                         // bank carried food: on silver cells, or beside the
                         // queen when no pantry cell is handy
@@ -308,7 +319,7 @@ impl Sim {
                             self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER;
                         let near_queen = chebyshev(tile, self.queen_tile()) <= 1;
                         if (on_silver || near_queen)
-                            && self.cell_food(Layer::Underground, tile) < FOOD_CELL_CAP
+                            && self.cell_food(Layer::Underground, tile) < self.rules.food_cell_cap
                         {
                             self.store_food(id, tile);
                         }
@@ -340,7 +351,7 @@ impl Sim {
                         // nothing known to farm: drift where we stand for a
                         // while, then head home and rest (auto-scouting is
                         // gone — far sources are found by the player)
-                        self.set_job(id, Job::Loiter(LOITER_HOPS));
+                        self.set_job(id, Job::Loiter(self.rules.loiter_hops));
                     }
                 }
                 Job::Feed => {
@@ -350,7 +361,7 @@ impl Sim {
                         continue;
                     }
                     let craving = self.craving();
-                    let hungry = self.colony.hunger_t >= EAT_PERIOD;
+                    let hungry = self.colony.hunger_t >= self.rules.eat_period;
                     match carrying {
                         Carry::Food(k) if k == craving => {
                             let (qlayer, qtile) = self.queen_where();
@@ -370,11 +381,12 @@ impl Sim {
                             // this unit, then fetch the new craving
                             if pos.layer == Layer::Underground {
                                 let tile = tile_of(pos.p);
-                                let on_silver = self.soil_at(Layer::Underground, tile.0, tile.1)
-                                    == SOIL_SILVER;
+                                let on_silver =
+                                    self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER;
                                 let near_queen = chebyshev(tile, self.queen_tile()) <= 1;
                                 if (on_silver || near_queen)
-                                    && self.cell_food(Layer::Underground, tile) < FOOD_CELL_CAP
+                                    && self.cell_food(Layer::Underground, tile)
+                                        < self.rules.food_cell_cap
                                 {
                                     self.store_food(id, tile);
                                 } else if let Some((px, py)) = self.pantry_tile() {
@@ -409,9 +421,9 @@ impl Sim {
                                 // beside the queen — her request display is
                                 // the player-facing signal to farm it
                                 let (qlayer, qtile) = self.queen_where();
-                                if qlayer == pos.layer && chebyshev(tile_of(pos.p), qtile) <= 2 {
-                                    self.set_retry(id, 60);
-                                } else if !self.route(id, qlayer, qtile) {
+                                let near =
+                                    qlayer == pos.layer && chebyshev(tile_of(pos.p), qtile) <= 2;
+                                if !near && !self.route(id, qlayer, qtile) {
                                     self.set_retry(id, 60);
                                 }
                             }
@@ -441,11 +453,11 @@ impl Sim {
                     }
                     // one short hop near the current spot, then pause a beat
                     let (cx, cy) = (tile_of(pos.p).0 as i32, tile_of(pos.p).1 as i32);
-                    let r = LOITER_RADIUS as i32;
-                    let dx = self.rng.irange(0, 2 * LOITER_RADIUS) as i32 - r;
-                    let dy = self.rng.irange(0, 2 * LOITER_RADIUS) as i32 - r;
-                    let tx = (cx + dx).clamp(1, self.config.width as i32 - 2) as u32;
-                    let ty = (cy + dy).clamp(1, self.config.height as i32 - 2) as u32;
+                    let r = self.rules.loiter_radius as i32;
+                    let dx = self.rng.irange(0, 2 * self.rules.loiter_radius) as i32 - r;
+                    let dy = self.rng.irange(0, 2 * self.rules.loiter_radius) as i32 - r;
+                    let tx = (cx + dx).clamp(1, self.rules.width as i32 - 2) as u32;
+                    let ty = (cy + dy).clamp(1, self.rules.height as i32 - 2) as u32;
                     self.set_job(id, Job::Loiter(hops - 1));
                     if (tx, ty) == (cx as u32, cy as u32) {
                         self.set_retry(id, 20);
@@ -465,7 +477,7 @@ impl Sim {
                     }
                     if pos.layer == Layer::Underground {
                         // home: rest a stretch before the next glance outside
-                        self.set_job(id, Job::Rest(HOME_REST_TICKS));
+                        self.set_job(id, Job::Rest(self.rules.home_rest_ticks));
                     } else if let Some((ex, ey)) = self.world.entrance {
                         if !self.route(id, Layer::Underground, (ex + 1, ey + 3)) {
                             self.set_retry(id, 60);
@@ -486,14 +498,15 @@ impl Sim {
                     // pop out for a look around the nest mouth — this is how
                     // near-nest sources stay discoverable without scouting
                     if let Some((ex, ey)) = self.world.entrance {
-                        let r = LOITER_RADIUS as i32;
-                        let dx = self.rng.irange(0, 2 * LOITER_RADIUS) as i32 - r;
-                        let dy = self.rng.irange(0, 2 * LOITER_RADIUS) as i32 - r;
-                        let tx = (ex as i32 + 1 + dx).clamp(1, self.config.width as i32 - 2) as u32;
-                        let ty = (ey as i32 + 1 + dy).clamp(1, self.config.height as i32 - 2) as u32;
-                        if pos.layer == Layer::Surface && chebyshev(tile_of(pos.p), (ex, ey)) <= LOITER_RADIUS + 2
+                        let r = self.rules.loiter_radius as i32;
+                        let dx = self.rng.irange(0, 2 * self.rules.loiter_radius) as i32 - r;
+                        let dy = self.rng.irange(0, 2 * self.rules.loiter_radius) as i32 - r;
+                        let tx = (ex as i32 + 1 + dx).clamp(1, self.rules.width as i32 - 2) as u32;
+                        let ty = (ey as i32 + 1 + dy).clamp(1, self.rules.height as i32 - 2) as u32;
+                        if pos.layer == Layer::Surface
+                            && chebyshev(tile_of(pos.p), (ex, ey)) <= self.rules.loiter_radius + 2
                         {
-                            self.set_job(id, Job::Loiter(LOITER_HOPS));
+                            self.set_job(id, Job::Loiter(self.rules.loiter_hops));
                         } else if !self.route(id, Layer::Surface, (tx, ty)) {
                             self.set_retry(id, 60);
                         }
@@ -513,7 +526,8 @@ impl Sim {
                     }
                 }
                 Job::DigTile(tx, ty) => {
-                    if matches!(carrying, Carry::Dirt { blocks: DIRT_CAPACITY }) {
+                    if matches!(carrying, Carry::Dirt { blocks } if blocks == self.rules.dirt_capacity)
+                    {
                         // hands full of spoil: haul it out, then come back
                         self.haul_out_dirt(id);
                         continue;
@@ -554,10 +568,8 @@ impl Sim {
                         continue;
                     };
                     if llayer == pos.layer {
-                        if chebyshev(tile_of(pos.p), ltile) > 2 {
-                            if !self.route(id, llayer, ltile) {
-                                self.set_retry(id, 30);
-                            }
+                        if chebyshev(tile_of(pos.p), ltile) > 2 && !self.route(id, llayer, ltile) {
+                            self.set_retry(id, 30);
                         }
                         // close enough: hold position with the squad
                     } else if !self.route(id, llayer, ltile) {
@@ -618,7 +630,7 @@ impl Sim {
                     if pos.layer == Layer::Underground {
                         let tile = tile_of(pos.p);
                         if tile == (tx, ty) {
-                            if self.cell_food(Layer::Underground, tile) < FOOD_CELL_CAP {
+                            if self.cell_food(Layer::Underground, tile) < self.rules.food_cell_cap {
                                 self.store_food(id, tile);
                                 self.set_job(id, Job::Idle);
                             } else {
@@ -652,13 +664,17 @@ impl Sim {
         }
         let mut leads: Vec<(u32, Lead)> = Vec::new();
         for id in self.ant_ids() {
-            let Some(&ent) = self.ids.get(&id) else { continue };
+            let Some(&ent) = self.ids.get(&id) else {
+                continue;
+            };
             let info = self
                 .ecs
                 .query_one::<(&AntState, &WorkerAi)>(ent)
                 .ok()
                 .and_then(|mut q| q.get().map(|(st, ai)| ((*st).clone(), ai.attack_after)));
-            let Some((state, attack_after)) = info else { continue };
+            let Some((state, attack_after)) = info else {
+                continue;
+            };
             let lead = if let Some(t) = attack_after {
                 // the attack order was just issued (walk-to-attack included)
                 Lead::Attack(t)
@@ -724,7 +740,9 @@ impl Sim {
         }
         let feeder_ok = |sim: &Sim, id: u32| -> bool {
             sim.ids.get(&id).is_some_and(|&e| {
-                sim.ecs.get::<&Ant>(e).is_ok_and(|a| a.caste == Caste::Worker)
+                sim.ecs
+                    .get::<&Ant>(e)
+                    .is_ok_and(|a| a.caste == Caste::Worker)
                     && sim
                         .ecs
                         .get::<&WorkerAi>(e)
@@ -745,7 +763,9 @@ impl Sim {
             match lost {
                 Some(old) => {
                     self.set_job(c, Job::Feed);
-                    self.ev(format!("feeder #{old} unavailable — worker #{c} feeds the queen"));
+                    self.ev(format!(
+                        "feeder #{old} unavailable — worker #{c} feeds the queen"
+                    ));
                 }
                 None => {
                     self.set_job(c, Job::Feed);
@@ -783,7 +803,7 @@ impl Sim {
             let tile = tile_of(fp.p);
             if ants
                 .iter()
-                .any(|&(ax, ay)| chebyshev((ax, ay), tile) <= SIGHT_RANGE)
+                .any(|&(ax, ay)| chebyshev((ax, ay), tile) <= self.rules.sight_range)
             {
                 found.push(fid);
             }
@@ -864,7 +884,7 @@ impl Sim {
                 if self.world.underground.get(tile.0, tile.1) != EMPTY {
                     continue;
                 }
-                if self.cell_food(Layer::Underground, tile) >= FOOD_CELL_CAP {
+                if self.cell_food(Layer::Underground, tile) >= self.rules.food_cell_cap {
                     continue;
                 }
                 if self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER {
@@ -897,7 +917,7 @@ impl Sim {
 
     pub(crate) fn pick_dig_target(&self) -> Option<(u32, u32)> {
         let (qx, qy) = self.queen_tile();
-        for r in 1u32..=DIG_EXPAND_RADIUS {
+        for r in 1u32..=self.rules.dig_expand_radius {
             for dy in -(r as i32)..=(r as i32) {
                 for dx in -(r as i32)..=(r as i32) {
                     if dx.abs() != r as i32 && dy.abs() != r as i32 {
@@ -907,8 +927,8 @@ impl Sim {
                     let y = qy as i32 + dy;
                     if x < 1
                         || y < 1
-                        || x >= self.config.width as i32 - 1
-                        || y >= self.config.height as i32 - 1
+                        || x >= self.rules.width as i32 - 1
+                        || y >= self.rules.height as i32 - 1
                     {
                         continue;
                     }
@@ -949,8 +969,8 @@ impl Sim {
                     let y = qy as i32 + dy;
                     if x < 1
                         || y < 1
-                        || x >= self.config.width as i32 - 1
-                        || y >= self.config.height as i32 - 1
+                        || x >= self.rules.width as i32 - 1
+                        || y >= self.rules.height as i32 - 1
                     {
                         continue;
                     }

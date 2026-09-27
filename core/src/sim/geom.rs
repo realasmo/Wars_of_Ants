@@ -20,9 +20,8 @@ impl Sim {
         let mut tiles = g.tiles.clone();
         for by in (0..g.h - 1).step_by(2) {
             for bx in (0..g.w - 1).step_by(2) {
-                let full = (0..2u32).all(|dy| {
-                    (0..2u32).all(|dx| Grid::is_soft(g.get(bx + dx, by + dy)))
-                });
+                let full =
+                    (0..2u32).all(|dy| (0..2u32).all(|dx| Grid::is_soft(g.get(bx + dx, by + dy))));
                 if !full {
                     for dy in 0..2u32 {
                         for dx in 0..2u32 {
@@ -43,7 +42,7 @@ impl Sim {
     }
 
     pub(crate) fn block_in_bounds(&self, bx: u32, by: u32) -> bool {
-        bx + 1 < self.config.width && by + 1 < self.config.height
+        bx + 1 < self.rules.width && by + 1 < self.rules.height
     }
 
     pub(crate) fn block_soft(&self, bx: u32, by: u32) -> bool {
@@ -55,9 +54,8 @@ impl Sim {
 
     pub(crate) fn block_empty(&self, bx: u32, by: u32) -> bool {
         self.block_in_bounds(bx, by)
-            && (0..2u32).all(|dy| {
-                (0..2u32).all(|dx| self.world.underground.get(bx + dx, by + dy) == EMPTY)
-            })
+            && (0..2u32)
+                .all(|dy| (0..2u32).all(|dx| self.world.underground.get(bx + dx, by + dy) == EMPTY))
     }
 
     /// Chebyshev distance from the ant's tile to the 2×2 block, tile-granular.
@@ -99,12 +97,12 @@ impl Sim {
             Layer::Surface => &self.world.soil_surface,
             Layer::Underground => &self.world.soil_underground,
         };
-        v[(y * self.config.width + x) as usize]
+        v[(y * self.rules.width + x) as usize]
     }
 
     pub(crate) fn set_soil_block(&mut self, layer: Layer, bx: u32, by: u32, soil: u8) {
         self.soil_epoch += 1;
-        let w = self.config.width;
+        let w = self.rules.width;
         let v = match layer {
             Layer::Surface => &mut self.world.soil_surface,
             Layer::Underground => &mut self.world.soil_underground,
@@ -130,7 +128,11 @@ impl Sim {
                 }
                 let x = c.0 as i32 + dx;
                 let y = c.1 as i32 + dy;
-                if x < 1 || y < 1 || x >= self.config.width as i32 - 1 || y >= self.config.height as i32 - 1 {
+                if x < 1
+                    || y < 1
+                    || x >= self.rules.width as i32 - 1
+                    || y >= self.rules.height as i32 - 1
+                {
                     continue;
                 }
                 v.push((x as u32, y as u32));
@@ -138,5 +140,4 @@ impl Sim {
         }
         v
     }
-
 }

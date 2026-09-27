@@ -2,10 +2,10 @@
 //! progress and spoiling.
 
 use super::Sim;
-use crate::balance::{FOOD_CELL_CAP, SourceSpec};
 use crate::components::{Carry, Collectible, CollectibleVariant, Food, FoodKind, Layer, Pos};
 use crate::math::Vec2;
 use crate::path::tile_of;
+use crate::rules::SourceSpec;
 use crate::world::{tile_center, EMPTY};
 use hecs::Entity;
 
@@ -75,7 +75,10 @@ impl Sim {
                 if self.grid_of(Layer::Surface).get(tile.0, tile.1) != EMPTY {
                     continue;
                 }
-                let room = FOOD_CELL_CAP.saturating_sub(self.cell_food(Layer::Surface, tile));
+                let room = self
+                    .rules
+                    .food_cell_cap
+                    .saturating_sub(self.cell_food(Layer::Surface, tile));
                 if room == 0 {
                     continue;
                 }
@@ -133,7 +136,7 @@ impl Sim {
             let room = self
                 .ecs
                 .get::<&Food>(ent)
-                .map(|f| f.kind == kind && f.amount < FOOD_CELL_CAP)
+                .map(|f| f.kind == kind && f.amount < self.rules.food_cell_cap)
                 .unwrap_or(false);
             if room {
                 if let Ok(mut q) = self.ecs.get::<&mut Food>(ent) {
@@ -171,7 +174,10 @@ impl Sim {
             FoodKind::Carbs | FoodKind::Green => "carbs",
             FoodKind::Protein | FoodKind::Super => "protein",
         };
-        self.ev(format!("ant #{ant} banked 1 {rname} at ({},{})", tile.0, tile.1));
+        self.ev(format!(
+            "ant #{ant} banked 1 {rname} at ({},{})",
+            tile.0, tile.1
+        ));
         self.spawn_unit_food(Layer::Underground, tile, kind, None);
         // pantry piles never spoil and are not forage targets
         for fid in self.food_on(Layer::Underground, tile) {
@@ -237,8 +243,10 @@ impl Sim {
 
     /// What the queen requests right now.
     pub(crate) fn craving(&self) -> FoodKind {
-        crate::balance::QUEEN_CRAVING_CYCLE
-            [self.colony.craving_i.min(crate::balance::QUEEN_CRAVING_CYCLE.len() - 1)]
+        self.rules.craving_cycle[self
+            .colony
+            .craving_i
+            .min(self.rules.craving_cycle.len() - 1)]
     }
 
     /// The pantry pile the feeder should withdraw from: the nearest stored
@@ -250,8 +258,7 @@ impl Sim {
         let mut best: Option<(u32, u32)> = None; // (chebyshev dist, id)
         for &fid in &self.food_ids() {
             let ent = self.ids[&fid];
-            let (Ok(fp), Ok(ff)) = (self.ecs.get::<&Pos>(ent), self.ecs.get::<&Food>(ent))
-            else {
+            let (Ok(fp), Ok(ff)) = (self.ecs.get::<&Pos>(ent), self.ecs.get::<&Food>(ent)) else {
                 continue;
             };
             if !ff.stored || ff.amount == 0 || ff.kind != craving {
@@ -335,7 +342,7 @@ impl Sim {
     /// craving advances to the next in the cycle.
     pub(crate) fn queen_fed(&mut self, who: String, fed: FoodKind) {
         self.colony.hunger_t = 0.0;
-        self.colony.craving_i = (self.colony.craving_i + 1) % crate::balance::QUEEN_CRAVING_CYCLE.len();
+        self.colony.craving_i = (self.colony.craving_i + 1) % self.rules.craving_cycle.len();
         let next = self.craving();
         self.ev(format!(
             "{who} fed the queen 1 {} — next: {}",
@@ -362,7 +369,10 @@ impl Sim {
         let id = self.fresh_id();
         let ent = self.ecs.spawn((
             Collectible { variant },
-            Pos { p, layer: Layer::Surface },
+            Pos {
+                p,
+                layer: Layer::Surface,
+            },
         ));
         self.ids.insert(id, ent);
         id
@@ -374,8 +384,12 @@ impl Sim {
         tile: (u32, u32),
     ) -> Option<(u32, CollectibleVariant)> {
         for (&id, &ent) in self.ids.iter() {
-            let Ok(c) = self.ecs.get::<&Collectible>(ent) else { continue };
-            let Ok(pos) = self.ecs.get::<&Pos>(ent) else { continue };
+            let Ok(c) = self.ecs.get::<&Collectible>(ent) else {
+                continue;
+            };
+            let Ok(pos) = self.ecs.get::<&Pos>(ent) else {
+                continue;
+            };
             if pos.layer == Layer::Surface && tile_of(pos.p) == tile {
                 return Some((id, c.variant));
             }

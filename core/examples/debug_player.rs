@@ -1,7 +1,7 @@
-use woa_core::{Carry, Caste, Command, Config, EntitySnap, Layer, Sim};
+use woa_core::{Carry, Caste, Command, EntitySnap, GameRules, Layer, Sim};
 
 fn main() {
-    let mut s = Sim::new(31, Config::default());
+    let mut s = Sim::new(31, GameRules::default());
     let w = s
         .snapshot()
         .into_iter()

@@ -1,16 +1,16 @@
-mod balance;
 mod components;
 mod math;
 mod path;
 mod rng;
+mod rules;
 mod sim;
 mod world;
 
-pub use balance::{SourceSpec, UnitStats, SOURCES, START_FOOD};
 pub use components::{AntState, Carry, Caste, FoodKind, Layer, WorkerAi};
+pub use rules::{GameRules, SourceSpec, UnitStats};
 pub use sim::{
-    Activity, AntSnap, Colony, Command, Config, DevSpawn, EggSnap, EntitySnap, FollowMode,
-    FoodRole, FoodSnap, Phase, Sim, SpiderSnap, Team, DT, TPS,
+    Activity, AntSnap, Colony, Command, DevSpawn, EggSnap, EntitySnap, FollowMode, FoodRole,
+    FoodSnap, Phase, Sim, SpiderSnap, Team, DT, TPS,
 };
 pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK, SOIL_NONE, SOIL_ORANGE, SOIL_SILVER};
 
@@ -21,7 +21,7 @@ use wasm_bindgen::prelude::*;
 /// (however slight), WAVE bumps per shipped feature wave, -dev is constant
 /// while the game is in development. Single source of truth: edit this one
 /// line in the same commit as any game change.
-pub const GAME_VERSION: &str = "0.1.02.54-dev";
+pub const GAME_VERSION: &str = "0.1.03.55-dev";
 
 #[wasm_bindgen]
 pub fn game_version() -> String {
@@ -49,13 +49,13 @@ pub struct WoaSim {
 impl WoaSim {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u64, workers: u32, clusters: u32) -> WoaSim {
-        let config = Config {
+        let rules = GameRules {
             start_workers: workers,
             food_clusters: clusters,
-            ..Config::default()
+            ..GameRules::default()
         };
         WoaSim {
-            inner: Sim::new(seed, config),
+            inner: Sim::new(seed, rules),
         }
     }
 
@@ -195,7 +195,7 @@ impl WoaSim {
     }
 
     pub fn dims(&self) -> Vec<u32> {
-        vec![self.inner.config.width, self.inner.config.height]
+        vec![self.inner.rules.width, self.inner.rules.height]
     }
 
     pub fn entrance(&self) -> Vec<u32> {
@@ -317,8 +317,7 @@ impl WoaSim {
                             a.following.map(|l| l as f64 + 1.0).unwrap_or(0.0),
                             // p6: the queen's craved resource (food code);
                             // 0 for everyone else / no craving
-                            a.request.map(wire::food_code).unwrap_or(wire::REQUEST_NONE)
-                                as f64,
+                            a.request.map(wire::food_code).unwrap_or(wire::REQUEST_NONE) as f64,
                         ],
                     );
                 }

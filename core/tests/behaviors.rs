@@ -2,7 +2,7 @@
 //! docs/AUDIT.md): friendly fire, the queen retry freeze, and attack
 //! engagement semantics.
 
-use woa_core::{AntSnap, Caste, Command, Config, DevSpawn, EntitySnap, Phase, Sim, Team, EMPTY};
+use woa_core::{AntSnap, Caste, Command, DevSpawn, EntitySnap, GameRules, Sim, Team, EMPTY};
 
 fn queen(s: &Sim) -> AntSnap {
     s.snapshot()
@@ -17,7 +17,11 @@ fn queen(s: &Sim) -> AntSnap {
 fn founded(seed: u64) -> Sim {
     let mut s = Sim::new_founding(seed, Team::Red);
     let q = queen(&s);
-    assert!(s.issue(Command::Land { ant: q.id, x: q.x, y: q.y }));
+    assert!(s.issue(Command::Land {
+        ant: q.id,
+        x: q.x,
+        y: q.y
+    }));
     assert!(s.issue(Command::FoundNest {
         ant: q.id,
         x: q.x,
@@ -29,7 +33,7 @@ fn founded(seed: u64) -> Sim {
 #[test]
 fn attack_on_own_colony_is_refused() {
     // no friendly fire: a worker may not be ordered to attack colony ants
-    let mut s = Sim::new(7, Config::default());
+    let mut s = Sim::new(7, GameRules::default());
     let ids: Vec<(u32, Caste)> = s
         .snapshot()
         .into_iter()
@@ -94,10 +98,14 @@ fn queen_recovers_from_retry_backoff() {
                 continue;
             }
             let ring_empty = [
-                (bx.wrapping_sub(1), by), (bx.wrapping_sub(1), by + 1),
-                (bx + 2, by), (bx + 2, by + 1),
-                (bx, by.wrapping_sub(1)), (bx + 1, by.wrapping_sub(1)),
-                (bx, by + 2), (bx + 1, by + 2),
+                (bx.wrapping_sub(1), by),
+                (bx.wrapping_sub(1), by + 1),
+                (bx + 2, by),
+                (bx + 2, by + 1),
+                (bx, by.wrapping_sub(1)),
+                (bx + 1, by.wrapping_sub(1)),
+                (bx, by + 2),
+                (bx + 1, by + 2),
             ]
             .iter()
             .any(|&(x, y)| s.tile_at(woa_core::Layer::Underground, x, y) == EMPTY);
@@ -164,14 +172,10 @@ fn attack_intent_survives_a_routed_chase() {
         // she must reach the surface and actually fight: the spider takes
         // damage (queen dmg is 0 — engagement is proven by the spider
         // targeting her back / her Fighting activity)
-        if let Some(a) = s
-            .snapshot()
-            .into_iter()
-            .find_map(|e| match e {
-                EntitySnap::Ant(a) if a.id == q.id => Some(a),
-                _ => None,
-            })
-        {
+        if let Some(a) = s.snapshot().into_iter().find_map(|e| match e {
+            EntitySnap::Ant(a) if a.id == q.id => Some(a),
+            _ => None,
+        }) {
             if a.activity == woa_core::Activity::Fighting {
                 assert_eq!(a.layer, woa_core::Layer::Surface);
                 return;

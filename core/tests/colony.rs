@@ -1,6 +1,4 @@
-use woa_core::{
-    Carry, Caste, Command, Config, EntitySnap, FoodRole, Layer, Sim, DIRT, EMPTY,
-};
+use woa_core::{Carry, Caste, Command, EntitySnap, GameRules, Layer, Sim, DIRT, EMPTY};
 
 fn first_worker(s: &Sim) -> u32 {
     s.snapshot()
@@ -21,8 +19,8 @@ fn ant_by_id(s: &Sim, id: u32) -> Option<woa_core::AntSnap> {
 
 #[test]
 fn deterministic_same_seed() {
-    let mut a = Sim::new(42, Config::default());
-    let mut b = Sim::new(42, Config::default());
+    let mut a = Sim::new(42, GameRules::default());
+    let mut b = Sim::new(42, GameRules::default());
     for _ in 0..2000 {
         a.tick();
         b.tick();
@@ -37,9 +35,9 @@ fn colony_grows() {
     // 12 clusters: enough finite food that survival at the 30k-tick horizon is
     // guaranteed, not seed luck (every legacy world starves once its piles
     // run out — the queen alone eats ~1200 carbs in 30k ticks)
-    let cfg = Config {
+    let cfg = GameRules {
         food_clusters: 12,
-        ..Config::default()
+        ..GameRules::default()
     };
     let mut s = Sim::new(7, cfg);
     for _ in 0..30_000 {
@@ -61,10 +59,10 @@ fn colony_grows() {
 
 #[test]
 fn queen_starves_without_food() {
-    let cfg = Config {
+    let cfg = GameRules {
         food_clusters: 0,
         start_workers: 1,
-        ..Config::default()
+        ..GameRules::default()
     };
     let mut s = Sim::new(3, cfg);
     for _ in 0..6000 {
@@ -75,11 +73,11 @@ fn queen_starves_without_food() {
 
 #[test]
 fn nest_expands_when_brood_space_runs_out() {
-    let cfg = Config {
+    let cfg = GameRules {
         food_clusters: 12,
         max_ants: 60,
         start_workers: 4,
-        ..Config::default()
+        ..GameRules::default()
     };
     let mut s = Sim::new(11, cfg);
     for _ in 0..40_000 {
@@ -95,11 +93,11 @@ fn nest_expands_when_brood_space_runs_out() {
 
 #[test]
 fn spider_dies_to_swarm_and_soldier_is_bred() {
-    let cfg = Config {
+    let cfg = GameRules {
         spiders: 1,
         start_workers: 8,
         food_clusters: 4,
-        ..Config::default()
+        ..GameRules::default()
     };
     let mut s = Sim::new(23, cfg);
     let spider = s
@@ -125,8 +123,7 @@ fn spider_dies_to_swarm_and_soldier_is_bred() {
             }
         }
         s.tick();
-        if s
-            .snapshot()
+        if s.snapshot()
             .iter()
             .any(|e| matches!(e, EntitySnap::Ant(a) if a.caste == Caste::Soldier))
         {
@@ -142,7 +139,7 @@ fn spider_dies_to_swarm_and_soldier_is_bred() {
 
 #[test]
 fn player_loop_entrance_pickup_deposit() {
-    let mut s = Sim::new(31, Config::default());
+    let mut s = Sim::new(31, GameRules::default());
     let w = first_worker(&s);
     assert!(s.issue(Command::UseEntrance { ant: w }));
     let mut surfaced = false;
@@ -221,7 +218,7 @@ fn player_loop_entrance_pickup_deposit() {
 
 #[test]
 fn dig_command_digs_tile() {
-    let mut s = Sim::new(1, Config::default());
+    let mut s = Sim::new(1, GameRules::default());
     let e = s.world.entrance.unwrap().0;
     assert_eq!(s.tile_at(Layer::Underground, e + 3, 2), DIRT);
     let w = first_worker(&s);

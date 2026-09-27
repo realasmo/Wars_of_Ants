@@ -1,10 +1,10 @@
-use woa_core::{Config, Sim};
+use woa_core::{GameRules, Sim};
 fn main() {
-    let cfg = Config {
+    let cfg = GameRules {
         food_clusters: 12,
         max_ants: 200,
         start_workers: 4,
-        ..Config::default()
+        ..GameRules::default()
     };
     let mut s = Sim::new(11, cfg);
     for _ in 0..40_000 {
