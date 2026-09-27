@@ -38,7 +38,9 @@ impl Sim {
                 let hands_diggable = match carrying {
                     Carry::None => true,
                     Carry::Dirt { blocks } => blocks < self.rules.dirt_capacity,
-                    Carry::Egg | Carry::Food(_) | Carry::Wood | Carry::Wool => false,
+                    Carry::Egg | Carry::Food(_) | Carry::Wood | Carry::Wool | Carry::Fallen => {
+                        false
+                    }
                 };
                 let queen_may_dig = caste == Caste::Queen
                     && self.colony.founding
@@ -165,6 +167,7 @@ impl Sim {
                 true
             }
             Command::Follow { leader, mode } => self.apply_follow(leader, mode),
+            Command::Brood { ant, caste } => self.try_brood(ant, caste).is_ok(),
             Command::PickEgg { ant, egg } => {
                 if !self.is_ant(ant) {
                     return false;
@@ -451,7 +454,9 @@ impl Sim {
                         && self.block_adjacent(ant, bx, by)
                 }
             },
-            Carry::Egg | Carry::Food(_) => chebyshev(self.ant_tile(ant), (tx, ty)) <= 1,
+            Carry::Egg | Carry::Food(_) | Carry::Fallen => {
+                chebyshev(self.ant_tile(ant), (tx, ty)) <= 1
+            }
         }
     }
 
@@ -573,6 +578,48 @@ impl Sim {
                     *q = Carry::None;
                 }
                 true
+            }
+            Carry::Fallen => {
+                // set the downed ant down on the adjacent cell — a medic's
+                // hands-off placement (the AI heals once the patient is home)
+                if !self.grid_of(layer).in_bounds(tx, ty)
+                    || chebyshev(self.ant_tile(ant), (tx, ty)) > 1
+                {
+                    return false;
+                }
+                let mut placed = false;
+                for oid in self.ant_ids() {
+                    let Some(&oent) = self.ids.get(&oid) else {
+                        continue;
+                    };
+                    let mine = self
+                        .ecs
+                        .get::<&Fallen>(oent)
+                        .map(|f| f.carried_by == Some(ant))
+                        .unwrap_or(false);
+                    if !mine {
+                        continue;
+                    }
+                    if let Some(q) = self
+                        .ecs
+                        .query_one::<(&mut Fallen, &mut Pos)>(oent)
+                        .unwrap()
+                        .get()
+                    {
+                        q.0.carried_by = None;
+                        q.1.p = tile_center(tx, ty);
+                        q.1.layer = layer;
+                    }
+                    placed = true;
+                    self.ev(format!("downed ant #{oid} set down at ({tx},{ty})"));
+                    break;
+                }
+                if placed {
+                    if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                        *q = Carry::None;
+                    }
+                }
+                placed
             }
             Carry::Wood | Carry::Wool => {
                 // nest-building collectibles: underground they convert one
@@ -710,12 +757,17 @@ impl Sim {
                                 pos.layer,
                                 tile_of(pos.p),
                                 matches!(ai.job, Job::Follow(l, _) if l == leader),
+                                // downed ants can't walk to the leader
+                                self.ecs.get::<&Fallen>(ent).is_err(),
                             )
                         })
                     };
-                    let Some((caste, layer, tile, follows)) = info else {
+                    let Some((caste, layer, tile, follows, standing)) = info else {
                         continue;
                     };
+                    if !standing {
+                        continue;
+                    }
                     // the queen never joins a squad (she is player-driven)
                     if caste == Caste::Queen || layer != llayer || follows {
                         continue;
@@ -760,6 +812,103 @@ impl Sim {
             .and_then(|&e| self.ecs.get::<&Carry>(e).ok())
             .map(|c| *c)
             .unwrap_or(Carry::None)
+    }
+
+    /// Queen X-menu brood order (F4). Every refusal explains itself — the
+    /// client flashes the reason in the help bar ("every refused command
+    /// must produce visible feedback").
+    pub fn try_brood(&mut self, ant: u32, caste: Caste) -> Result<(), String> {
+        if ant != self.colony.queen_id {
+            return Err("only the queen lays brood".into());
+        }
+        let Some(cost) = self.rules.brood.for_caste(caste).copied() else {
+            return Err("the queen cannot lay a queen".into());
+        };
+        if self.world.entrance.is_none() {
+            return Err("found the nest first — brood is laid underground".into());
+        }
+        if self.colony.lay_cooldown > 0.0 {
+            return Err(format!(
+                "the queen is resting ({:.0}s between broods)",
+                self.colony.lay_cooldown
+            ));
+        }
+        // costs are paid from the PHYSICAL pantry — check everything first,
+        // then withdraw (atomic: all kinds or nothing)
+        for (kind, need) in [
+            (FoodKind::Protein, cost.protein),
+            (FoodKind::Carbs, cost.carbs),
+            (FoodKind::Water, cost.water),
+            (FoodKind::Honeydew, cost.honeydew),
+        ] {
+            let have = self.pantry_units(kind);
+            if have < need {
+                return Err(format!(
+                    "not enough {} in the pantry ({have}/{need})",
+                    super::snapshot::food_name(kind)
+                ));
+            }
+        }
+        // soldier: one existing worker is consumed by the metamorphosis
+        let mut worker_to_consume: Option<u32> = None;
+        if cost.consumes_worker {
+            worker_to_consume = self
+                .ant_ids()
+                .into_iter()
+                .filter(|&id| {
+                    self.ids.get(&id).is_some_and(|&e| {
+                        self.ecs
+                            .get::<&Ant>(e)
+                            .is_ok_and(|a| a.caste == Caste::Worker)
+                            && self.ecs.get::<&Fallen>(e).is_err()
+                    })
+                })
+                .min();
+            if worker_to_consume.is_none() {
+                return Err("converting a soldier needs one living worker".into());
+            }
+        } else if self.colony.ant_count >= self.rules.max_ants {
+            return Err(format!(
+                "the colony is at its cap ({})",
+                self.rules.max_ants
+            ));
+        }
+        let Some(tile) = self.free_egg_tile() else {
+            return Err("no free cell beside the queen — dig out room".into());
+        };
+        for (kind, need) in [
+            (FoodKind::Protein, cost.protein),
+            (FoodKind::Carbs, cost.carbs),
+            (FoodKind::Water, cost.water),
+            (FoodKind::Honeydew, cost.honeydew),
+        ] {
+            if need > 0 {
+                assert!(self.withdraw_pantry_units(kind, need));
+            }
+        }
+        if let Some(worker) = worker_to_consume {
+            if let Some(&went) = self.ids.get(&worker) {
+                let _ = self.ecs.despawn(went);
+            }
+            self.ids.remove(&worker);
+            self.colony.ant_count -= 1;
+            self.ev(format!("worker #{worker} spins into a soldier brood"));
+        }
+        self.colony.eggs_laid += 1;
+        self.colony.lay_cooldown = self.rules.lay_cooldown;
+        let name = match caste {
+            Caste::Worker => "worker",
+            Caste::Soldier => "soldier",
+            Caste::Honey => "honey",
+            Caste::Medic => "medic",
+            Caste::Queen => "queen",
+        };
+        self.ev(format!(
+            "queen laid a {name} egg at ({},{}) — {:.0}s to hatch",
+            tile.0, tile.1, cost.egg_time
+        ));
+        self.spawn_egg(tile_center(tile.0, tile.1), caste, cost.egg_time);
+        Ok(())
     }
 
     /// Pick up the remembered egg once adjacent; drop the intent if the egg

@@ -37,6 +37,41 @@ pub struct SourceSpec {
     pub count: u32,
 }
 
+/// What the queen spends to lay one brood egg of a caste (F4). Costs are
+/// paid from the physical pantry (stored piles) — the first data-driven
+/// rows of the rules layer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BroodCost {
+    pub protein: u32,
+    pub carbs: u32,
+    pub water: u32,
+    pub honeydew: u32,
+    /// Seconds of incubation for this caste's eggs.
+    pub egg_time: f64,
+    /// Soldier: the order also consumes one existing worker (metamorphosis).
+    pub consumes_worker: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BroodRules {
+    pub worker: BroodCost,
+    pub soldier: BroodCost,
+    pub honey: BroodCost,
+    pub medic: BroodCost,
+}
+
+impl BroodRules {
+    pub fn for_caste(&self, caste: Caste) -> Option<&BroodCost> {
+        match caste {
+            Caste::Worker => Some(&self.worker),
+            Caste::Soldier => Some(&self.soldier),
+            Caste::Honey => Some(&self.honey),
+            Caste::Medic => Some(&self.medic),
+            Caste::Queen => None,
+        }
+    }
+}
+
 /// The complete ruleset a sim runs under. Field names keep the historical
 /// constant names (snake_cased) so graduating a value stays a mechanical,
 /// reviewable change.
@@ -99,8 +134,21 @@ pub struct GameRules {
     pub worker: UnitStats,
     pub soldier: UnitStats,
     pub spider: UnitStats,
+    pub honey: UnitStats,
+    pub medic: UnitStats,
     /// Melee reach shared by all ant castes (kept uniform for now).
     pub ant_range: f64,
+
+    // --- brood production (F4): queen X-menu egg orders ---
+    pub brood: BroodRules,
+    /// Seconds a Honey ant needs to secrete one honeydew unit.
+    pub honey_period: f64,
+    /// Seconds a downed ant bleeds out in (F4 medics).
+    pub bleed_time: f64,
+    /// Seconds a medic's healing takes once the patient is home.
+    pub heal_time: f64,
+    /// Stored water units consumed by one healing.
+    pub water_per_heal: u32,
 
     // --- founding (game start) ---
     /// Flight speed of the founding queen over the surface (tiles/s).
@@ -233,6 +281,14 @@ impl Default for GameRules {
                     harvest: 13.0,
                     count: 5,
                 },
+                // F4: honeydew source until aphid farming (Wave D)
+                SourceSpec {
+                    src: 7,
+                    kind: FoodKind::Honeydew,
+                    amount: (15, 22),
+                    harvest: 10.0,
+                    count: 4,
+                },
             ],
             sight_range: 8,
             protein_per_spider: 8,
@@ -266,7 +322,63 @@ impl Default for GameRules {
                 speed: 2.2,
                 range: 0.8,
             },
+            // specialists (F4): weak fighters — their value is the special role
+            honey: UnitStats {
+                hp: 90.0,
+                dmg: 4.0,
+                atk_cd: 1.0,
+                speed: 2.8,
+                range: 0.9,
+            },
+            medic: UnitStats {
+                hp: 95.0,
+                dmg: 5.0,
+                atk_cd: 1.0,
+                speed: 3.2,
+                range: 0.9,
+            },
             ant_range: 0.9,
+
+            // F4 settled costs (docs/WORLD-DESIGN.md): worker 2p+1w, soldier
+            // 6p+3w + consumes a worker, honey 1p+8h, medic 4p+3c
+            brood: BroodRules {
+                worker: BroodCost {
+                    protein: 2,
+                    carbs: 0,
+                    water: 1,
+                    honeydew: 0,
+                    egg_time: 45.0,
+                    consumes_worker: false,
+                },
+                soldier: BroodCost {
+                    protein: 6,
+                    carbs: 0,
+                    water: 3,
+                    honeydew: 0,
+                    egg_time: 45.0,
+                    consumes_worker: true,
+                },
+                honey: BroodCost {
+                    protein: 1,
+                    carbs: 0,
+                    water: 0,
+                    honeydew: 8,
+                    egg_time: 45.0,
+                    consumes_worker: false,
+                },
+                medic: BroodCost {
+                    protein: 4,
+                    carbs: 3,
+                    water: 0,
+                    honeydew: 0,
+                    egg_time: 45.0,
+                    consumes_worker: false,
+                },
+            },
+            honey_period: 240.0,
+            bleed_time: 60.0,
+            heal_time: 10.0,
+            water_per_heal: 2,
 
             queen_fly_speed: 5.0,
             founding_time: 60.0,
@@ -312,6 +424,8 @@ impl GameRules {
             Caste::Queen => &self.queen,
             Caste::Worker => &self.worker,
             Caste::Soldier => &self.soldier,
+            Caste::Honey => &self.honey,
+            Caste::Medic => &self.medic,
         }
     }
 
@@ -388,6 +502,24 @@ impl GameRules {
         positive(&mut errs, "egg_time", self.egg_time);
         positive(&mut errs, "dig_time", self.dig_time);
         positive(&mut errs, "spoil_time", self.spoil_time);
+        positive(&mut errs, "honey_period", self.honey_period);
+        positive(&mut errs, "bleed_time", self.bleed_time);
+        positive(&mut errs, "heal_time", self.heal_time);
+        for (name, cost) in [
+            ("worker", &self.brood.worker),
+            ("soldier", &self.brood.soldier),
+            ("honey", &self.brood.honey),
+            ("medic", &self.brood.medic),
+        ] {
+            if !(cost.egg_time.is_finite() && cost.egg_time > 0.0) {
+                errs.push(format!("{name} brood egg_time must be > 0"));
+            }
+            if cost.protein == 0 && cost.carbs == 0 && cost.water == 0 && cost.honeydew == 0 {
+                errs.push(format!(
+                    "{name} brood must cost something (free brood breaks the economy)"
+                ));
+            }
+        }
         if self.craving_cycle.is_empty() {
             errs.push("craving_cycle must not be empty".into());
         }
@@ -396,6 +528,8 @@ impl GameRules {
             ("worker", &self.worker),
             ("soldier", &self.soldier),
             ("spider", &self.spider),
+            ("honey", &self.honey),
+            ("medic", &self.medic),
         ] {
             if !(u.hp.is_finite() && u.hp > 0.0) {
                 errs.push(format!("{name} hp must be > 0 (got {})", u.hp));

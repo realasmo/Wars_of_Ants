@@ -135,6 +135,7 @@ impl Sim {
                 carbs: rules.start_food,
                 protein: 0,
                 water: 0,
+                honeydew: 0,
                 delivered: 0,
                 eggs_laid: 0,
                 dead: false,

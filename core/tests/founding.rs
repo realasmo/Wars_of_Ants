@@ -1,6 +1,6 @@
 use woa_core::{
     Activity, AntSnap, Carry, Caste, Command, DevSpawn, EggSnap, EntitySnap, FollowMode, FoodKind,
-    FoodRole, GameRules, Layer, Phase, Sim, Team, DIRT, EMPTY,
+    FoodRole, GameRules, Layer, Phase, Sim, Team, DIRT, EMPTY, TPS,
 };
 
 fn queen(s: &Sim) -> AntSnap {
@@ -2188,4 +2188,348 @@ fn leader_attack_shares_the_target_and_the_squad_returns_afterward() {
         s.tick();
     }
     assert!(follows(&s, f1), "still following after the second kill");
+}
+
+// --- F4: queen brood production, honeydew, medics, retaliation ---
+
+fn source_count(s: &Sim, kind: FoodKind) -> usize {
+    s.snapshot()
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                EntitySnap::Food(f)
+                    if matches!(f.role, FoodRole::Source { .. }) && f.kind == kind
+            )
+        })
+        .count()
+}
+
+/// Non-source food units of one kind (sources are map features, not loot).
+fn carried_or_loose_food(s: &Sim, kind: FoodKind) -> u32 {
+    s.snapshot()
+        .iter()
+        .filter_map(|e| match e {
+            EntitySnap::Food(f) if f.kind == kind && !matches!(f.role, FoodRole::Source { .. }) => {
+                Some(f.amount)
+            }
+            _ => None,
+        })
+        .sum()
+}
+
+fn ant_layer_of(s: &Sim, id: u32) -> Layer {
+    s.snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Ant(a) if a.id == id => Some(a.layer),
+            _ => None,
+        })
+        .unwrap()
+}
+
+/// March an ant out through the entrance and drop a spider on it once it
+/// stands on the surface (returns the spider id).
+fn ambush_on_surface(s: &mut Sim, id: u32) -> u32 {
+    assert!(s.issue(Command::UseEntrance { ant: id }));
+    for _ in 0..(TPS as usize * 40) {
+        s.tick();
+        if ant_layer_of(s, id) == Layer::Surface {
+            let p = s
+                .snapshot()
+                .into_iter()
+                .find_map(|e| match e {
+                    EntitySnap::Ant(a) if a.id == id => Some((a.x, a.y)),
+                    _ => None,
+                })
+                .unwrap();
+            return s.dev_spawn(DevSpawn::Spider, p.0, p.1);
+        }
+    }
+    panic!("ant never reached the surface");
+}
+
+fn kill_worldgen_spiders(s: &mut Sim) {
+    let spiders: Vec<u32> = s
+        .snapshot()
+        .into_iter()
+        .filter_map(|e| match e {
+            EntitySnap::Spider(p) => Some(p.id),
+            _ => None,
+        })
+        .collect();
+    for id in spiders {
+        s.dev_kill(id);
+    }
+}
+
+/// Run the initial 3s lay cooldown down so brood orders are testable.
+fn cooldown_over(s: &mut Sim) {
+    let ticks = (s.rules.lay_cooldown * TPS as f64) as usize + 5;
+    for _ in 0..ticks {
+        s.tick();
+    }
+}
+
+#[test]
+fn nettle_sources_scatter_four_times() {
+    let s = Sim::new_founding(9, Team::Red);
+    assert_eq!(source_count(&s, FoodKind::Honeydew), 4, "4 nettles per map");
+}
+
+#[test]
+fn brood_order_pays_the_physical_pantry_and_lays_an_egg() {
+    let mut s = founded(11);
+    let q = queen(&s);
+    cooldown_over(&mut s);
+    // nothing in the pantry: the refusal names the missing resource
+    let err = s.try_brood(q.id, Caste::Worker).unwrap_err();
+    assert!(err.contains("not enough protein"), "got: {err}");
+    // pay with real stored piles at the queen's tile
+    for _ in 0..2 {
+        s.dev_spawn(DevSpawn::PantryProtein, q.x, q.y);
+    }
+    s.dev_spawn(DevSpawn::PantryWater, q.x, q.y);
+    assert_eq!(s.colony.protein, 2);
+    assert_eq!(s.colony.water, 1);
+    assert!(s.try_brood(q.id, Caste::Worker).is_ok());
+    assert_eq!(
+        s.colony.protein, 0,
+        "ledger synced with the physical withdraw"
+    );
+    assert_eq!(s.colony.water, 0);
+    assert_eq!(s.colony.eggs_laid, 1);
+    assert_eq!(first_egg(&s).caste, Caste::Worker);
+    // an immediate second order hits the lay cooldown
+    let err = s.try_brood(q.id, Caste::Worker).unwrap_err();
+    assert!(err.contains("resting"), "got: {err}");
+}
+
+#[test]
+fn soldier_order_consumes_one_worker() {
+    let mut s = founded(12);
+    let q = queen(&s);
+    cooldown_over(&mut s);
+    let worker = s.dev_spawn(DevSpawn::Worker, q.x, q.y);
+    let _ = worker;
+    for _ in 0..6 {
+        s.dev_spawn(DevSpawn::PantryProtein, q.x, q.y);
+    }
+    for _ in 0..3 {
+        s.dev_spawn(DevSpawn::PantryWater, q.x, q.y);
+    }
+    let ants_before = s.colony.ant_count;
+    assert!(s.try_brood(q.id, Caste::Soldier).is_ok());
+    assert_eq!(
+        workers(&s),
+        0,
+        "the worker was consumed by the metamorphosis"
+    );
+    assert_eq!(s.colony.ant_count, ants_before - 1);
+    assert_eq!(first_egg(&s).caste, Caste::Soldier);
+    assert_eq!(s.colony.protein, 0);
+    assert_eq!(s.colony.water, 0);
+    // without a living worker the order is refused with the reason (re-pay
+    // and re-wait so the cost/cooldown gates don't shadow the worker gate)
+    for _ in 0..6 {
+        s.dev_spawn(DevSpawn::PantryProtein, q.x, q.y);
+    }
+    for _ in 0..3 {
+        s.dev_spawn(DevSpawn::PantryWater, q.x, q.y);
+    }
+    cooldown_over(&mut s);
+    let err = s.try_brood(q.id, Caste::Soldier).unwrap_err();
+    assert!(err.contains("needs one living worker"), "got: {err}");
+}
+
+#[test]
+fn honey_ant_secretes_one_honeydew_per_period() {
+    let mut s = founded(13);
+    let q = queen(&s);
+    kill_worldgen_spiders(&mut s);
+    s.rules.founding_eggs = 0; // isolate: no founding brood hatching mid-test
+                               // silver under the queen's tile: secretion banks straight into the pantry
+    s.dev_set_soil(1, q.x as u32, q.y as u32, 2);
+    // stand the honey ant still on the queen's tile (Manual parks it)
+    let h = s.dev_spawn(DevSpawn::HoneyAnt, q.x, q.y);
+    assert!(s.issue(Command::Move {
+        ant: h,
+        x: q.x,
+        y: q.y
+    }));
+    let period = (s.rules.honey_period * TPS as f64) as usize + 5;
+    for _ in 0..period {
+        s.tick();
+    }
+    assert_eq!(s.colony.honeydew, 1, "one unit per period");
+    assert_eq!(
+        carried_or_loose_food(&s, FoodKind::Honeydew),
+        1,
+        "the unit is physical"
+    );
+}
+
+#[test]
+fn downed_ant_bleeds_out_without_a_medic() {
+    let mut s = founded(14);
+    kill_worldgen_spiders(&mut s);
+    let q = queen(&s);
+    // a lone worker walks out and meets a spider (Manual, so feeder duty
+    // can't pull it back underground and hide it from the spider)
+    let w = s.dev_spawn(DevSpawn::Worker, q.x, q.y);
+    assert!(s.issue(Command::Move {
+        ant: w,
+        x: q.x,
+        y: q.y
+    }));
+    ambush_on_surface(&mut s, w);
+    let budget = (TPS as f64 * (s.rules.bleed_time + 90.0)) as usize;
+    for _ in 0..budget {
+        s.tick();
+    }
+    let events = s.event_lines().join("\n");
+    assert!(
+        events.contains("is DOWN"),
+        "combat downs before killing:\n{events}"
+    );
+    assert!(
+        events.contains("bled out"),
+        "no medic → bleed-out:\n{events}"
+    );
+    assert_eq!(workers(&s), 0, "the worker is gone");
+}
+
+#[test]
+fn medic_rescues_and_heals_a_fallen_ant() {
+    let mut s = founded(15);
+    kill_worldgen_spiders(&mut s);
+    s.rules.founding_eggs = 0; // isolate: no founding brood hatching mid-test
+                               // roomy bleed window: the medic has to cross layers twice; the queen
+                               // never hungers mid-rescue (workers exist, grace is off)
+    s.rules.bleed_time = 180.0;
+    s.rules.eat_period = 1.0e9;
+    let q = queen(&s);
+    // water for the healing, paid from real piles
+    for _ in 0..2 {
+        s.dev_spawn(DevSpawn::PantryWater, q.x, q.y);
+    }
+    let w = s.dev_spawn(DevSpawn::Worker, q.x, q.y);
+    let medic = s.dev_spawn(DevSpawn::MedicAnt, q.x, q.y);
+    assert!(s.issue(Command::Move {
+        ant: w,
+        x: q.x,
+        y: q.y
+    }));
+    ambush_on_surface(&mut s, w);
+    let budget = (TPS as f64 * (s.rules.bleed_time + s.rules.heal_time + 120.0)) as usize;
+    for _ in 0..budget {
+        s.tick();
+    }
+    let events = s.event_lines().join("\n");
+    assert!(
+        events.contains("picked up downed ant"),
+        "medic picked the casualty up:\n{events}"
+    );
+    assert!(
+        events.contains("starts healing"),
+        "healing started (water paid):\n{events}"
+    );
+    assert!(
+        events.contains("back on its feet"),
+        "patient revived:\n{events}"
+    );
+    let events = s.event_lines().join("\n");
+    assert_eq!(
+        s.colony.water, 0,
+        "the healing consumed its water\n--- events ---\n{events}"
+    );
+    let healed = s
+        .snapshot()
+        .into_iter()
+        .find_map(|e| match e {
+            EntitySnap::Ant(a) if a.id == w => Some(a),
+            _ => None,
+        })
+        .expect("the worker survived");
+    assert_eq!(healed.hp, 1.0, "revived at full hp");
+    let _ = medic;
+}
+
+#[test]
+fn queen_brood_recovers_the_founder_softlock() {
+    let mut s = founded(16);
+    // run the founding script out: 4 eggs, then kill them all — the exact
+    // softlock state the user hit live (0 eggs + 0 workers, forever)
+    let founding = (TPS as f64 * s.rules.founding_time) as usize + 5;
+    for _ in 0..founding {
+        s.tick();
+    }
+    assert_eq!(eggs(&s), 4);
+    let egg_ids: Vec<u32> = s
+        .snapshot()
+        .into_iter()
+        .filter_map(|e| match e {
+            EntitySnap::Egg(e) => Some(e.id),
+            _ => None,
+        })
+        .collect();
+    for id in egg_ids {
+        assert!(s.dev_kill(id));
+    }
+    assert_eq!(eggs(&s), 0);
+    assert_eq!(workers(&s), 0);
+    assert!(
+        !s.colony.dead,
+        "the softlock is a live queen, stuck forever"
+    );
+    // F4 is the fix: pay the pantry and order a new worker
+    cooldown_over(&mut s);
+    let q = queen(&s);
+    for _ in 0..2 {
+        s.dev_spawn(DevSpawn::PantryProtein, q.x, q.y);
+    }
+    s.dev_spawn(DevSpawn::PantryWater, q.x, q.y);
+    assert!(s.try_brood(q.id, Caste::Worker).is_ok());
+    assert_eq!(eggs(&s), 1);
+    // hatch it: orange under the egg, incubation out
+    let egg = first_egg(&s);
+    s.dev_set_soil(1, egg.x as u32, egg.y as u32, 1);
+    let hatch = (TPS as f64 * s.rules.egg_time) as usize + 10;
+    for _ in 0..hatch {
+        s.tick();
+    }
+    assert_eq!(workers(&s), 1, "colony recovered from 0 eggs + 0 workers");
+}
+
+#[test]
+fn squad_retaliates_when_the_leader_is_attacked() {
+    let mut s = founded(17);
+    kill_worldgen_spiders(&mut s);
+    let q = queen(&s);
+    let leader = s.dev_spawn(DevSpawn::Worker, q.x, q.y);
+    let f1 = s.dev_spawn(DevSpawn::Worker, q.x, q.y);
+    // squad up in the chamber (same layer, within sight)
+    assert!(s.issue(Command::Follow {
+        leader,
+        mode: FollowMode::All
+    }));
+    assert_eq!(atk_token(&s, f1), "None", "no intent before any attack");
+    // the leader walks out and takes a spider hit
+    ambush_on_surface(&mut s, leader);
+    let budget = TPS as usize * 60;
+    for _ in 0..budget {
+        s.tick();
+        if atk_token(&s, f1) != "None" {
+            break;
+        }
+    }
+    assert!(
+        atk_token(&s, f1).starts_with("Some("),
+        "the follower turns on the spider that hit the leader"
+    );
+}
+
+#[test]
+fn game_rules_default_validates() {
+    assert!(GameRules::default().validate().is_ok());
 }

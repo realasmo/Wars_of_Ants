@@ -356,7 +356,12 @@ impl Sim {
                     .get(&t)
                     .and_then(|&te| self.ecs.get::<&Pos>(te).ok())
                     .map(|p| p.layer == Layer::Surface)
-                    .unwrap_or(false);
+                    .unwrap_or(false)
+                    && self
+                        .ids
+                        .get(&t)
+                        .map(|&te| self.ecs.get::<&Fallen>(te).is_err())
+                        .unwrap_or(false); // downed ants are not prey
                 if !valid {
                     pred.target = None;
                 }
@@ -370,7 +375,7 @@ impl Sim {
                         let Ok(ap) = self.ecs.get::<&Pos>(aent) else {
                             continue;
                         };
-                        if ap.layer != Layer::Surface {
+                        if ap.layer != Layer::Surface || self.ecs.get::<&Fallen>(aent).is_ok() {
                             continue;
                         }
                         let d = (ap.p - pos.p).len();
@@ -409,6 +414,10 @@ impl Sim {
                             if let Ok(mut c) = self.ecs.get::<&mut Combat>(tent) {
                                 c.hp -= pred.dmg;
                             }
+                            // retaliation (F4): an attacked leader's squad
+                            // turns on the attacker — same shared-target
+                            // semantics as the leader's own attack order
+                            self.retaliate(t, pid);
                         }
                     }
                 }
@@ -461,15 +470,21 @@ impl Sim {
             .ant_ids()
             .into_iter()
             .filter(|&id| {
-                self.ids
-                    .get(&id)
-                    .and_then(|&e| self.ecs.get::<&Combat>(e).ok())
-                    .map(|c| c.hp <= 0.0)
-                    .unwrap_or(false)
+                // downed ants already sit at hp 0 — they bleed out in
+                // `specialists`, not here
+                self.ids.get(&id).is_some_and(|&e| {
+                    self.ecs.get::<&Combat>(e).is_ok_and(|c| c.hp <= 0.0)
+                        && self.ecs.get::<&Fallen>(e).is_err()
+                })
             })
             .collect();
         for id in dead_ants {
-            self.kill_cause(id, "combat");
+            if id == self.colony.queen_id {
+                // the queen never downs — her death ends the colony
+                self.kill_cause(id, "combat");
+            } else {
+                self.fall_ant(id);
+            }
         }
         let dead_predators: Vec<u32> = self
             .ids
@@ -591,7 +606,9 @@ impl Sim {
                                 self.colony.protein -= self.rules.soldier_cost_super;
                             }
                             Caste::Worker => self.colony.carbs -= self.rules.egg_cost,
-                            Caste::Queen => {}
+                            // the legacy auto-laying above only ever picks
+                            // Worker/Soldier — the F4 castes are queen-ordered
+                            Caste::Queen | Caste::Honey | Caste::Medic => {}
                         }
                         self.colony.eggs_laid += 1;
                         self.colony.lay_cooldown = self.rules.lay_cooldown;
@@ -684,6 +701,242 @@ impl Sim {
                 self.ev(format!("egg #{id} ready — waiting for orange soil"));
             } else if let Ok(mut q) = self.ecs.get::<&mut Egg>(ent) {
                 q.hatch = hatch.max(0.0);
+            }
+        }
+    }
+
+    /// Specialist-caste systems (F4): honey secretion, the downed-ant
+    /// bleed/heal cycle. Runs after queen_system, before eggs.
+    pub(crate) fn specialists(&mut self) {
+        // Honey ants secrete one honeydew unit per honey_period where they
+        // stand: on a silver pantry cell it banks (ledger + pile, like any
+        // delivery), anywhere else it drops as a spoiling loose unit that
+        // workers must haul home.
+        let honeys: Vec<u32> = self
+            .ant_ids()
+            .into_iter()
+            .filter(|&id| {
+                self.ids
+                    .get(&id)
+                    .map(|&e| {
+                        self.ecs
+                            .get::<&Ant>(e)
+                            .is_ok_and(|a| a.caste == Caste::Honey)
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+        for id in honeys {
+            let Some(&ent) = self.ids.get(&id) else {
+                continue;
+            };
+            let (gen_t, pos) = match self
+                .ecs
+                .query_one::<(&mut Ant, &Pos)>(ent)
+                .ok()
+                .and_then(|mut q| q.get().map(|(a, p)| (a.gen_t, *p)))
+            {
+                Some(v) => v,
+                None => continue,
+            };
+            let gen_t = gen_t + DT;
+            if gen_t < self.rules.honey_period {
+                if let Ok(mut a) = self.ecs.get::<&mut Ant>(ent) {
+                    a.gen_t = gen_t;
+                }
+                continue;
+            }
+            if let Ok(mut a) = self.ecs.get::<&mut Ant>(ent) {
+                a.gen_t = 0.0;
+            }
+            let tile = crate::path::tile_of(pos.p);
+            let on_silver = pos.layer == Layer::Underground
+                && self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER;
+            if on_silver {
+                self.colony.honeydew += 1;
+                self.colony.delivered += 1;
+                self.spawn_unit_food(Layer::Underground, tile, FoodKind::Honeydew, None);
+                // spawn_unit_food marks pantry joins stored; force the fresh
+                // pile stored too so the ledger and the pile agree
+                for fid in self.food_on(Layer::Underground, tile) {
+                    let fent = self.ids[&fid];
+                    if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
+                        q.stored = true;
+                        q.spoil = None;
+                    }
+                }
+                self.ev(format!(
+                    "honey ant #{id} banked 1 honeydew at ({},{})",
+                    tile.0, tile.1
+                ));
+            } else {
+                self.spawn_unit_food(
+                    pos.layer,
+                    tile,
+                    FoodKind::Honeydew,
+                    Some(self.rules.spoil_time),
+                );
+                self.ev(format!(
+                    "honey ant #{id} secreted 1 honeydew at ({},{}) — haul it home",
+                    tile.0, tile.1
+                ));
+            }
+        }
+        // downed ants ride their medic (like eggs); a dead medic drops
+        // them where they lie — the carrier check below clears the carry on
+        // death, so a stale carried_by can't outlive the medic
+        let fallen: Vec<u32> = self
+            .ids
+            .iter()
+            .filter_map(|(&id, &ent)| self.ecs.get::<&Fallen>(ent).ok().map(|_| id))
+            .collect();
+        for &fid in &fallen {
+            let Some(&fent) = self.ids.get(&fid) else {
+                continue;
+            };
+            let carrier = self
+                .ecs
+                .get::<&Fallen>(fent)
+                .ok()
+                .and_then(|f| f.carried_by);
+            let Some(m) = carrier else { continue };
+            let mpos = self.ids.get(&m).and_then(|&ment| {
+                self.ecs
+                    .query_one::<&Pos>(ment)
+                    .ok()
+                    .and_then(|mut q| q.get().copied())
+            });
+            match mpos {
+                Some(p) => {
+                    if let Some(q) = self.ecs.query_one::<(&mut Pos,)>(fent).unwrap().get() {
+                        q.0.p = p.p;
+                        q.0.layer = p.layer;
+                    }
+                }
+                None => {
+                    // the medic died mid-carry: drop the patient in place
+                    if let Ok(mut q) = self.ecs.get::<&mut Fallen>(fent) {
+                        q.carried_by = None;
+                    }
+                }
+            }
+        }
+        for fid in fallen {
+            let Some(&ent) = self.ids.get(&fid) else {
+                continue;
+            };
+            let Some(f) = self
+                .ecs
+                .query_one::<&mut Fallen>(ent)
+                .ok()
+                .and_then(|mut q| q.get().map(|f| *f))
+            else {
+                continue;
+            };
+            if let Some(heal_t) = f.heal_t {
+                let left = heal_t - DT;
+                if left <= 0.0 {
+                    // back on its feet: full hp, resumes its old job
+                    let _ = self.ecs.remove_one::<Fallen>(ent);
+                    if let Ok(mut c) = self.ecs.get::<&mut Combat>(ent) {
+                        c.hp = c.max_hp;
+                    }
+                    self.ev(format!("medic healed ant #{fid} — back on its feet"));
+                } else if let Ok(mut q) = self.ecs.get::<&mut Fallen>(ent) {
+                    q.heal_t = Some(left);
+                }
+            } else {
+                let bleed = f.bleed_t - DT;
+                if bleed <= 0.0 {
+                    self.kill_cause(fid, "bled out");
+                } else if let Ok(mut q) = self.ecs.get::<&mut Fallen>(ent) {
+                    q.bleed_t = bleed;
+                }
+            }
+        }
+    }
+
+    /// A caste ant drops to the ground instead of dying: downed, bleeding,
+    /// waiting for a medic — carried items fall beside it first.
+    pub(crate) fn fall_ant(&mut self, id: u32) {
+        let Some(&ent) = self.ids.get(&id) else {
+            return;
+        };
+        let carry = self
+            .ecs
+            .get::<&Carry>(ent)
+            .map(|c| *c)
+            .unwrap_or(Carry::None);
+        if carry != Carry::None {
+            let pos = self.ecs.get::<&Pos>(ent).map(|q| *q).unwrap_or(Pos {
+                p: Vec2::default(),
+                layer: Layer::Surface,
+            });
+            let tile = crate::path::tile_of(pos.p);
+            match carry {
+                Carry::Egg => {
+                    for eid in self.egg_ids() {
+                        let eent = self.ids[&eid];
+                        let mine = self
+                            .ecs
+                            .get::<&Egg>(eent)
+                            .map(|q| q.carried_by == Some(id))
+                            .unwrap_or(false);
+                        if mine {
+                            if let Ok(mut q) = self.ecs.get::<&mut Egg>(eent) {
+                                q.carried_by = None;
+                            }
+                        }
+                    }
+                }
+                Carry::Food(kind) => {
+                    self.spawn_unit_food(pos.layer, tile, kind, Some(self.rules.spoil_time));
+                }
+                Carry::Wood => {
+                    self.spawn_collectible(tile_center(tile.0, tile.1), CollectibleVariant::Wood);
+                }
+                Carry::Wool => {
+                    self.spawn_collectible(tile_center(tile.0, tile.1), CollectibleVariant::Wool);
+                }
+                _ => {} // dirt vanishes with the collapse
+            }
+            if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                *q = Carry::None;
+            }
+        }
+        self.set_state(id, AntState::Idle);
+        let bleed = self.rules.bleed_time;
+        let _ = self.ecs.insert_one(
+            ent,
+            Fallen {
+                bleed_t: bleed,
+                heal_t: None,
+                carried_by: None,
+            },
+        );
+        self.ev(format!(
+            "ant #{id} is DOWN — bleeds out in {bleed:.0}s without a medic"
+        ));
+    }
+
+    /// The victim's squad turns on its attacker (F4 retaliation).
+    fn retaliate(&mut self, victim: u32, attacker: u32) {
+        let ids = self.ant_ids();
+        for fid in ids {
+            let follows = self
+                .ids
+                .get(&fid)
+                .and_then(|&e| self.ecs.get::<&WorkerAi>(e).ok())
+                .map(|ai| {
+                    matches!(&ai.job, Job::Follow(l, _) if *l == victim)
+                        && ai.attack_after != Some(attacker)
+                })
+                .unwrap_or(false);
+            if follows {
+                self.set_attack_after(fid, Some(attacker));
+                self.ev(format!(
+                    "ant #{fid} retaliates — spider #{attacker} hit leader #{victim}"
+                ));
             }
         }
     }

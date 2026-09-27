@@ -17,6 +17,8 @@ pub const KIND_SPIDER: u8 = 4;
 pub const KIND_FOOD: u8 = 5;
 pub const KIND_SOURCE: u8 = 6;
 pub const KIND_COLLECTIBLE: u8 = 7;
+pub const KIND_HONEY: u8 = 8;
+pub const KIND_MEDIC: u8 = 9;
 
 pub const ACT_IDLE: u8 = 0;
 pub const ACT_MOVING: u8 = 1;
@@ -31,12 +33,14 @@ pub const CARRY_NONE: u8 = 0;
 pub const CARRY_DIRT: u8 = 1;
 pub const CARRY_EGG: u8 = 2;
 pub const CARRY_FOOD: u8 = 3;
+pub const CARRY_FALLEN: u8 = 6;
 
 pub const FOOD_GREEN: u8 = 0;
 pub const FOOD_SUPER: u8 = 1;
 pub const FOOD_PROTEIN: u8 = 2;
 pub const FOOD_CARB: u8 = 3;
 pub const FOOD_WATER: u8 = 4;
+pub const FOOD_HONEYDEW: u8 = 5;
 
 pub fn food_code(kind: FoodKind) -> u8 {
     match kind {
@@ -45,6 +49,23 @@ pub fn food_code(kind: FoodKind) -> u8 {
         FoodKind::Protein => FOOD_PROTEIN,
         FoodKind::Carbs => FOOD_CARB,
         FoodKind::Water => FOOD_WATER,
+        FoodKind::Honeydew => FOOD_HONEYDEW,
+    }
+}
+
+/// What an egg hatches into (wire p1 on egg records; layout v4).
+pub const EGG_WORKER: u8 = 0;
+pub const EGG_SOLDIER: u8 = 1;
+pub const EGG_HONEY: u8 = 2;
+pub const EGG_MEDIC: u8 = 3;
+
+pub fn egg_caste_code(caste: Caste) -> u8 {
+    match caste {
+        Caste::Worker => EGG_WORKER,
+        Caste::Soldier => EGG_SOLDIER,
+        Caste::Honey => EGG_HONEY,
+        Caste::Medic => EGG_MEDIC,
+        Caste::Queen => EGG_WORKER,
     }
 }
 
@@ -56,7 +77,7 @@ pub const REQUEST_NONE: u8 = 0;
 /// decoder assertion. Bump `snapshot` when the layout changes.
 pub fn snapshot_spec() -> String {
     format!(
-        "{{\"snapshot\":3,\"stride\":12,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE},\"collectible\":{KIND_COLLECTIBLE}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD},\"wood\":{CARRY_WOOD},\"wool\":{CARRY_WOOL}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}},\"request\":{{\"none\":{REQUEST_NONE},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}}}}"
+        "{{\"snapshot\":4,\"stride\":13,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE},\"collectible\":{KIND_COLLECTIBLE},\"honey\":{KIND_HONEY},\"medic\":{KIND_MEDIC}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD},\"wood\":{CARRY_WOOD},\"wool\":{CARRY_WOOL},\"fallen\":{CARRY_FALLEN}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER},\"honeydew\":{FOOD_HONEYDEW}}},\"request\":{{\"none\":{REQUEST_NONE},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}},\"eggCaste\":{{\"worker\":{EGG_WORKER},\"soldier\":{EGG_SOLDIER},\"honey\":{EGG_HONEY},\"medic\":{EGG_MEDIC}}}}}"
     )
 }
 
@@ -94,6 +115,8 @@ pub struct AntSnap {
     pub request: Option<FoodKind>,
     /// Squad leader this ant follows, if any (X-menu, F3).
     pub following: Option<u32>,
+    /// Downed (F4): remaining bleed fraction 1→0; None = standing.
+    pub downed: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -203,6 +226,7 @@ pub(crate) fn source_name(src: u8) -> &'static str {
         4 => "strawberry",
         5 => "cockroach",
         6 => "caterpillar",
+        7 => "nettle",
         _ => "source",
     }
 }
@@ -214,6 +238,7 @@ pub(crate) fn food_name(kind: FoodKind) -> &'static str {
         FoodKind::Protein => "protein",
         FoodKind::Carbs => "carbs",
         FoodKind::Water => "water",
+        FoodKind::Honeydew => "honeydew",
     }
 }
 
@@ -272,6 +297,11 @@ impl Sim {
             } else {
                 0.0
             };
+            let downed = self
+                .ecs
+                .get::<&Fallen>(ent)
+                .ok()
+                .map(|f| (f.bleed_t / self.rules.bleed_time).clamp(0.0, 1.0));
             v.push(EntitySnap::Ant(AntSnap {
                 id,
                 caste: ant.caste,
@@ -284,6 +314,7 @@ impl Sim {
                 hunger,
                 request,
                 following,
+                downed,
             }));
         }
         for (ent, (food, pos)) in self.ecs.query::<(&Food, &Pos)>().iter() {
@@ -408,10 +439,11 @@ impl Sim {
                 EntitySnap::Ant(a) => {
                     let (state, extra) = self.canonical_ant_state(a.id);
                     s.push_str(&format!(
-                        "|A{} {:?} sp{:.4} L{} {:+.4},{:+.4} {}{} hp{:.4} {:?} h{:.4}{}",
+                        "|A{} {:?} sp{:.4} g{:.4} L{} {:+.4},{:+.4} {}{} hp{:.4} {:?} h{:.4}{}{}",
                         a.id,
                         a.caste,
                         self.ant_speed_raw(a.id),
+                        self.ant_gen_raw(a.id),
                         a.layer as u8,
                         a.x,
                         a.y,
@@ -421,6 +453,7 @@ impl Sim {
                         a.carry,
                         a.hunger,
                         self.canonical_ai(a.id),
+                        self.canonical_fallen(a.id),
                     ));
                 }
                 EntitySnap::Food(f) => {
@@ -474,6 +507,21 @@ impl Sim {
     fn ant_speed_raw(&self, id: u32) -> f64 {
         let ent = self.ids[&id];
         self.ecs.get::<&Ant>(ent).map(|a| a.speed).unwrap_or(0.0)
+    }
+
+    fn ant_gen_raw(&self, id: u32) -> f64 {
+        let ent = self.ids[&id];
+        self.ecs.get::<&Ant>(ent).map(|a| a.gen_t).unwrap_or(0.0)
+    }
+
+    /// Downed-ant state for the digest: bleed/heal timers and carrier —
+    /// all of them steer the future.
+    fn canonical_fallen(&self, id: u32) -> String {
+        let ent = self.ids[&id];
+        match self.ecs.get::<&Fallen>(ent) {
+            Ok(f) => format!(" fl{:.4} h{:?} by{:?}", f.bleed_t, f.heal_t, f.carried_by),
+            Err(_) => String::new(),
+        }
     }
 
     fn hatch_raw(&self, id: u32) -> f64 {

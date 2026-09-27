@@ -61,6 +61,10 @@ impl Sim {
                     q.4.found_after,
                 )
             };
+            // A downed ant lies still until a medic hauls it home (F4).
+            if self.ecs.get::<&Fallen>(ent).is_ok() {
+                continue;
+            }
             // The queen is player-driven: she never takes forage/dig jobs and
             // never auto-picks-up food — only Attack orders and walk-to-dig
             // intents move her.
@@ -283,6 +287,45 @@ impl Sim {
             if let Some(eid) = pick_after {
                 self.resolve_pick_after(id, eid);
                 continue;
+            }
+            // Medic specialists (F4): a downed ant in the mandibles always
+            // resumes healing (player orders may have interrupted it); an
+            // unoccupied medic drops EVERYTHING for the nearest casualty —
+            // Fetch/Deliver/DigTile included (GoHome and Rest hand out those
+            // jobs, so the override must catch them too, or medics farm).
+            if caste == Caste::Medic {
+                if let Carry::Fallen = carrying {
+                    if !matches!(job, Job::Heal(_)) {
+                        if let Some(fid) = self.carried_fallen(id) {
+                            self.set_job(id, Job::Heal(fid));
+                        }
+                    }
+                } else {
+                    // finish banking a carried food unit; player orders and
+                    // active rescue/heal jobs stand; everything else is
+                    // overridable
+                    let overridable = match &job {
+                        Job::Manual
+                        | Job::Follow(..)
+                        | Job::Rescue(_)
+                        | Job::Heal(_)
+                        | Job::Hold => false,
+                        Job::Deliver(_, _) => matches!(carrying, Carry::Food(_)),
+                        _ => true,
+                    };
+                    if overridable {
+                        match self.nearest_fallen() {
+                            Some(fid) => {
+                                self.set_job(id, Job::Rescue(fid));
+                                continue;
+                            }
+                            None => {
+                                self.set_job(id, Job::Hold);
+                                continue;
+                            }
+                        }
+                    }
+                }
             }
             match job {
                 Job::Manual => {
@@ -550,6 +593,121 @@ impl Sim {
                         self.set_retry(id, 60);
                     }
                 }
+                Job::Hold => {
+                    // stand by near the queen — but a casualty beats standby
+                    if let Some(fid) = self.nearest_fallen() {
+                        self.set_job(id, Job::Rescue(fid));
+                        continue;
+                    }
+                    let (qlayer, qtile) = self.queen_where();
+                    if qlayer == pos.layer && chebyshev(tile_of(pos.p), qtile) <= 3 {
+                        self.set_retry(id, 50);
+                    } else if !self.route(id, qlayer, qtile) {
+                        self.set_retry(id, 60);
+                    }
+                }
+                Job::Rescue(fid) => {
+                    let info = self.ids.get(&fid).and_then(|&fent| {
+                        self.ecs
+                            .query_one::<(&Fallen, &Pos)>(fent)
+                            .ok()
+                            .and_then(|mut q| q.get().map(|(f, p)| (*f, *p)))
+                    });
+                    let Some((fallen, fpos)) = info else {
+                        self.set_job(id, Job::Idle);
+                        continue;
+                    };
+                    if fallen.carried_by.is_some()
+                        || fallen.heal_t.is_some()
+                        || carrying != Carry::None
+                    {
+                        // another medic got there first, healing already, or
+                        // the medic's hands filled up meanwhile
+                        self.set_job(id, Job::Idle);
+                        continue;
+                    }
+                    if fpos.layer == pos.layer && chebyshev(tile_of(pos.p), tile_of(fpos.p)) <= 1 {
+                        if let Some(&fent) = self.ids.get(&fid) {
+                            if let Ok(mut q) = self.ecs.get::<&mut Fallen>(fent) {
+                                q.carried_by = Some(id);
+                            }
+                        }
+                        if let Some(&aent) = self.ids.get(&id) {
+                            if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+                                *q = Carry::Fallen;
+                            }
+                        }
+                        self.set_job(id, Job::Heal(fid));
+                        self.ev(format!("medic #{id} picked up downed ant #{fid}"));
+                    } else if !self.route(id, fpos.layer, tile_of(fpos.p)) {
+                        self.set_retry(id, 60);
+                    }
+                }
+                Job::Heal(fid) => {
+                    let info = self.ids.get(&fid).and_then(|&fent| {
+                        self.ecs
+                            .query_one::<(&Fallen, &Pos)>(fent)
+                            .ok()
+                            .and_then(|mut q| q.get().map(|(f, p)| (*f, *p)))
+                    });
+                    let Some((fallen, fpos)) = info else {
+                        self.set_job(id, Job::Idle);
+                        continue;
+                    };
+                    if let Carry::Fallen = carrying {
+                        // phase 1 — haul the patient home: underground, by
+                        // the queen
+                        let (qlayer, qtile) = self.queen_where();
+                        if pos.layer == Layer::Underground && chebyshev(tile_of(pos.p), qtile) <= 3
+                        {
+                            if let Some(&fent) = self.ids.get(&fid) {
+                                if let Some(q) =
+                                    self.ecs.query_one::<(&mut Pos,)>(fent).unwrap().get()
+                                {
+                                    q.0.p = pos.p;
+                                    q.0.layer = pos.layer;
+                                }
+                                if let Ok(mut q) = self.ecs.get::<&mut Fallen>(fent) {
+                                    q.carried_by = None;
+                                }
+                            }
+                            if let Some(&aent) = self.ids.get(&id) {
+                                if let Ok(mut q) = self.ecs.get::<&mut Carry>(aent) {
+                                    *q = Carry::None;
+                                }
+                            }
+                            self.ev(format!("medic #{id} set ant #{fid} down in the nest"));
+                        } else if !self.route(id, qlayer, qtile) {
+                            self.set_retry(id, 60);
+                        }
+                        continue;
+                    }
+                    let _ = fpos;
+                    // phase 2 — standing by the patient: start the healing
+                    // once the pantry can pay its water cost
+                    if fallen.heal_t.is_none() {
+                        let cost = self.rules.water_per_heal;
+                        if self.pantry_units(FoodKind::Water) >= cost
+                            && self.withdraw_pantry_units(FoodKind::Water, cost)
+                        {
+                            if let Some(&fent) = self.ids.get(&fid) {
+                                if let Ok(mut q) = self.ecs.get::<&mut Fallen>(fent) {
+                                    q.heal_t = Some(self.rules.heal_time);
+                                }
+                            }
+                            self.ev(format!(
+                                "medic #{id} starts healing ant #{fid} ({cost} water, {:.0}s)",
+                                self.rules.heal_time
+                            ));
+                        } else {
+                            // no water yet — wait; the bleed keeps running
+                            self.set_retry(id, 60);
+                        }
+                    } else {
+                        // specialists() revives the patient when heal_t ends
+                        self.set_retry(id, 20);
+                    }
+                }
                 Job::Follow(leader, resume) => {
                     // squad follow: stay near the leader (cross-layer via the
                     // entrance); manual commands naturally leave the squad
@@ -701,7 +859,18 @@ impl Sim {
                 }
                 match lead {
                     Lead::Farm(target) => {
-                        // workers AND soldiers farm the leader's source
+                        // workers AND soldiers farm the leader's source;
+                        // specialists (honey/medic) keep following — their
+                        // role is the point, not extra hands
+                        let specialist = self
+                            .ids
+                            .get(&fid)
+                            .and_then(|&e| self.ecs.get::<&Ant>(e).ok())
+                            .map(|a| matches!(a.caste, Caste::Honey | Caste::Medic))
+                            .unwrap_or(false);
+                        if specialist {
+                            continue;
+                        }
                         self.set_job(fid, Job::Fetch(target));
                         self.ev(format!(
                             "ant #{fid} joins the harvest of #{target} (leader #{leader})"
@@ -743,6 +912,7 @@ impl Sim {
                 sim.ecs
                     .get::<&Ant>(e)
                     .is_ok_and(|a| a.caste == Caste::Worker)
+                    && sim.ecs.get::<&Fallen>(e).is_err()
                     && sim
                         .ecs
                         .get::<&WorkerAi>(e)
@@ -990,6 +1160,41 @@ impl Sim {
         self.ant_tile(self.colony.queen_id)
     }
 
+    /// The downed ant this medic is carrying, if any.
+    pub(crate) fn carried_fallen(&self, medic: u32) -> Option<u32> {
+        for (&id, &ent) in self.ids.iter() {
+            if let Ok(f) = self.ecs.get::<&Fallen>(ent) {
+                if f.carried_by == Some(medic) {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
+
+    /// Nearest unattended casualty (downed, not carried, not yet healing),
+    /// tie → lowest id. Medics drop everything for it.
+    pub(crate) fn nearest_fallen(&self) -> Option<u32> {
+        let mut best: Option<((u32, u32), u32)> = None; // ((chebyshev from queen, layer), id)
+        let home = self.queen_tile();
+        for (&id, &ent) in self.ids.iter() {
+            let Ok(f) = self.ecs.get::<&Fallen>(ent) else {
+                continue;
+            };
+            if f.carried_by.is_some() || f.heal_t.is_some() {
+                continue;
+            }
+            let Ok(p) = self.ecs.get::<&Pos>(ent) else {
+                continue;
+            };
+            let key = (chebyshev(tile_of(p.p), home), p.layer as u8 as u32);
+            if best.map(|b| (key, id) < b).unwrap_or(true) {
+                best = Some((key, id));
+            }
+        }
+        best.map(|(_, id)| id)
+    }
+
     pub(crate) fn caste_counts(&self) -> (u32, u32) {
         let mut workers = 0;
         let mut soldiers = 0;
@@ -999,7 +1204,7 @@ impl Sim {
                 match q.caste {
                     Caste::Worker => workers += 1,
                     Caste::Soldier => soldiers += 1,
-                    Caste::Queen => {}
+                    Caste::Queen | Caste::Honey | Caste::Medic => {}
                 }
             }
         }

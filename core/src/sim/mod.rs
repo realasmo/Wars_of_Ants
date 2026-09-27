@@ -114,6 +114,13 @@ pub enum Command {
         ant: u32,
         egg: u32,
     },
+    /// Queen X-menu brood order (F4): lay one egg of `caste`, paying the
+    /// brood cost from the physical pantry; a soldier order additionally
+    /// consumes one worker (metamorphosis).
+    Brood {
+        ant: u32,
+        caste: Caste,
+    },
 }
 
 /// Spawnable entities for dev tools. Natural layers: spiders/food on the
@@ -144,8 +151,17 @@ pub enum DevSpawn {
     Wood,
     /// Dry wool collectible (egg-friendly block).
     Wool,
-    /// A map source by visual type 1..6.
+    /// A map source by visual type 1..7.
     Source(u8),
+    /// One stored pantry unit (silver-cell pile, ledger synced) — F4 testing:
+    /// brood costs and medic water are paid from PHYSICAL piles, so dev tools
+    /// must place real ones (dev_set_* only writes the ledger).
+    PantryProtein,
+    PantryWater,
+    PantryHoneydew,
+    /// F4 specialist castes (dev tools / tests).
+    HoneyAnt,
+    MedicAnt,
 }
 
 impl DevSpawn {
@@ -166,6 +182,12 @@ impl DevSpawn {
             "strawberry" => DevSpawn::Source(4),
             "cockroach" => DevSpawn::Source(5),
             "caterpillar" => DevSpawn::Source(6),
+            "nettle" => DevSpawn::Source(7),
+            "pantry-protein" => DevSpawn::PantryProtein,
+            "pantry-water" => DevSpawn::PantryWater,
+            "pantry-honeydew" => DevSpawn::PantryHoneydew,
+            "honey" => DevSpawn::HoneyAnt,
+            "medic" => DevSpawn::MedicAnt,
             _ => return None,
         })
     }
@@ -175,6 +197,7 @@ pub struct Colony {
     pub carbs: u32,
     pub protein: u32,
     pub water: u32,
+    pub honeydew: u32,
     pub delivered: u32,
     pub eggs_laid: u32,
     pub dead: bool,
@@ -193,9 +216,9 @@ pub struct Colony {
     /// no auto-laying) governs brood; false in the legacy founded start.
     pub founding: bool,
     /// Seconds since the founding queen last ate (physical feeding model);
-    /// hungry at self.rules.eat_period, dead at self.rules.eat_period + self.rules.starve_time.
+    /// hungry at `eat_period`, dead at `eat_period + starve_time` (rules).
     pub hunger_t: f64,
-    /// Index into self.rules.craving_cycle — what the queen requests next.
+    /// Index into the rules' craving cycle — what the queen requests next.
     pub craving_i: usize,
     /// The designated feeder (founding): one worker whose job is feeding her.
     pub feeder_id: Option<u32>,
@@ -288,6 +311,11 @@ impl Sim {
             DevSpawn::SuperFood => self.spawn_food(p, self.rules.super_per_spider, FoodKind::Super),
             DevSpawn::Wood => self.spawn_collectible(Vec2::new(x, y), CollectibleVariant::Wood),
             DevSpawn::Wool => self.spawn_collectible(Vec2::new(x, y), CollectibleVariant::Wool),
+            DevSpawn::PantryProtein => self.dev_pantry_unit(x, y, FoodKind::Protein),
+            DevSpawn::PantryWater => self.dev_pantry_unit(x, y, FoodKind::Water),
+            DevSpawn::PantryHoneydew => self.dev_pantry_unit(x, y, FoodKind::Honeydew),
+            DevSpawn::HoneyAnt => self.spawn_ant(Caste::Honey, p, Layer::Underground),
+            DevSpawn::MedicAnt => self.spawn_ant(Caste::Medic, p, Layer::Underground),
             DevSpawn::Source(src) => {
                 let spec = self.rules.sources.iter().find(|s| s.src == src).copied();
                 match spec {
@@ -311,6 +339,24 @@ impl Sim {
 
     pub fn dev_set_water(&mut self, n: u32) {
         self.colony.water = n;
+    }
+
+    pub fn dev_set_honeydew(&mut self, n: u32) {
+        self.colony.honeydew = n;
+    }
+
+    /// One stored pantry unit at (x, y) with the ledger synced — brood costs
+    /// and medic water are paid physically, so tests/tools place real piles.
+    fn dev_pantry_unit(&mut self, x: f64, y: f64, kind: FoodKind) -> u32 {
+        let tile = (x.floor() as u32, y.floor() as u32);
+        let id = self.spawn_food_entity(Layer::Underground, tile, 1, kind, true, None);
+        match kind {
+            FoodKind::Green | FoodKind::Carbs => self.colony.carbs += 1,
+            FoodKind::Super | FoodKind::Protein => self.colony.protein += 1,
+            FoodKind::Water => self.colony.water += 1,
+            FoodKind::Honeydew => self.colony.honeydew += 1,
+        }
+        id
     }
 
     /// Paint a 2×2 soil block (dev/test op, deterministic + replayable).
@@ -351,6 +397,7 @@ impl Sim {
         self.predators();
         self.cleanup_deaths();
         self.queen_system();
+        self.specialists();
         self.eggs();
         self.cleanup();
     }
@@ -370,6 +417,7 @@ impl Sim {
             Ant {
                 caste,
                 speed: st.speed,
+                gen_t: 0.0,
             },
             Pos { p, layer },
             AntState::Idle,
@@ -404,6 +452,8 @@ impl Sim {
                 Caste::Queen => "queen",
                 Caste::Worker => "worker",
                 Caste::Soldier => "soldier",
+                Caste::Honey => "honey ant",
+                Caste::Medic => "medic",
             };
             self.ev(format!("{name} #{id} born"));
         }
@@ -463,6 +513,15 @@ impl Sim {
     pub(crate) fn kill_cause(&mut self, id: u32, cause: &str) {
         if let Some(ent) = self.ids.remove(&id) {
             let was_ant = self.ecs.get::<&Ant>(ent).is_ok();
+            // a downed ant dying (bleed-out, dev kill) releases its medic's
+            // mandibles — the carrier holds no id, so free them explicitly
+            if let Some(carrier) = self.ecs.get::<&Fallen>(ent).ok().and_then(|f| f.carried_by) {
+                if let Some(&cent) = self.ids.get(&carrier) {
+                    if let Ok(mut q) = self.ecs.get::<&mut Carry>(cent) {
+                        *q = Carry::None;
+                    }
+                }
+            }
             if let (Ok(pos), true) = (
                 self.ecs.get::<&Pos>(ent),
                 self.ecs.get::<&Food>(ent).is_ok(),

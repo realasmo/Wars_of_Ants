@@ -20,6 +20,10 @@ pub enum Caste {
     Queen,
     Worker,
     Soldier,
+    /// Living pantry: secretes honeydew over time (F4).
+    Honey,
+    /// Combat medic: hauls fallen ants home and heals them (F4).
+    Medic,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -28,10 +32,12 @@ pub enum FoodKind {
     Green,
     /// Legacy founded worlds only (spider drops there).
     Super,
-    /// Resource economy: units and sources are one of these three.
+    /// Resource economy: units and sources are one of these four.
     Protein,
     Carbs,
     Water,
+    /// From nettle sources (F4) and Honey ants — feeds Honey brood.
+    Honeydew,
 }
 
 /// What an ant carries. A sum type instead of `{amount, kind}` so an empty
@@ -52,6 +58,9 @@ pub enum Carry {
     Wood,
     /// Dry wool — place in the nest to build one egg-friendly (orange) block.
     Wool,
+    /// A downed ant being hauled to the nest by a medic; the ant entity
+    /// itself rides along (`Fallen::carried_by`).
+    Fallen,
 }
 
 /// Surface collectibles hauled home for nest building (user TODO F2).
@@ -72,6 +81,9 @@ pub struct Collectible {
 pub struct Ant {
     pub caste: Caste,
     pub speed: f64,
+    /// Honey-ant secretion timer (seconds since the last honeydew unit;
+    /// other castes keep it at 0).
+    pub gen_t: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -145,6 +157,26 @@ pub enum Job {
     /// attack order is shared as `attack_after` — they fight that enemy and
     /// return to following when it dies.
     Follow(u32, Option<Box<Job>>),
+    /// Stand by in the nest, ready — the medic's idle (never farms; the
+    /// rescue override below owns this caste's initiative).
+    Hold,
+    /// Medic: walk to a downed ant and pick it up (F4).
+    Rescue(u32),
+    /// Medic: carry the downed ant to the nest, then heal it there (F4).
+    Heal(u32),
+}
+
+/// A downed ant — knocked out by combat instead of killed, bleeding out on
+/// `bleed_t` (pauses while healing) unless a medic hauls it home and heals
+/// it (water from the pantry). Carried ants ride their medic like eggs.
+#[derive(Clone, Copy, Debug)]
+pub struct Fallen {
+    /// Seconds left before the ant bleeds out and dies for real.
+    pub bleed_t: f64,
+    /// Some(secs) while a medic's healing is in progress.
+    pub heal_t: Option<f64>,
+    /// Carrying medic, if any: position follows the carrier.
+    pub carried_by: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -181,8 +213,8 @@ pub struct Food {
     pub harvest_t: f64,
     /// Shared harvest progress toward the next unit.
     pub progress: f64,
-    /// Source visual type: 0 = not a source, 1..6 = moss, mushroom,
-    /// raspberry, strawberry, cockroach, caterpillar.
+    /// Source visual type: 0 = not a source, 1..7 = moss, mushroom,
+    /// raspberry, strawberry, cockroach, caterpillar, nettle.
     pub src: u8,
 }
 

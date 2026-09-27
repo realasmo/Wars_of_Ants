@@ -10,7 +10,7 @@ use crate::world::{tile_center, EMPTY};
 use hecs::Entity;
 
 impl Sim {
-    fn food_on(&self, layer: Layer, tile: (u32, u32)) -> Vec<u32> {
+    pub(crate) fn food_on(&self, layer: Layer, tile: (u32, u32)) -> Vec<u32> {
         self.food_tiles
             .get(&(layer as u8, tile.0, tile.1))
             .map(|s| s.iter().copied().collect())
@@ -167,12 +167,14 @@ impl Sim {
             FoodKind::Green | FoodKind::Carbs => self.colony.carbs += 1,
             FoodKind::Super | FoodKind::Protein => self.colony.protein += 1,
             FoodKind::Water => self.colony.water += 1,
+            FoodKind::Honeydew => self.colony.honeydew += 1,
         }
         self.colony.delivered += 1;
         let rname = match kind {
             FoodKind::Water => "water",
             FoodKind::Carbs | FoodKind::Green => "carbs",
             FoodKind::Protein | FoodKind::Super => "protein",
+            FoodKind::Honeydew => "honeydew",
         };
         self.ev(format!(
             "ant #{ant} banked 1 {rname} at ({},{})",
@@ -275,6 +277,64 @@ impl Sim {
         best.map(|(_, fid)| (fid, self.food_info(fid).map(|(t, _)| t).unwrap_or((0, 0))))
     }
 
+    /// Total units of one kind sitting in stored pantry piles (the physical
+    /// balance; `colony.*` is the ledger and the two move together).
+    pub(crate) fn pantry_units(&self, kind: FoodKind) -> u32 {
+        let mut total = 0;
+        for &fid in &self.food_ids() {
+            let ent = self.ids[&fid];
+            let Ok(f) = self.ecs.get::<&Food>(ent) else {
+                continue;
+            };
+            if f.stored && f.kind == kind {
+                total += f.amount;
+            }
+        }
+        total
+    }
+
+    /// Remove `n` stored units of one kind from the pantry piles (lowest-id
+    /// piles first) and debit the ledger. Returns false without touching
+    /// anything when the pantry cannot satisfy the full amount — brood costs
+    /// and medic water pay atomically, all kinds or nothing.
+    pub(crate) fn withdraw_pantry_units(&mut self, kind: FoodKind, n: u32) -> bool {
+        if self.pantry_units(kind) < n {
+            return false;
+        }
+        let mut left = n;
+        for fid in self.food_ids() {
+            if left == 0 {
+                break;
+            }
+            let Some(&fent) = self.ids.get(&fid) else {
+                continue;
+            };
+            let take = {
+                let Ok(mut f) = self.ecs.get::<&mut Food>(fent) else {
+                    continue;
+                };
+                if !f.stored || f.kind != kind || f.amount == 0 {
+                    continue;
+                }
+                let take = f.amount.min(left);
+                f.amount -= take;
+                take
+            };
+            left -= take;
+        }
+        match kind {
+            FoodKind::Green | FoodKind::Carbs => {
+                self.colony.carbs = self.colony.carbs.saturating_sub(n)
+            }
+            FoodKind::Super | FoodKind::Protein => {
+                self.colony.protein = self.colony.protein.saturating_sub(n)
+            }
+            FoodKind::Water => self.colony.water = self.colony.water.saturating_sub(n),
+            FoodKind::Honeydew => self.colony.honeydew = self.colony.honeydew.saturating_sub(n),
+        }
+        true
+    }
+
     /// Withdraw one craved unit from a pantry pile into the mandibles: pile
     /// −1 and store (ledger) −1 — the unit leaves the pantry accounting and
     /// settles when fed to the queen or re-banked.
@@ -302,6 +362,7 @@ impl Sim {
                 self.colony.protein = self.colony.protein.saturating_sub(1)
             }
             FoodKind::Water => self.colony.water = self.colony.water.saturating_sub(1),
+            FoodKind::Honeydew => self.colony.honeydew = self.colony.honeydew.saturating_sub(1),
         }
         if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
             q.amount = amount - 1;
