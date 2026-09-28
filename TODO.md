@@ -1,4 +1,4 @@
-## NEXT: admin tuning panel — the ?admin=1 client overlay over the GameRules data layer (GUI-first, whole-rules get/set with validation; full decisions in the project memory + AGENTS quality bar). After that: waves C (neutral creatures) → D (aphid farming) → E (bosses), then the lighting ticket menu.
+## NEXT: admin tuning panel + activity indicators (one wave) — part 1: the ?admin=1 client overlay over the GameRules data layer (GUI-first, whole-rules get/set with validation, live-vs-new-game scopes, world-gen preview; full decisions in the project memory + AGENTS quality bar). Part 2, folded in 2026-09-28: **activity indicators** — floating pixel-icon atlas over player-colony ants (💤 off-duty, per-resource harvest icons, ⛏ dig, ↗ haul home, ⚔ fight, ✚ medic, 👑 feeder, ⌖ following, ! blocked-with-reason); **visible only when the camera is BELOW a height threshold** (zoomed out — the rigs carry the information up close; the user's own rule); needs core enrichment: intent-level job + blocked-reason on the ant snapshot, wire v4→v5. After that: waves C (neutral creatures) → D (aphid farming) → E (bosses), then the lighting ticket menu.
 
 ## User TODO batch (2026-09-27, verbatim — sequenced into waves below)
 
@@ -67,6 +67,21 @@ Agent sequencing of the batch (one ticket per wave, playtest-gated):
   Sim (the admin panel's substrate; F4's brood costs were its first data
   rows). Wire layout v4 (stride 13). 71 core tests, e2e 3× green with
   determinism byte-match.
+- **NEXT wave — admin panel + activity indicators (settled 2026-09-28, not
+  started):** two features, one wave. (1) Admin tuning panel: embedded
+  ?admin=1 DOM drawer (never a separate server), Tweakpane widgets (no RMB
+  needed), generated from a field registry; core surface `rules_get/set/
+  default/hash` — whole-object atomic commit with cross-field validation;
+  live-apply vs applies-on-new-game badges; rules digest already in the
+  canon since F4. (2) Activity indicators: floating pixel-art icons over
+  player-colony ants — off-duty / per-resource harvest / dig / haul-home /
+  fight / medic / feeder / following / **!-blocked-with-a-reason** (empty
+  pantry, unreachable, soldiers-can't-dig, queen starving); icons render
+  only when zoomed OUT past a height threshold (rigs show the work up
+  close — user's rule); core grows an intent enum + blocked-reason enum on
+  the ant snapshot (wire v5) so icons never lie (a feeder fetching from the
+  pantry must not read as idle); brief confirm-pulse when an order lands.
+  Order-confirmation and the !-reason system double as command-feedback.
 
 ---
 
@@ -95,7 +110,7 @@ healing sink still to design against playtesting):
 
 ## Ants walking and farming.
  - When ant under player control exits the nest, the camera should switch to surface as well and same the opposite way. (DONE via the locked camera)
- - ants should have indicator associated with current activity: farming, just moving, attacking, digging (DONE — procedural rigs animate dig/harvest/carry/combat from the snapshot `activity`)
+ - ants should have indicator associated with current activity: farming, just moving, attacking, digging (close zoom DONE — procedural rigs animate dig/harvest/carry/combat from the snapshot `activity`; far-zoom icon layer — pixel icon atlas with intent + blocked reasons — settled for the admin wave)
 
 ### Farming resources
  - dead insects

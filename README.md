@@ -55,14 +55,6 @@ editing `client/src/art/ants.ts` numbers).
   on whoever hits the leader. Foundation: `GameRules` (rules.rs) — all
   tunables now one typed, validated, digest-hashed dataset on the sim (the
   admin tuning panel's substrate). Wire layout v4.
-- **F4 (next):** the queen's X-menu — egg types with resource costs
-  (Worker / Soldier / Honey / Medic), worker→soldier conversion (consumes
-  the worker), fallen-ant rescue; absorbs Wave B (corpses/healing) and
-  reaches toward the aphid economy. Honeydew comes from a new **nettle**
-  source (15–22 units, 10s/unit, 4 scattered). Squad combat shipped in
-  wave S (assist-attack — the whole squad fights your target, workers
-  included, then returns to you; farm-conversion persists) — F4 adds
-  retaliation when the leader is attacked.
 
 **Worker-priorities wave (ticket `docs/TICKET-worker-priorities.md`):**
 the queen eats **real food** now — a rotating craving cycle
@@ -91,7 +83,10 @@ boot wire-spec assertion); true full-state canonical digest; irange,
 pantry-deadlock, queen retry-freeze, dropped attack intents, friendly
 fire, underground chase fixes; food index + epoch-gated re-pulls.
 
-**Decided next:** F4 brood production (see TODO.md), then C (neutral
+**Decided next:** the admin-panel wave — ?admin=1 tuning overlay over
+`GameRules` **+ activity indicators** (floating pixel icons over your ants:
+harvest/dig/haul/fight/medic/feeder/!-blocked-with-reason, shown only when
+zoomed out; see TODO.md), then C (neutral
 creatures), D (aphid farming), E (bosses); drafts and costs in
 `docs/WORLD-DESIGN.md`. The visual/lighting ticket menu (baked AO first)
 follows the content waves; one effect per ticket, rendering-only.
