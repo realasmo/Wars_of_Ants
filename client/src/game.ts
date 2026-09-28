@@ -6,6 +6,7 @@ import type { AntEnt, Ent, SpiderEnt } from './sim';
 import { InputLog, r2 } from './inputlog';
 import { coreVersion } from './wasm';
 import { DevPanel } from './devpanel';
+import { AdminPanel } from './admin';
 import { consoleOpen, pollEvents } from './console';
 import type { Replay } from './replay';
 
@@ -15,6 +16,8 @@ export class Game {
   private input: Input;
   private hud = new Hud();
   private dev: DevPanel;
+  /** Rules tuning drawer (?admin=1 / F4). Lazy — created with the game. */
+  admin: AdminPanel;
   paused = false; // public for the dev console
   private readonly log = new InputLog();
   private playerAnt: number | null = null;
@@ -57,6 +60,8 @@ export class Game {
     this.input.onTogglePerf = () => this.hud.togglePerf();
     this.input.onEscape = () => this.dev.setPlacement(null);
     this.input.onSquadKey = (code) => this.squadKey(code);
+    this.input.onToggleAdmin = () => this.admin.toggle();
+    this.admin = new AdminPanel(this);
     this.dev = new DevPanel({
       onFood: () => this.debugSetFood(50),
       onSuper: () => this.debugSetSuper(5),
@@ -195,6 +200,7 @@ export class Game {
     if (this.playerAnt === null || this.sim.dead || this.replay !== null) return;
     const reason = this.sim.brood(this.playerAnt, code);
     if (reason !== '') this.hud.flashHint(reason);
+    else this.renderer.pulse(this.playerAnt);
     this.log.push({ type: 'cmd', act: 'brood', ant: this.playerAnt, kind: String(code) });
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
     this.broodOpen = false;
@@ -215,6 +221,7 @@ export class Game {
     const acts = ['follow-all', 'follow-one', 'follow-soldiers', 'follow-release'];
     if (this.sim.follow(this.playerAnt, mode)) {
       this.log.push({ type: 'cmd', act: acts[mode], ant: this.playerAnt });
+      this.renderer.pulse(this.playerAnt);
     }
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
     this.squadOpen = false;
@@ -227,6 +234,55 @@ export class Game {
     const ok = this.sim.follow(this.playerAnt, mode);
     if (ok) this.log.push({ type: 'cmd', act: ['follow-all', 'follow-one', 'follow-soldiers', 'follow-release'][mode], ant: this.playerAnt });
     return ok;
+  }
+
+  // --- admin rules surface (the drawer's commit paths; logged + replayable) ---
+
+  /** Atomic whole-rules commit to the RUNNING sim. Successful commits are
+   * logged as `dev-rules` commands so sessions replay byte-identically. */
+  simRulesSet(json: string): { ok: boolean; digest?: string; errors?: string[] } {
+    const res = this.sim.rulesSet(json);
+    if (res.ok) {
+      this.log.push({ type: 'cmd', act: 'dev-rules', json });
+      this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+    }
+    return res;
+  }
+
+  /** Restart the founding game under committed rules, KEEPING the seed —
+   * worldgen tweaks must be comparable run-to-run. */
+  restartWithRules(rulesJson: string): void {
+    if (this.replay !== null) {
+      this.replay = null;
+      this.hud.setReplay(false);
+      this.log.push({ type: 'mark', label: 'replay-aborted-by-restart' });
+    }
+    const team = this.sim.team();
+    this.log.push({ type: 'restart', seed: this.seed, team, note: 'rules' });
+    this.sim = new Sim(this.seed, 3, 6, { founding: true, team, rules: rulesJson });
+    this.playerAnt = this.initialAnt();
+    this.lastPlayerLayer = null;
+    this.steerTarget = null;
+    this.lastEntrance = undefined;
+    this.renderer.reset(this.sim);
+    this.hud.hideDead();
+    this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+    this.acc = 0;
+    this.deadShown = false;
+    this.log.push({ type: 'start', seed: this.seed, team, workers: 0 });
+  }
+
+  /** e2e/console hook: the panel + rules state. */
+  debugRules(): Record<string, unknown> {
+    return {
+      admin: this.admin.debugState(),
+      digest: this.sim.rulesDigest(),
+    };
+  }
+
+  /** e2e hook: the icon layer's state (zoom gating + per-ant glyphs). */
+  debugIcons(): Record<string, unknown> {
+    return this.renderer.iconsDebug();
   }
 
   debugLog(): Record<string, unknown> {
@@ -328,6 +384,7 @@ export class Game {
         if (e.n !== undefined) c.n = e.n;
         if (e.layer !== undefined) c.layer = e.layer;
         if (e.soil !== undefined) c.soil = e.soil;
+        if (e.json !== undefined) c.json = e.json;
         return c;
       });
     return {
@@ -443,7 +500,7 @@ export class Game {
       if (s.kind === 'spider') {
         spiders.push({ id: s.id, x: +s.x.toFixed(2), y: +s.y.toFixed(2), hp: +s.hp.toFixed(2), layer: s.layer });
       } else if (isAnt(s) && s.kind !== 'queen') {
-        ants.push({ id: s.id, kind: s.kind, x: +s.x.toFixed(2), y: +s.y.toFixed(2), hp: +s.hp.toFixed(2), activity: s.activity, carrying: carryLabel(s.carry), layer: s.layer === 0 ? 'S' : 'U' });
+        ants.push({ id: s.id, kind: s.kind, x: +s.x.toFixed(2), y: +s.y.toFixed(2), hp: +s.hp.toFixed(2), activity: s.activity, carrying: carryLabel(s.carry), layer: s.layer === 0 ? 'S' : 'U', intent: s.intent, blocked: s.blocked, following: s.following });
       }
     }
     let foods = 0;
@@ -455,6 +512,8 @@ export class Game {
       phase: this.sim.phase(),
       phaseTime: +this.sim.phaseTime().toFixed(1),
       team: this.sim.team(),
+      map: [this.sim.w, this.sim.h],
+      rulesDigest: this.sim.rulesDigest(),
       carbs: this.sim.storeCarbs(),
       protein: this.sim.storeProtein(),
       water: this.sim.storeWater(),
@@ -478,6 +537,8 @@ export class Game {
             carry: carryLabel(qs.carry),
             request: qs.request,
             hunger: +qs.hunger.toFixed(2),
+            intent: qs.intent,
+            blocked: qs.blocked,
           }
         : null,
       entrance: this.sim.entrance,
@@ -530,6 +591,7 @@ export class Game {
     if (pick && pick.kind === 'spider') {
       this.log.push({ type: 'cmd', act: 'attack', ant: this.playerAnt, target: pick.id });
       this.sim.attack(this.playerAnt, pick.id);
+      this.renderer.pulse(this.playerAnt);
       this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
       return true;
     }
@@ -640,6 +702,7 @@ export class Game {
     if (pick && pick.kind === 'spider') {
       this.log.push({ type: 'cmd', act: 'attack', ant: this.playerAnt, target: pick.id });
       this.sim.attack(this.playerAnt, pick.id);
+      this.renderer.pulse(this.playerAnt);
       this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
       return;
     }
@@ -651,6 +714,7 @@ export class Game {
       } else {
         this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: r2(x), y: r2(y) });
         this.sim.move(this.playerAnt, x, y);
+        this.renderer.pulse(this.playerAnt);
       }
     } else if (button === 2) {
       const layer = this.renderer.activeLayer;
@@ -664,6 +728,7 @@ export class Game {
           // right-click: fly to the destination and land there
           this.log.push({ type: 'cmd', act: 'land', ant: this.playerAnt, x: r2(x), y: r2(y) });
           this.sim.land(this.playerAnt, x, y);
+          this.renderer.pulse(this.playerAnt);
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }
@@ -682,6 +747,7 @@ export class Game {
             ...(fits ? {} : { note: 'refused-near-edge' }),
           });
           this.sim.found(this.playerAnt, x, y);
+          this.renderer.pulse(this.playerAnt);
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }
@@ -693,6 +759,19 @@ export class Game {
       const soft = kind >= 1 && kind <= 3;
       if (layer === 1 && soft && this.sim.dig(this.playerAnt, tx, ty)) {
         this.log.push({ type: 'cmd', act: 'dig', ant: this.playerAnt, tx, ty });
+        this.renderer.pulse(this.playerAnt);
+        this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+        return;
+      }
+      // dig refused on soft dirt: non-diggers get the reason in the help bar
+      // instead of a silent fall-through walk into the wall (command
+      // feedback — the "!" system's twin channel)
+      if (layer === 1 && soft && me !== undefined && me.kind !== 'worker') {
+        this.hud.flashHint(
+          me.kind === 'queen'
+            ? 'The queen only excavates while founding — order a worker to dig'
+            : `${me.kind}s can't dig — only workers excavate`,
+        );
         this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
         return;
       }
@@ -721,6 +800,7 @@ export class Game {
           const kind = this.sim.tileAt(me.layer, tx, ty);
           if (!nearHoleE && kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
             this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'egg' });
+            this.renderer.pulse(this.playerAnt);
             this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
             return;
           }
@@ -747,6 +827,7 @@ export class Game {
           }
           if (!isHoleBlock && emptyBlock && this.sim.drop(this.playerAnt, tx, ty)) {
             this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'dirt' });
+            this.renderer.pulse(this.playerAnt);
             this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
             return;
           }
@@ -754,6 +835,7 @@ export class Game {
           // dirt above ground: the drop simply discards it
           this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx: 0, ty: 0, note: 'surface' });
           this.sim.drop(this.playerAnt, 0, 0);
+          this.renderer.pulse(this.playerAnt);
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }
@@ -781,11 +863,13 @@ export class Game {
               ty,
               note: me.carry.t === 'wood' ? 'food-storage block' : 'nursery block',
             });
+            this.renderer.pulse(this.playerAnt);
             this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
             return;
           }
         } else if (this.sim.tileAt(0, tx, ty) === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
           this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'set down' });
+          this.renderer.pulse(this.playerAnt);
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }
@@ -803,6 +887,7 @@ export class Game {
         const kind = this.sim.tileAt(me.layer, tx, ty);
         if (!nearHole && kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
           this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'food' });
+          this.renderer.pulse(this.playerAnt);
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }
@@ -823,6 +908,7 @@ export class Game {
           // adjacent picks happen instantly; distant ones send the ant
           // walking and it picks up on arrival (core intent)
           this.log.push({ type: 'cmd', act: 'pick-egg', ant: this.playerAnt, target: egg.id });
+          this.renderer.pulse(this.playerAnt);
           this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
           return;
         }
@@ -834,9 +920,11 @@ export class Game {
       ) {
         this.log.push({ type: 'cmd', act: 'entrance', ant: this.playerAnt });
         this.sim.useEntrance(this.playerAnt);
+        this.renderer.pulse(this.playerAnt);
       } else {
         this.log.push({ type: 'cmd', act: 'move', ant: this.playerAnt, x: tx + 0.5, y: ty + 0.5 });
         this.sim.move(this.playerAnt, tx + 0.5, ty + 0.5);
+        this.renderer.pulse(this.playerAnt);
       }
     }
     this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
@@ -967,6 +1055,7 @@ export class Game {
       else if (c.act === 'dev-honeydew') this.sim.devSetHoneydew(Number(c.n ?? 0));
       else if (c.act === 'dev-soil')
         this.sim.devSetSoil(Number(c.layer ?? 0), c.x ?? 0, c.y ?? 0, Number(c.soil ?? 0));
+      else if (c.act === 'dev-rules') this.sim.rulesSet(String(c.json ?? '{}'));
       applied = true;
     }
     if (applied && rp.i >= rp.cmds.length) {

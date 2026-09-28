@@ -69,12 +69,44 @@ const REQUEST = {
   water: FOOD.water,
 } as const;
 
+/** Intent codes (ant record p8, wire v5): 0 none (downed), 1 off-duty,
+ * 2–9 named intents, 20+food = forage of that resource (icon tint). */
+const INTENT = {
+  none: 0,
+  off: 1,
+  dig: 2,
+  haulDirt: 3,
+  haulHome: 4,
+  fight: 5,
+  medic: 6,
+  feeder: 7,
+  follow: 8,
+  produce: 9,
+  forageGreen: 20,
+  forageSuper: 21,
+  forageProtein: 22,
+  forageCarbs: 23,
+  forageWater: 24,
+  forageHoneydew: 25,
+} as const;
+
+/** Blocked-reason codes (ant record p9, wire v5): the "!" icon's reason. */
+const BLOCKED = {
+  none: 0,
+  emptyPantry: 1,
+  needsWater: 2,
+  pantryFull: 3,
+  queenStarving: 4,
+} as const;
+
 // --- decoded shapes ---
 
 export type FoodName = keyof typeof FOOD; // 'green' | 'super' | 'protein' | 'carbs' | 'water' | 'honeydew'
 export type ActivityName = keyof typeof ACTIVITY;
 export type AntKindName = 'queen' | 'worker' | 'soldier' | 'honey' | 'medic';
 export type EggCasteName = keyof typeof EGG_CASTE;
+export type IntentName = keyof typeof INTENT;
+export type BlockedName = keyof typeof BLOCKED;
 
 export type Carry =
   | { t: 'none' }
@@ -107,6 +139,10 @@ export interface AntEnt extends Base {
   following: number | null;
   /** Downed (F4): remaining bleed fraction 1→0; null = standing. */
   downed: number | null;
+  /** Intent-level activity for the far-zoom icon layer (wire v5). */
+  intent: IntentName;
+  /** Why this ant is stuck ("!" reason); 'none' when it isn't. */
+  blocked: BlockedName;
 }
 
 /** Dropped or banked food pile. */
@@ -163,6 +199,12 @@ const ACTIVITY_NAMES: Record<number, ActivityName> = Object.fromEntries(
 const FOOD_NAMES: Record<number, FoodName> = Object.fromEntries(
   Object.entries(FOOD).map(([k, v]) => [v, k as FoodName]),
 );
+const INTENT_NAMES: Record<number, IntentName> = Object.fromEntries(
+  Object.entries(INTENT).map(([k, v]) => [v, k as IntentName]),
+);
+const BLOCKED_NAMES: Record<number, BlockedName> = Object.fromEntries(
+  Object.entries(BLOCKED).map(([k, v]) => [v, k as BlockedName]),
+);
 const KIND_BY_CODE: Record<number, AntKindName> = {
   [KINDS.queen]: 'queen',
   [KINDS.worker]: 'worker',
@@ -171,6 +213,18 @@ const KIND_BY_CODE: Record<number, AntKindName> = {
   [KINDS.medic]: 'medic',
 };
 
+function intentName(code: number): IntentName {
+  const n = INTENT_NAMES[code];
+  if (n === undefined) throw new Error(`decodeSnapshot: unknown intent code ${code}`);
+  return n;
+}
+
+function blockedName(code: number): BlockedName {
+  const n = BLOCKED_NAMES[code];
+  if (n === undefined) throw new Error(`decodeSnapshot: unknown blocked code ${code}`);
+  return n;
+}
+
 /** Decode the flat transport into named entities. Throws on unknown codes —
  * a stale decoder against a newer core should crash loudly, not guess. */
 export function decodeSnapshot(sim: WoaSim): Snapshot {
@@ -178,7 +232,7 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
   const n = raw[3];
   const ents: Ent[] = [];
   for (let i = 0; i < n; i++) {
-    const o = 4 + i * 13;
+    const o = 4 + i * 15;
     const id = raw[o];
     const kindCode = raw[o + 1];
     const layer = raw[o + 2];
@@ -192,6 +246,8 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
     const p5 = raw[o + 10];
     const p6 = raw[o + 11];
     const p7 = raw[o + 12];
+    const p8 = raw[o + 13];
+    const p9 = raw[o + 14];
     if (
       kindCode === KINDS.queen ||
       kindCode === KINDS.worker ||
@@ -227,6 +283,8 @@ export function decodeSnapshot(sim: WoaSim): Snapshot {
         request: p6 > 0.5 ? foodName(p6) : null,
         following: p5 > 0.5 ? p5 - 1 : null,
         downed: p7 < -0.5 ? null : p7,
+        intent: intentName(p8),
+        blocked: blockedName(p9),
       });
     } else if (kindCode === KINDS.food) {
       ents.push({
@@ -325,6 +383,8 @@ export function assertWireSpec(specJson: string): void {
     ['food', FOOD],
     ['request', REQUEST],
     ['eggCaste', EGG_CASTE],
+    ['intent', INTENT],
+    ['blocked', BLOCKED],
   ];
   for (const [name, local] of groups) {
     const remote = spec[name] as Record<string, number> | undefined;

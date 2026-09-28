@@ -2,7 +2,7 @@ import { WoaSim } from './wasm';
 import { decodeSnapshot } from './decode';
 import type { AntEnt, Ent } from './decode';
 
-export type { AntEnt, EggEnt, Ent, SourceEnt, SpiderEnt, FoodEnt, Carry, FoodName, ActivityName } from './decode';
+export type { AntEnt, EggEnt, Ent, SourceEnt, SpiderEnt, FoodEnt, Carry, FoodName, ActivityName, IntentName, BlockedName } from './decode';
 export type Snap = Ent;
 
 export const TPS = 20;
@@ -21,6 +21,10 @@ export interface SimOptions {
   founding?: boolean;
   /** Team color: 0 red, 1 blue (founding mode only). */
   team?: number;
+  /** Whole-rules JSON to run under (admin panel restart path). Invalid
+   * rules throw — they were validated before the restart; a silent fallback
+   * to defaults would hide a tuning mistake. */
+  rules?: string;
 }
 
 /** Colony start phases, mirroring the core enum. */
@@ -51,9 +55,17 @@ export class Sim {
 
   constructor(seed: number, workers = 3, clusters = 6, opts: SimOptions = {}) {
     this.foundingMode = opts.founding ?? false;
-    this.sim = this.foundingMode
-      ? WoaSim.new_founding(BigInt(Math.floor(seed)), opts.team ?? 0)
-      : new WoaSim(BigInt(Math.floor(seed)), workers, clusters);
+    if (this.foundingMode && opts.rules !== undefined) {
+      this.sim = WoaSim.new_founding_rules(
+        BigInt(Math.floor(seed)),
+        opts.team ?? 0,
+        opts.rules,
+      );
+    } else if (this.foundingMode) {
+      this.sim = WoaSim.new_founding(BigInt(Math.floor(seed)), opts.team ?? 0);
+    } else {
+      this.sim = new WoaSim(BigInt(Math.floor(seed)), workers, clusters);
+    }
     const dims = this.sim.dims();
     this.w = dims[0];
     this.h = dims[1];
@@ -182,6 +194,37 @@ export class Sim {
 
   devSpawn(kind: string, x: number, y: number): number {
     return this.sim.dev_spawn(kind, x, y);
+  }
+
+  // --- rules tuning surface (admin panel; core validates atomically) ---
+
+  /** Current rules + digest, decoded: the panel's draft source of truth. */
+  rulesGet(): { digest: string; rules: Record<string, unknown> } {
+    return JSON.parse(this.sim.rules_get()) as { digest: string; rules: Record<string, unknown> };
+  }
+
+  rulesDefault(): { digest: string; rules: Record<string, unknown> } {
+    return JSON.parse(this.sim.rules_default()) as { digest: string; rules: Record<string, unknown> };
+  }
+
+  /** The panel's field registry (groups, scopes, nested-shape hints). */
+  rulesMeta(): RulesMeta {
+    if (this.rulesMetaCache === null) {
+      this.rulesMetaCache = JSON.parse(this.sim.rules_meta()) as RulesMeta;
+    }
+    return this.rulesMetaCache;
+  }
+  private rulesMetaCache: RulesMeta | null = null;
+
+  /** Atomic whole-rules commit; ok, else every validation error. Clears
+   * derived caches (brood menu costs) — they come from the rules. */
+  rulesSet(json: string): { ok: boolean; digest?: string; errors?: string[] } {
+    this.broodSpecCache = null;
+    return JSON.parse(this.sim.rules_set(json));
+  }
+
+  rulesDigest(): string {
+    return this.sim.rules_digest();
   }
 
   devSetFood(n: number): void {
@@ -354,4 +397,16 @@ export interface BroodSpecEntry {
   honeydew: number;
   eggTime: number;
   consumesWorker: boolean;
+}
+
+/** The admin panel's field registry, from the core's rules_meta(). */
+export interface RulesMeta {
+  groups: { name: string; fields: string[] }[];
+  /** Leaf path → { scope: 'live' | 'new_game', group }. */
+  fields: Record<string, { scope: 'live' | 'new_game'; group: string }>;
+  unit_fields: string[];
+  unit_groups: string[];
+  brood_castes: string[];
+  brood_fields: string[];
+  food_kinds: string[];
 }

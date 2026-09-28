@@ -312,6 +312,138 @@ body {
   color: #f0eaff;
 }
 
+/* admin tuning drawer (?admin=1 / F4): scrollable right panel — opaque so
+ * world labels never read through it */
+#admin {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 60px;
+  z-index: 16;
+  pointer-events: auto;
+  background: #12100c;
+  border: 1px solid #5c4033;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#admin.hidden {
+  display: none;
+}
+
+#admin .adm-title {
+  color: #d9c27a;
+  letter-spacing: 2px;
+}
+
+#admin #admin-digest {
+  color: #8f8371;
+  letter-spacing: 0;
+  font-size: 10px;
+  margin-left: 6px;
+}
+
+#admin .adm-digest-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+#admin #admin-dirty {
+  color: #d9a05a;
+  font-size: 11px;
+}
+
+#admin #admin-pane {
+  /* size to the form's content (all-collapsed ≈ small), scroll when tall */
+  flex: 0 1 auto;
+  overflow-y: auto;
+  min-height: 60px;
+  --tp-base-background-color: rgba(20, 17, 13, 0.9);
+  --tp-container-background-color: rgba(42, 34, 51, 0.6);
+  --tp-button-background-color: #2a2233;
+  --tp-button-foreground-color: #cfc4e8;
+  --tp-container-foreground-color: #cfc4e8;
+  --tp-input-background-color: rgba(15, 13, 10, 0.9);
+  --tp-input-foreground-color: #f0e8da;
+  --tp-label-foreground-color: #a89a80;
+}
+
+#admin #admin-json {
+  width: 100%;
+  height: 110px;
+  background: rgba(10, 9, 7, 0.9);
+  color: #b8c8b0;
+  border: 1px solid #4d3f5c;
+  border-radius: 5px;
+  font-family: 'monospace', monospace;
+  font-size: 10px;
+  resize: vertical;
+}
+
+#admin #admin-json.hidden {
+  display: none;
+}
+
+#admin .adm-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+#admin button {
+  background: #2a2233;
+  color: #cfc4e8;
+  border: 1px solid #4d3f5c;
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+#admin button:hover {
+  background: #382d45;
+}
+
+#admin #admin-apply {
+  background: #33402a;
+  border-color: #5c7a4a;
+  color: #cfe8c0;
+}
+
+#admin #admin-restart {
+  background: #40332a;
+  border-color: #7a5c4a;
+  color: #e8d0c0;
+}
+
+#admin #admin-errors {
+  color: #d97a6a;
+  font-size: 11px;
+  white-space: pre-wrap;
+  margin: 0;
+  max-height: 110px;
+  overflow-y: auto;
+  background: rgba(60, 20, 15, 0.35);
+  border-radius: 5px;
+  padding: 4px 6px;
+}
+
+#admin #admin-errors.hidden {
+  display: none;
+}
+
+#admin .adm-hint {
+  color: #8f8371;
+  font-size: 10px;
+}
+
 /* dev console (`): half-transparent roll-down from the top */
 #console {
   position: fixed;

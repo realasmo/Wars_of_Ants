@@ -480,6 +480,48 @@ try {
   }
   console.log('brood:', JSON.stringify({ eggs: a4.eggs, protein: a4.protein, water: a4.water }));
   await page.evaluate(() => window.__woa.pause());
+  await page.evaluate(() => window.__woa.pause()); // resume (double pause from F4 flow)
+
+  // --- admin rules surface: live commit, atomic refusal, replay coverage ---
+  {
+    const rules0 = await page.evaluate(() => window.__woa.rulesGet());
+    const s0 = await state();
+    if (rules0.digest !== s0.rulesDigest) {
+      failures.push(`rules digest mismatch: ${rules0.digest} vs ${s0.rulesDigest}`);
+    }
+    if (s0.ants.some((a) => typeof a.intent !== 'string' || typeof a.blocked !== 'string')) {
+      failures.push('ant intent/blocked missing from the snapshot');
+    }
+    if (!s0.ants.some((a) => a.intent !== 'none')) {
+      failures.push('no worker shows any intent long into the colony');
+    }
+    // live commit: dig_time 1.2 → 0.5 (the log carries the JSON for replay)
+    const doc = JSON.parse(JSON.stringify(rules0.rules));
+    doc.dig_time = 0.5;
+    const res1 = await page.evaluate((j) => window.__woa.rulesSet(j), JSON.stringify(doc));
+    if (res1.ok !== true) failures.push(`live rules commit refused: ${JSON.stringify(res1)}`);
+    const s1 = await state();
+    if (s1.rulesDigest === s0.rulesDigest) failures.push('digest unchanged after live commit');
+    // invalid commit is atomic: refused with the reason listed, nothing applied
+    const bad = JSON.parse(JSON.stringify(doc));
+    bad.dig_time = 0;
+    bad.near_ring_min = 99;
+    const res2 = await page.evaluate((j) => window.__woa.rulesSet(j), JSON.stringify(bad));
+    if (res2.ok !== false) failures.push('invalid rules commit must be refused');
+    else {
+      const joined = res2.errors.join(' | ');
+      if (!joined.includes('dig_time') || !joined.includes('near_ring_min')) {
+        failures.push(`refusal must list every violation: ${joined}`);
+      }
+    }
+    const s2 = await state();
+    if (s2.rulesDigest !== s1.rulesDigest) failures.push('refused commit changed the digest');
+    // the commit is in the input log (replayable)
+    const logR = await page.evaluate(() => window.__woa.log());
+    if (!logR.events.some((e) => e.type === 'cmd' && e.act === 'dev-rules')) {
+      failures.push('dev-rules commit not logged');
+    }
+  }
 
   // --- regenerate the determinism fixture from this very session ---
   const replayExport = await page.evaluate(() => window.__woa.replay());
@@ -528,6 +570,72 @@ try {
   }
   const badgeHidden = await page.evaluate(() => document.getElementById('replay-badge').classList.contains('hidden'));
   if (!badgeHidden) failures.push('REPLAY badge still visible after replay finished');
+
+  // --- admin drawer + new-game rules + the icon layer (fresh page) ---
+  await page.goto(`${baseUrl}?seed=${SEED}&e2e=1&admin=1`);
+  await page.waitForSelector('#menu:not(.hidden)', { timeout: 30000 });
+  await page.click('#btn-play');
+  await page.click('#btn-team-red');
+  await page.waitForFunction(() => window.__woa !== undefined, null, { timeout: 30000 });
+  await page.waitForTimeout(600);
+  {
+    // ?admin=1 auto-opened the drawer; F4 toggles it
+    const open0 = await page.evaluate(() => !document.getElementById('admin').classList.contains('hidden'));
+    if (!open0) failures.push('?admin=1 did not open the rules drawer');
+    const blades = await page.evaluate(() => document.querySelectorAll('#admin-pane *').length);
+    if (blades < 20) failures.push(`tweakpane form looks unbuilt (${blades} nodes)`);
+    const digestShown = await page.evaluate(() => document.getElementById('admin-digest').textContent);
+    const rulesNow = await page.evaluate(() => window.__woa.rulesGet());
+    if (digestShown !== rulesNow.digest) failures.push(`drawer digest ${digestShown} ≠ core ${rulesNow.digest}`);
+    await page.keyboard.press('F4');
+    const closed = await page.evaluate(() => document.getElementById('admin').classList.contains('hidden'));
+    if (!closed) failures.push('F4 did not close the drawer');
+    await page.keyboard.press('F4');
+    const reopened = await page.evaluate(() => !document.getElementById('admin').classList.contains('hidden'));
+    if (!reopened) failures.push('F4 did not reopen the drawer');
+    // Defaults button restages the shipped ruleset (digest label flags it)
+    await page.click('#admin-default');
+    const defText = await page.evaluate(() => document.getElementById('admin-digest').textContent);
+    if (!defText.includes('defaults')) failures.push(`Defaults button did not restage (${defText})`);
+    await shot('s10-admin-drawer');
+
+    // new-game rules: a 64×64 map with one spider, restarted under the seed
+    const doc = JSON.parse(JSON.stringify(rulesNow.rules));
+    doc.width = 64;
+    doc.height = 64;
+    doc.spiders = 1;
+    const json = JSON.stringify(doc);
+    const res = await page.evaluate((j) => window.__woa.rulesSet(j), json);
+    if (res.ok !== true) failures.push(`rulesSet for restart refused: ${JSON.stringify(res)}`);
+    await page.evaluate((j) => window.__woa.rulesRestart(j), json);
+    await page.waitForTimeout(300);
+    const s = await state();
+    if (!Array.isArray(s.map) || s.map[0] !== 64 || s.map[1] !== 64) {
+      failures.push(`rules restart did not resize the map (${JSON.stringify(s.map)})`);
+    }
+    if (s.phase !== 0 || s.tick > 40) failures.push(`restart not a fresh flight (phase ${s.phase}, tick ${s.tick})`);
+    if (s.spiders.length !== 1) failures.push(`custom spider count not applied (${s.spiders.length})`);
+
+    // icon layer: zoom-gated far view + order-confirm pulse
+    let icons = await page.evaluate(() => window.__woa.icons());
+    if (icons.visible !== false) failures.push(`icons must start hidden at zoom ${icons.zoom}`);
+    await page.mouse.move(500, 400);
+    await page.mouse.wheel(0, 700); // zoom OUT past the 0.75 threshold
+    await page.waitForTimeout(120);
+    icons = await page.evaluate(() => window.__woa.icons());
+    if (icons.visible !== true) failures.push(`zooming out did not reveal the icon layer (zoom ${icons.zoom})`);
+    if (!icons.icons.some((i) => i.glyph !== null)) failures.push('no glyph assigned to any ant');
+    await shot('s09-icons-far');
+    await page.mouse.wheel(0, -1400); // back in
+    await page.waitForTimeout(120);
+    icons = await page.evaluate(() => window.__woa.icons());
+    if (icons.visible !== false) failures.push(`zooming in did not hide the icon layer (zoom ${icons.zoom})`);
+    // an order pops the icon + ring in regardless of zoom
+    const q = (await state()).queen;
+    await page.evaluate((p) => window.__woa.click(p.x + 2, p.y, 0), { x: q.x, y: q.y });
+    icons = await page.evaluate(() => window.__woa.icons());
+    if (!icons.pulsing.includes(q.id)) failures.push('order did not pulse the queen');
+  }
 
   if (pageErrors.length > 0) failures.push(`page errors: ${pageErrors.slice(0, 5).join(' | ')}`);
   await browser.close();

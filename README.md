@@ -8,7 +8,7 @@ Design reference: AntWar.io (see `docs/BASED-ON.md`); world content draft: `docs
 - **Remote (origin):** `git@github.com:realasmo/Wars_of_Ants.git`
 - **SSH key:** `/root/.ssh/key_Wars_of_Ants` (configured via repo-local `core.sshCommand`)
 
-## Current status (2026-09-28) — version 0.1.03.57-dev
+## Current status (2026-09-28) — version 0.1.04.58-dev
 
 **Playable:** title → team select → flying queen → found nest → excavate
 (2×2 blocks, dirt hauling) → orange-soil nursery (egg transport) → first
@@ -83,13 +83,26 @@ boot wire-spec assertion); true full-state canonical digest; irange,
 pantry-deadlock, queen retry-freeze, dropped attack intents, friendly
 fire, underground chase fixes; food index + epoch-gated re-pulls.
 
-**Decided next:** the admin-panel wave — ?admin=1 tuning overlay over
-`GameRules` **+ activity indicators** (floating pixel icons over your ants:
-harvest/dig/haul/fight/medic/feeder/!-blocked-with-reason, shown only when
-zoomed out; see TODO.md), then C (neutral
-creatures), D (aphid farming), E (bosses); drafts and costs in
-`docs/WORLD-DESIGN.md`. The visual/lighting ticket menu (baked AO first)
-follows the content waves; one effect per ticket, rendering-only.
+**Admin tuning + activity indicators (ticket
+`docs/TICKET-admin-indicators.md`, shipped 2026-09-28):** every tunable is
+live-editable in-game — `?admin=1` or **F4** opens a Tweakpane drawer over
+`GameRules`, generated from the core's field registry (groups, per-field
+live vs new-game scope), committing whole-object and atomically: the core
+validates everything, applies live fields immediately (entity stats
+re-derived, hp fraction preserved) or lists every violation; "apply & new
+game" restarts under the edited rules with the same seed. Commits are
+logged (`dev-rules`) and replay byte-identically (digest in the canon).
+Zoomed out (≤0.75), every player ant floats a **pixel-art intent icon** —
+per-resource harvest droplets (tinted), dig, spoil-haul, haul-home, fight,
+medic, feeder crown, follow reticle, honey production, off-duty Zz — and a
+red **!** with an honest core-derived reason (empty pantry, medic without
+water, pantry full, queen starving); a gold pulse confirms every order.
+Refused digs explain themselves (soldiers can't dig). Wire layout v5.
+
+**Decided next:** wave C — neutral creatures (earthworm/snail/rove beetle,
+see `docs/WORLD-DESIGN.md`), then D (aphid farming), E (bosses); drafts and
+costs in `docs/WORLD-DESIGN.md`. The visual/lighting ticket menu (baked AO
+first) follows the content waves; one effect per ticket, rendering-only.
 
 **Open balance questions from playtesting:** founding lottery (natural
 orange in the starter chamber ~17% of seeds); orange/silver density
@@ -134,7 +147,7 @@ AntWar.io is a great proof of concept, but it is not perfect and no longer maint
 - **Founding window (60s, countdown in the HUD):** the queen excavates — right-click digs a dirt cell (1s each) and the spoil becomes a **carried dirt unit**: dump it on an empty underground cell to *refill* that cell, or haul it up through the entrance and drop it above ground where it vanishes. Real nest growth means hauling dirt out. She digs until the first workers hatch.
 - **First brood:** when the timer ends she lays **4 eggs** (fewer if the chamber is too small — excavate!); they hatch **3 minutes** later into 4 controllable workers → standard colony gameplay. Ongoing egg production is **not** part of this wave (the founding script replaces auto-laying; production design is a later decision).
 - **Founding grace:** starvation is suspended while the colony has no workers; the queen is still on her own against spiders once grounded (her death by any means ends the colony).
-- All founding numbers live in `core/src/balance.rs` (`QUEEN_FLY_SPEED`, `QUEEN.speed`, `QUEEN_DIG_TIME`, `FOUNDING_TIME`, `FOUNDING_EGGS`, `FOUNDING_EGG_HATCH`).
+- All founding numbers live in `GameRules` (`core/src/rules.rs` — editable live via the F4 admin drawer).
 
 ### World content (design draft — see docs/WORLD-DESIGN.md)
 Creatures (worker/soldier/honey/medic/queen castes, neutral earthworm/snail/rove
@@ -149,7 +162,7 @@ gate into the roadmap through playtesting, phase by phase.
 - **Orange = nursery.** Eggs transform into ants **only on empty orange cells** — ready eggs wait indefinitely until carried there. Any ant can pick up an adjacent egg (right-click) and place it (right-click); the hatch state is preserved.
 - **Silver = pantry.** Food that ants pick up and drop spoils after 5 minutes on a non-silver cell (the timer freezes while on silver); worldgen piles never spoil. Per-cell cap: **6 food units** (any mix) — bigger piles spread across neighboring cells.
 - **Physical pantry:** workers place collected food on the **nearest silver cell** to the entrance (first free cell if none exists yet) as a visible, safe pile; placement credits the food store, and when the pantry fills up the carriers dig out more nest space. The queen still eats from the abstract store (physical eating is undecided).
-- All knobs in `core/src/balance.rs` (`ORANGE/SILVER_SOIL_CHANCE`, `PATCH_*`, `FOOD_CELL_CAP`, `SPOIL_TIME`, ...). Dev: `__woa.setsoil(layer, x, y, 0|1|2)` paints a block (replayable `dev-soil` act).
+- All knobs live in `GameRules` (`core/src/rules.rs` — `ORANGE/SILVER_SOIL_CHANCE`, `PATCH_*`, `FOOD_CELL_CAP`, `SPOIL_TIME`, ...; F4 tunes them live). Dev: `__woa.setsoil(layer, x, y, 0|1|2)` paints a block (replayable `dev-soil` act).
 
 ### Resource economy (founding worlds)
 - Three colony stores: **protein** (ant spawning — spiders drop 8; cockroach
@@ -158,7 +171,7 @@ gate into the roadmap through playtesting, phase by phase.
   fed), **water** (healing later; moss/mushroom sources).
 - The map has **no green food**: six **finite source types** (moss, mushroom,
   raspberry, strawberry, cockroach, caterpillar) scattered as single finds —
-  spec table in `core/src/balance.rs` (`SOURCES`) and `docs/WORLD-DESIGN.md`.
+  spec table in `GameRules.sources` (`core/src/rules.rs`) and `docs/WORLD-DESIGN.md`.
   Sources never respawn; depleted ones vanish.
 - **Scouting:** sources count as known only after a colony ant sights them
   (8 tiles). Idle workers with nothing known wander outward from the nest
@@ -170,7 +183,7 @@ gate into the roadmap through playtesting, phase by phase.
 
 ### Combat & content (confirmed, Phase 3 wave 1)
 - **Combat model:** original-style melee — HP / damage / attack cooldown / speed per unit; click an enemy to lock on and auto-attack in range.
-- **Stats (wave 1):** Worker 100 HP / 8 dmg / 1.0s CD / speed 3.0 · Soldier 130 / 22 / 1.0s / 2.6 · Queen 150 HP · Spider 130 / 15 / 1.2s / 2.2 (aggro 5 tiles, wanders near lair, surface only). Values live in `core/src/balance.rs` — see "Balance table".
+- **Stats (wave 1):** Worker 100 HP / 8 dmg / 1.0s CD / speed 3.0 · Soldier 130 / 22 / 1.0s / 2.6 · Queen 150 HP · Spider 130 / 15 / 1.2s / 2.2 (aggro 5 tiles, wanders near lair, surface only). Values live in `GameRules` (`core/src/rules.rs`) — see "Balance table".
 - **Predators:** spiders (2 per map) wander the surface, attack ants in aggro range.
 - **Super Food (blue):** dropped by killed spiders (8 units); Soldier eggs cost 2 Super + 3 Green; soldiers produced automatically while Super is available, capped at 1 soldier per 2 workers.
 - **Fog of war:** removed for now (was implemented in wave 1) — may return later, likely server-authoritative for multiplayer.
@@ -194,7 +207,7 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 - `cd client && npm run e2e` — boots the real client in headless Chromium (system `chromium` package), drives it through a scripted scenario via an in-page debug hook (`window.__woa`, only alongside `?e2e=1`): world-coordinate clicks, key toggles, sim fast-forward, state dumps, canvas pixel probes.
 - Reproducible: `WOA_SEED=42 WOA_PORT=5199 WOA_OUT=/tmp/... npm run e2e`.
 - Screenshots + JSON state dumps land in `/tmp/opencode/woa-shots` (screenshots are for humans; assertions are state/pixel-based).
-- URL params: `?seed=N` fixed world seed, `?e2e=1` preserve canvas for pixel reads.
+- URL params: `?seed=N` fixed world seed, `?e2e=1` preserve canvas for pixel reads, `?admin=1` open the rules drawer, `?perf=1` perf overlay, `?replay=name` watch a replay.
 
 ### Input recorder (live debugging)
 
@@ -219,14 +232,19 @@ Build order: singleplayer first. Art: placeholder/procedural until the gameplay 
 
 ### Versioning rule
 
-- **Every format that crosses a build, process, or network boundary gets a version number from day one.** Currently versioned: replay format (`version: 2`), the wire snapshot (layout v2 via `snapshot_spec()`), and the game itself — `GAME_VERSION` in `core/src/lib.rs` (single source; `game_version()` serves it to the client, shown in the main menu and the bottom-left in-game corner). Scheme: `MAJOR.MINOR.WAVE.BUILD-dev` — BUILD bumps on EVERY game change however slight (same commit as the change), WAVE bumps per shipped feature wave. Coming before first use: save files and the Phase-4 binary protocol.
+- **Every format that crosses a build, process, or network boundary gets a version number from day one.** Currently versioned: replay format (`version: 2`), the wire snapshot (layout v5 via `snapshot_spec()`), and the game itself — `GAME_VERSION` in `core/src/lib.rs` (single source; `game_version()` serves it to the client, shown in the main menu and the bottom-left in-game corner). Scheme: `MAJOR.MINOR.WAVE.BUILD-dev` — BUILD bumps on EVERY game change however slight (same commit as the change), WAVE bumps per shipped feature wave. Coming before first use: save files and the Phase-4 binary protocol.
 
 ### Balance table
 
-- All tunable gameplay numbers (unit HP/damage/cooldown/speed/range per caste and predator, economy constants) live in `core/src/balance.rs` — data only, no logic. Sim code reads them via `stats_for(caste)`; changing a number there is a balance change, not a code change.
+- All tunable gameplay numbers (unit HP/damage/cooldown/speed/range per caste and predator, worldgen, economy constants) live in `GameRules` (`core/src/rules.rs`) — data only, validated, digest-hashed into the canon. Sim code reads them via `stats_for(caste)`. Tune live with the F4 admin drawer or by editing the defaults; changing a number there is a balance change, not a code change.
 
-### Dev tools (F2, F3)
+### Dev tools (F2, F3, F4)
 
+- **F4 opens the admin rules drawer** (also `?admin=1` on load) — see the
+  "Admin tuning" paragraph above. The whole form is generated from the
+  core's field registry; `◇ng` marks fields that only apply on a new game.
+  `__woa.rulesGet/rulesSet/rulesRestart` drive the same surface from
+  devtools/e2e; `__woa.icons()` reads the intent-icon layer state.
 - **F2 opens the dev panel**: pick an entity (worker / soldier / egg / spider / food / super food), then click the map to place it. Quick actions: food = 50, super = 5, kill spiders, pause, +10s fast-forward. Esc cancels placement. Ants and eggs spawn underground; spiders and food on the surface.
 - **In-game console (`` ` ``):** a half-transparent console rolls down from the top — live event feed (colony events with causes: births, deaths and why, egg laid/ready/hatched, sources discovered/depleted, deliveries, pantry expansions, carb slow on/off, colony death) plus a command line (`help` lists everything: spawn/setfood/setsuper/setwater/soil/kill/killspiders/pause/step/coords/state/canon/seed/events/clear). Arrow-up recalls history. The event log lives in the sim (capped 400, observational only — never affects gameplay or determinism).
 - **Coords tool** (F2 → coords): live x/y + tile of your ant in a corner readout; every click logs its world position into the console.

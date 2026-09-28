@@ -122,6 +122,25 @@
       </div>
     </div>
     <div id="coords" class="hidden"></div>
+    <div id="admin" class="hidden">
+      <div class="adm-title">ADMIN · RULES <span id="admin-digest"></span></div>
+      <div class="adm-digest-row"><span id="admin-dirty"></span><span class="adm-hint">◇ng = applies on a new game</span></div>
+      <div id="admin-pane"></div>
+      <textarea id="admin-json" class="hidden" spellcheck="false"></textarea>
+      <div class="adm-row">
+        <button id="admin-json-load">load JSON</button>
+        <button id="admin-json-toggle">JSON…</button>
+      </div>
+      <div class="adm-row">
+        <button id="admin-apply">Apply (live)</button>
+        <button id="admin-restart">Apply &amp; new game</button>
+      </div>
+      <div class="adm-row">
+        <button id="admin-default">Defaults</button>
+      </div>
+      <pre id="admin-errors" class="hidden"></pre>
+      <div class="adm-hint">commits are atomic + logged (replayable) · new game keeps the seed</div>
+    </div>
     <div id="console" class="hidden">
       <div id="console-out"></div>
       <div id="console-line">

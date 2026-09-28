@@ -33,6 +33,11 @@ declare global {
       squad: (mode: number) => boolean;
       brood: (code: number) => string;
       parts: (id: number) => Record<string, unknown> | null;
+      rules: () => Record<string, unknown>;
+      rulesGet: () => Record<string, unknown>;
+      rulesSet: (json: string) => Record<string, unknown>;
+      rulesRestart: (json: string) => void;
+      icons: () => Record<string, unknown>;
     };
   }
 }
@@ -65,6 +70,8 @@ async function main(): Promise<void> {
   game.start();
   bindConsole(game);
   if (params.get('perf') !== null) game.togglePerf();
+  // the admin rules drawer opens itself with ?admin=1 (F4 toggles it too)
+  if (params.get('admin') !== null) game.admin.show();
   // death overlay → team menu → brand-new founding game
   game.onToMenu = () => {
     void chooseTeam().then((team) => game.restartFounding(team));
@@ -101,6 +108,11 @@ async function main(): Promise<void> {
     squad: (mode) => game.debugSquad(mode),
     brood: (code) => game.debugBrood(code),
     parts: (id) => game.debugAntParts(id),
+    rules: () => game.debugRules(),
+    rulesGet: () => game.sim.rulesGet() as Record<string, unknown>,
+    rulesSet: (json) => game.simRulesSet(json) as Record<string, unknown>,
+    rulesRestart: (json) => game.restartWithRules(json),
+    icons: () => game.debugIcons(),
   };
 }
 

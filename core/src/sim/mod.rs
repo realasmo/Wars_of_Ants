@@ -13,7 +13,8 @@ mod systems;
 mod worldgen;
 
 pub use snapshot::{
-    snapshot_spec, Activity, AntSnap, EggSnap, EntitySnap, FoodRole, FoodSnap, SpiderSnap,
+    snapshot_spec, Activity, AntSnap, Blocked, EggSnap, EntitySnap, FoodRole, FoodSnap, Intent,
+    SpiderSnap,
 };
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -266,11 +267,108 @@ impl Sim {
         Self::build(seed, rules, false, Team::Red)
     }
 
-    /// Founding start: a lone queen flying over the surface at map center.
-    /// Runs under the default ruleset (the admin panel wave adds rule
-    /// injection; nothing passes overrides yet).
+    /// Founding start: a lone queen flying over the surface at map center,
+    /// under the default ruleset.
     pub fn new_founding(seed: u64, team: Team) -> Sim {
         Self::build(seed, GameRules::default(), true, team)
+    }
+
+    /// Founding start under explicit rules (the admin panel's "apply & new
+    /// game" path). Parses and validates first: a bad ruleset must fail here,
+    /// before any world exists — never silently fall back to defaults.
+    pub fn new_founding_with(seed: u64, team: Team, rules: GameRules) -> Sim {
+        Self::build(seed, rules, true, team)
+    }
+
+    /// Parse + validate a whole-rules JSON document. Shared by the wasm
+    /// boundary and the replay path so a commit and its replay apply the
+    /// exact same bytes.
+    pub fn parse_rules(json: &str) -> Result<GameRules, Vec<String>> {
+        match serde_json::from_str::<GameRules>(json) {
+            Ok(rules) => match rules.validate() {
+                Ok(()) => Ok(rules),
+                Err(errs) => Err(errs),
+            },
+            Err(e) => Err(vec![format!("JSON: {e}")]),
+        }
+    }
+
+    /// The current ruleset as JSON (serde, whole-object; pairs with
+    /// `set_rules`).
+    pub fn rules_json(&self) -> String {
+        serde_json::to_string(&self.rules).expect("GameRules serializes")
+    }
+
+    /// Rules digest as 16 hex chars (the same value folded into the canon).
+    pub fn rules_digest_hex(&self) -> String {
+        format!("{:016x}", self.rules.digest())
+    }
+
+    /// Atomically replace the ruleset: parse + validate (all errors at once),
+    /// then commit and re-derive the entity-copied stats (speed, combat
+    /// numbers — hp fraction preserved) so "live" fields really are live for
+    /// existing entities too. Returns the new digest.
+    pub fn set_rules(&mut self, json: &str) -> Result<String, Vec<String>> {
+        let rules = Self::parse_rules(json)?;
+        let digest = self.rules_digest_hex();
+        self.rules = rules;
+        self.resync_stats();
+        let new_digest = self.rules_digest_hex();
+        self.ev(format!("rules updated ({digest} → {new_digest})"));
+        Ok(new_digest)
+    }
+
+    /// After a rules commit, refresh every per-entity copy of the tunables:
+    /// `Ant::speed` and `Combat` are snapshotted from the rules at spawn, so
+    /// without this a live speed/hp change would only affect ants yet to be
+    /// born. HP keeps its fraction (a half-dead spider stays half-dead of the
+    /// new maximum).
+    fn resync_stats(&mut self) {
+        let ants = self.ant_ids();
+        for id in ants {
+            let Some(&ent) = self.ids.get(&id) else {
+                continue;
+            };
+            let Some(caste) = self
+                .ecs
+                .query_one::<&Ant>(ent)
+                .ok()
+                .and_then(|mut q| q.get().map(|a| a.caste))
+            else {
+                continue;
+            };
+            let st = *self.rules.stats_for(caste);
+            if let Ok(mut a) = self.ecs.get::<&mut Ant>(ent) {
+                a.speed = st.speed;
+            }
+            if let Ok(mut c) = self.ecs.get::<&mut Combat>(ent) {
+                let frac = (c.hp / c.max_hp).clamp(0.0, 1.0);
+                c.max_hp = st.hp;
+                c.hp = frac * st.hp;
+                c.dmg = st.dmg;
+                c.atk_cd = st.atk_cd;
+            }
+        }
+        let spiders: Vec<u32> = self
+            .ids
+            .iter()
+            .filter(|(_, &e)| self.ecs.get::<&Predator>(e).is_ok())
+            .map(|(&id, _)| id)
+            .collect();
+        for id in spiders {
+            let Some(&ent) = self.ids.get(&id) else {
+                continue;
+            };
+            let st = self.rules.spider;
+            if let Ok(mut p) = self.ecs.get::<&mut Predator>(ent) {
+                let frac = (p.hp / p.max_hp).clamp(0.0, 1.0);
+                p.max_hp = st.hp;
+                p.hp = frac * st.hp;
+                p.dmg = st.dmg;
+                p.speed = st.speed;
+                p.atk_cd = st.atk_cd;
+            }
+        }
     }
 
     pub fn issue(&mut self, cmd: Command) -> bool {

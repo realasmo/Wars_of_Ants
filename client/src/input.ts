@@ -20,6 +20,8 @@ export class Input {
   onToggleDev: () => void = () => {};
   onSquadKey: (code: string) => void = () => {};
   onTogglePerf: () => void = () => {};
+  /** F4: the admin rules drawer (created lazily by the handler). */
+  onToggleAdmin: () => void = () => {};
   onEscape: () => void = () => {};
   /** Wheel zoom; anchored at the followed ant while controlling. */
   onZoom: (factor: number, sx: number, sy: number) => void = () => {};
@@ -128,6 +130,9 @@ export class Input {
       } else if (e.code === 'F3') {
         e.preventDefault();
         this.onTogglePerf();
+      } else if (e.code === 'F4') {
+        e.preventDefault();
+        this.onToggleAdmin();
       } else if (e.code === 'KeyX') {
         this.onSquadKey('KeyX');
       } else if (e.code === 'Escape') {

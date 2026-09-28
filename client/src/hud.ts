@@ -1,7 +1,46 @@
 import type { AntEnt, Sim } from './sim';
+import type { BlockedName } from './sim';
 
 function el(id: string): HTMLElement {
   return document.getElementById(id) as HTMLElement;
+}
+
+/** What the "!" means, in player words (mirrors the core's Blocked enum). */
+export const BLOCKED_TEXT: Record<BlockedName, string> = {
+  none: '',
+  emptyPantry: 'pantry lacks the craved resource',
+  needsWater: 'healing needs pantry water',
+  pantryFull: 'pantry full — nowhere to store',
+  queenStarving: 'queen starving — feed her',
+};
+
+/** Intent suffix for the controlling line: ' · digging' / ' · ! pantry full'. */
+function intentSuffix(a: AntEnt): string {
+  if (a.blocked !== 'none') return ` · ! ${BLOCKED_TEXT[a.blocked]}`;
+  switch (a.intent) {
+    case 'none':
+      return '';
+    case 'off':
+      return '';
+    case 'dig':
+      return ' · digging';
+    case 'haulDirt':
+      return ' · hauling spoil';
+    case 'haulHome':
+      return ' · hauling home';
+    case 'fight':
+      return ' · fighting';
+    case 'medic':
+      return ' · medic duty';
+    case 'feeder':
+      return ' · feeding the queen';
+    case 'follow':
+      return ' · following';
+    case 'produce':
+      return ' · producing honeydew';
+    default:
+      return a.intent.startsWith('forage') ? ' · foraging' : '';
+  }
 }
 
 /** Carry suffix for the controlling line: ' · egg' etc., so a full-handed
@@ -16,12 +55,12 @@ const HELP_COLONY =
   'Hold left button: your ant follows the cursor · Left-click an ant: take control · Right-click: dig tile / attack spider / ' +
   'enter-exit nest (the marked hole) · Mouse wheel: zoom · C: control next ant · X: squad — they follow you, farm with you ' +
   '(and keep at it), and attack your target; X, 1 recalls them · as the QUEEN, X: brood menu (order eggs for pantry food) · ' +
-  'F2: dev tools · F3: perf · the camera follows your ant; spectate (Tab, drag, WASD) when it dies';
+  'F2: dev tools · F3: perf · F4: rules drawer · the camera follows your ant; spectate (Tab, drag, WASD) when it dies';
 
 const HELP_FOUNDING =
   'Right-click dirt: walk there and dig (2×2) · You can carry two blocks — right-click empty space to refill one, haul out and drop above ground to discard all · ' +
   'Orange soil = eggs only hatch there · Silver = food never spoils there · Right-click an egg to carry it, again to place · ' +
-  'X: brood menu (order eggs for pantry food) · F2 · F3';
+  'X: brood menu (order eggs for pantry food) · F2 · F3 · F4: rules';
 
 const HELP_FLIGHT = 'Hold left button: fly toward the cursor · Right-click: land here · F2: dev tools · F3: perf';
 
@@ -74,8 +113,8 @@ export class Hud {
       : 'colony';
     el('ctrl-ant').textContent = snap
       ? snap.kind === 'queen'
-        ? `queen (${state}${carrySuffix(snap)})`
-        : `ant #${playerAnt} (${state}${carrySuffix(snap)})`
+        ? `queen (${state}${carrySuffix(snap)}${intentSuffix(snap)})`
+        : `ant #${playerAnt} (${state}${carrySuffix(snap)}${intentSuffix(snap)})`
       : 'spectating';
     el('ctrl-layer').textContent = layer === 0 ? 'Surface' : 'Underground';
     this.setHelp(

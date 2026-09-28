@@ -26,7 +26,8 @@ pub enum Caste {
     Medic,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FoodKind {
     /// Legacy founded worlds only (test economy).
     Green,

@@ -73,11 +73,107 @@ pub fn egg_caste_code(caste: Caste) -> u8 {
 /// the food code of the craved kind.
 pub const REQUEST_NONE: u8 = 0;
 
+// --- activity indicators (admin-panel wave, wire v5) ---
+
+/// What an ant is *about* — the intent-level job, not just the body state
+/// (a feeder walking to the pantry is still feeding the queen, a squad
+/// follower hauling dirt is still in the squad's service). Derived live in
+/// `intent_of` from job/state/carry; never stored, never canonical.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Intent {
+    /// Not applicable (downed ants carry the DOWN label instead).
+    None,
+    /// Off-duty: loiter, rest, standby, idle drift.
+    Off,
+    Dig,
+    /// Spoil being hauled out to the surface.
+    HaulDirt,
+    /// Carrying something home to the nest (food to the pantry, eggs to the
+    /// nursery, collectibles to build with).
+    HaulHome,
+    Fight,
+    /// Medic business: standby, rescue, healing.
+    Medic,
+    /// The designated queen-feeder, whatever leg of the loop it is on.
+    Feeder,
+    Follow,
+    /// A Honey ant producing honeydew where it stands.
+    Produce,
+    /// Working a food source or pile of this kind (drives the icon tint).
+    Forage(FoodKind),
+}
+
+/// Why an ant is stuck — the "!" icon's reason. Derived honestly from the
+/// live situation (the AI's actual blockers), never guessed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Blocked {
+    None,
+    /// The feeder's pantry cannot satisfy the queen's craving.
+    EmptyPantry,
+    /// A medic's healing is parked waiting for pantry water.
+    NeedsWater,
+    /// A loaded carrier with no pantry cell and no room to dig more nest.
+    PantryFull,
+    /// The founding queen's hunger fuse is burning and nothing feeds her.
+    QueenStarving,
+}
+
+pub const INTENT_NONE: u8 = 0;
+pub const INTENT_OFF: u8 = 1;
+pub const INTENT_DIG: u8 = 2;
+pub const INTENT_HAUL_DIRT: u8 = 3;
+pub const INTENT_HAUL_HOME: u8 = 4;
+pub const INTENT_FIGHT: u8 = 5;
+pub const INTENT_MEDIC: u8 = 6;
+pub const INTENT_FEEDER: u8 = 7;
+pub const INTENT_FOLLOW: u8 = 8;
+pub const INTENT_PRODUCE: u8 = 9;
+/// Forage intents are 20 + the food code (per-resource icon tint).
+pub const INTENT_FORAGE: u8 = 20;
+
+pub const BLOCKED_NONE: u8 = 0;
+pub const BLOCKED_EMPTY_PANTRY: u8 = 1;
+pub const BLOCKED_NEEDS_WATER: u8 = 2;
+pub const BLOCKED_PANTRY_FULL: u8 = 3;
+pub const BLOCKED_QUEEN_STARVING: u8 = 4;
+
+pub fn intent_code(i: Intent) -> u8 {
+    match i {
+        Intent::None => INTENT_NONE,
+        Intent::Off => INTENT_OFF,
+        Intent::Dig => INTENT_DIG,
+        Intent::HaulDirt => INTENT_HAUL_DIRT,
+        Intent::HaulHome => INTENT_HAUL_HOME,
+        Intent::Fight => INTENT_FIGHT,
+        Intent::Medic => INTENT_MEDIC,
+        Intent::Feeder => INTENT_FEEDER,
+        Intent::Follow => INTENT_FOLLOW,
+        Intent::Produce => INTENT_PRODUCE,
+        Intent::Forage(k) => INTENT_FORAGE + food_code(k),
+    }
+}
+
+pub fn blocked_code(b: Blocked) -> u8 {
+    match b {
+        Blocked::None => BLOCKED_NONE,
+        Blocked::EmptyPantry => BLOCKED_EMPTY_PANTRY,
+        Blocked::NeedsWater => BLOCKED_NEEDS_WATER,
+        Blocked::PantryFull => BLOCKED_PANTRY_FULL,
+        Blocked::QueenStarving => BLOCKED_QUEEN_STARVING,
+    }
+}
+
 /// JSON description of the snapshot wire codes, for the client's boot-time
 /// decoder assertion. Bump `snapshot` when the layout changes.
 pub fn snapshot_spec() -> String {
     format!(
-        "{{\"snapshot\":4,\"stride\":13,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE},\"collectible\":{KIND_COLLECTIBLE},\"honey\":{KIND_HONEY},\"medic\":{KIND_MEDIC}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD},\"wood\":{CARRY_WOOD},\"wool\":{CARRY_WOOL},\"fallen\":{CARRY_FALLEN}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER},\"honeydew\":{FOOD_HONEYDEW}}},\"request\":{{\"none\":{REQUEST_NONE},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}},\"eggCaste\":{{\"worker\":{EGG_WORKER},\"soldier\":{EGG_SOLDIER},\"honey\":{EGG_HONEY},\"medic\":{EGG_MEDIC}}}}}"
+        "{{\"snapshot\":5,\"stride\":15,\"kinds\":{{\"queen\":{KIND_QUEEN},\"worker\":{KIND_WORKER},\"soldier\":{KIND_SOLDIER},\"egg\":{KIND_EGG},\"spider\":{KIND_SPIDER},\"food\":{KIND_FOOD},\"source\":{KIND_SOURCE},\"collectible\":{KIND_COLLECTIBLE},\"honey\":{KIND_HONEY},\"medic\":{KIND_MEDIC}}},\"activity\":{{\"idle\":{ACT_IDLE},\"moving\":{ACT_MOVING},\"digging\":{ACT_DIGGING},\"fighting\":{ACT_FIGHTING},\"flying\":{ACT_FLYING},\"harvesting\":{ACT_HARVESTING}}},\"carry\":{{\"none\":{CARRY_NONE},\"dirt\":{CARRY_DIRT},\"egg\":{CARRY_EGG},\"food\":{CARRY_FOOD},\"wood\":{CARRY_WOOD},\"wool\":{CARRY_WOOL},\"fallen\":{CARRY_FALLEN}}},\"food\":{{\"green\":{FOOD_GREEN},\"super\":{FOOD_SUPER},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER},\"honeydew\":{FOOD_HONEYDEW}}},\"request\":{{\"none\":{REQUEST_NONE},\"protein\":{FOOD_PROTEIN},\"carbs\":{FOOD_CARB},\"water\":{FOOD_WATER}}},\"eggCaste\":{{\"worker\":{EGG_WORKER},\"soldier\":{EGG_SOLDIER},\"honey\":{EGG_HONEY},\"medic\":{EGG_MEDIC}}},\"intent\":{{\"none\":{INTENT_NONE},\"off\":{INTENT_OFF},\"dig\":{INTENT_DIG},\"haulDirt\":{INTENT_HAUL_DIRT},\"haulHome\":{INTENT_HAUL_HOME},\"fight\":{INTENT_FIGHT},\"medic\":{INTENT_MEDIC},\"feeder\":{INTENT_FEEDER},\"follow\":{INTENT_FOLLOW},\"produce\":{INTENT_PRODUCE},\"forageGreen\":{},\"forageSuper\":{},\"forageProtein\":{},\"forageCarbs\":{},\"forageWater\":{},\"forageHoneydew\":{}}},\"blocked\":{{\"none\":{BLOCKED_NONE},\"emptyPantry\":{BLOCKED_EMPTY_PANTRY},\"needsWater\":{BLOCKED_NEEDS_WATER},\"pantryFull\":{BLOCKED_PANTRY_FULL},\"queenStarving\":{BLOCKED_QUEEN_STARVING}}}}}",
+        INTENT_FORAGE + FOOD_GREEN,
+        INTENT_FORAGE + FOOD_SUPER,
+        INTENT_FORAGE + FOOD_PROTEIN,
+        INTENT_FORAGE + FOOD_CARB,
+        INTENT_FORAGE + FOOD_WATER,
+        INTENT_FORAGE + FOOD_HONEYDEW,
     )
 }
 
@@ -117,6 +213,10 @@ pub struct AntSnap {
     pub following: Option<u32>,
     /// Downed (F4): remaining bleed fraction 1→0; None = standing.
     pub downed: Option<f64>,
+    /// Intent-level activity for the far-zoom icon layer (wire v5).
+    pub intent: Intent,
+    /// Why this ant is stuck (the "!" icon's reason), if it is.
+    pub blocked: Blocked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -242,7 +342,153 @@ pub(crate) fn food_name(kind: FoodKind) -> &'static str {
     }
 }
 
+/// The WorkerAi fields the intent projection needs, copied out of the ECS
+/// borrow (the Ref guard can't leave the query scope).
+struct AiView {
+    job: Job,
+    attack_after: bool,
+    dig_after: bool,
+}
+
 impl Sim {
+    /// Intent + blocked derivation for the icon layer: a pure, honest
+    /// projection of (job, body state, mandibles, colony context). Order:
+    /// what the body is doing right now beats the job; the job beats the
+    /// idle defaults. Blocked is only ever reported where the AI genuinely
+    /// cannot proceed — never a guess.
+    fn intent_of(
+        &self,
+        caste: Caste,
+        state: &AntState,
+        carry: Carry,
+        ai: Option<&AiView>,
+        downed: bool,
+    ) -> (Intent, Blocked) {
+        if downed {
+            // the red DOWN label is the downed ant's whole story
+            return (Intent::None, Blocked::None);
+        }
+        let job = ai.map(|a| &a.job);
+        // the blocked checks all index through the queen/pantry (queen_tile
+        // panics on a despawned queen) — a dead colony has no economy left
+        let blocked = if self.colony.dead || self.world.entrance.is_none() {
+            Blocked::None
+        } else {
+            self.blocked_of(caste, carry, job)
+        };
+        // body states first — they are what is visibly happening
+        match state {
+            AntState::Digging { .. } => return (Intent::Dig, blocked),
+            AntState::Fighting { .. } => return (Intent::Fight, blocked),
+            AntState::Harvesting { target } => {
+                return (
+                    self.food_kind_of(*target)
+                        .map_or(Intent::Off, Intent::Forage),
+                    blocked,
+                )
+            }
+            _ => {}
+        }
+        if let Some(ai) = ai {
+            if ai.attack_after {
+                return (Intent::Fight, blocked);
+            }
+            if ai.dig_after {
+                return (Intent::Dig, blocked);
+            }
+        }
+        // role jobs beat the generic carry read: a feeder with the craved
+        // unit in its mandibles is walking it to the QUEEN, not to the
+        // pantry — the crown must not flicker to a haul icon mid-loop
+        match job {
+            Some(Job::Feed) => return (Intent::Feeder, blocked),
+            Some(Job::Rescue(_)) | Some(Job::Heal(_)) => return (Intent::Medic, blocked),
+            _ => {}
+        }
+        match carry {
+            Carry::Dirt { .. } => return (Intent::HaulDirt, blocked),
+            // a medic's patient is handled by the job below; anyone else
+            // hauling a fallen ant is doing medic work
+            Carry::Fallen => return (Intent::Medic, blocked),
+            // food banking on silver, eggs to the nursery, wood/wool home
+            Carry::Food(_) | Carry::Egg | Carry::Wood | Carry::Wool => {
+                return (Intent::HaulHome, blocked)
+            }
+            Carry::None => {}
+        }
+        match job {
+            Some(Job::Hold) => (Intent::Medic, blocked),
+            Some(Job::Follow(_, _)) => (Intent::Follow, blocked),
+            Some(Job::DigTile(_, _)) => (Intent::Dig, blocked),
+            Some(Job::Deliver(_, _)) => (Intent::HaulHome, blocked),
+            Some(Job::Fetch(fid)) => (
+                self.food_kind_of(*fid).map_or(Intent::Off, Intent::Forage),
+                blocked,
+            ),
+            // a Honey ant produces wherever it stands — even while loitering
+            // between pantry cells (the secretion timer always runs)
+            _ if caste == Caste::Honey => (Intent::Produce, blocked),
+            Some(Job::Loiter(_)) | Some(Job::GoHome) | Some(Job::GoOut) | Some(Job::Rest(_)) => {
+                (Intent::Off, blocked)
+            }
+            _ => (Intent::Off, blocked),
+        }
+    }
+
+    /// The stuck-reason half of the icon layer. Every case mirrors an actual
+    /// dead-end branch in the AI (see worker_ai) so the "!" never lies.
+    fn blocked_of(&self, caste: Caste, carry: Carry, job: Option<&Job>) -> Blocked {
+        // feeder with empty hands and a pantry that cannot satisfy the
+        // craving (worker_ai's Feed → craving_pile() None branch)
+        if matches!(job, Some(Job::Feed))
+            && !matches!(carry, Carry::Food(_))
+            && self.craving_pile().is_none()
+        {
+            return Blocked::EmptyPantry;
+        }
+        // medic parked at its patient because the pantry can't pay the water
+        // (worker_ai's Heal phase 2 → withdraw fails branch)
+        if let Some(Job::Heal(fid)) = job {
+            let healing = self
+                .ids
+                .get(fid)
+                .and_then(|&e| self.ecs.get::<&Fallen>(e).ok())
+                .and_then(|f| f.heal_t)
+                .is_some();
+            if !matches!(carry, Carry::Fallen)
+                && !healing
+                && self.pantry_units(FoodKind::Water) < self.rules.water_per_heal
+            {
+                return Blocked::NeedsWater;
+            }
+        }
+        // loaded carrier: no pantry cell with room and nowhere soft left to
+        // dig within the expansion radius (worker_ai's pantry-full branch)
+        if matches!(carry, Carry::Food(_))
+            && matches!(job, Some(Job::Idle) | Some(Job::Deliver(_, _)) | None)
+            && self.pantry_tile().is_none()
+            && self.pick_dig_target().is_none()
+        {
+            return Blocked::PantryFull;
+        }
+        // founding queen: hunger fuse burning, pantry can't cover the
+        // craving, and she isn't holding the craved unit herself
+        if caste == Caste::Queen
+            && self.colony.founding
+            && self.colony.hunger_t >= self.rules.eat_period
+            && self.craving_pile().is_none()
+            && !matches!(carry, Carry::Food(k) if k == self.craving())
+        {
+            return Blocked::QueenStarving;
+        }
+        Blocked::None
+    }
+
+    fn food_kind_of(&self, fid: u32) -> Option<FoodKind> {
+        let &ent = self.ids.get(&fid)?;
+        self.ecs.get::<&Food>(ent).ok().map(|f| f.kind)
+    }
+
     pub fn snapshot(&self) -> Vec<EntitySnap> {
         let mut rev = std::collections::HashMap::new();
         for (&id, &ent) in &self.ids {
@@ -302,6 +548,21 @@ impl Sim {
                 .get::<&Fallen>(ent)
                 .ok()
                 .map(|f| (f.bleed_t / self.rules.bleed_time).clamp(0.0, 1.0));
+            let (intent, blocked) = self.intent_of(
+                ant.caste,
+                state,
+                *carry,
+                self.ecs
+                    .get::<&WorkerAi>(ent)
+                    .ok()
+                    .map(|q| AiView {
+                        job: q.job.clone(),
+                        attack_after: q.attack_after.is_some(),
+                        dig_after: q.dig_after.is_some(),
+                    })
+                    .as_ref(),
+                downed.is_some(),
+            );
             v.push(EntitySnap::Ant(AntSnap {
                 id,
                 caste: ant.caste,
@@ -315,6 +576,8 @@ impl Sim {
                 request,
                 following,
                 downed,
+                intent,
+                blocked,
             }));
         }
         for (ent, (food, pos)) in self.ecs.query::<(&Food, &Pos)>().iter() {

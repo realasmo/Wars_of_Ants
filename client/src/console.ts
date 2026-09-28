@@ -121,6 +121,7 @@ function run(raw: string): void {
           'soil <layer> <x> <y> <0|1|2> — paint soil block (orange=1 silver=2)\n' +
           'kill <id> | killspiders | pause | step <n>\n' +
           'coords — toggle click/world coordinate logging\n' +
+          'rules — rules digest + icon layer state\n' +
           'state | canon | seed | events | clear',
         'sys',
       );
@@ -194,6 +195,16 @@ function run(raw: string): void {
     case 'coords':
       pushLine(g.toggleCoords() ? 'coords logging ON — clicks log world positions' : 'coords logging OFF', 'sys');
       break;
+    case 'rules': {
+      const r = g.debugRules() as { digest: string };
+      const iconState = g.debugIcons() as { visible: boolean; zoom: number };
+      pushLine(
+        `rules digest ${r.digest} · icons layer ${iconState.visible ? 'ON' : 'off'} (zoom ${iconState.zoom})`,
+        'sys',
+      );
+      pushLine('F4 or ?admin=1 opens the tuning drawer (live + new-game scopes)', 'sys');
+      break;
+    }
     case 'state': {
       const s = g.debugState() as Record<string, unknown>;
       const q = s.queen as Record<string, unknown> | undefined;

@@ -19,6 +19,7 @@ enum Step {
     SetSoil(u32, u32, u32, u32),
     SetWater(u32),
     SetHoneydew(u32),
+    SetRules(String),
 }
 
 fn main() {
@@ -128,6 +129,13 @@ fn main() {
                     obj.get("y").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                     obj.get("soil").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                 ),
+                // admin-panel rules commits (same bytes as the browser applied)
+                "dev-rules" => Step::SetRules(
+                    obj.get("json")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("{}")
+                        .to_string(),
+                ),
                 // client-only acts the browser applier also skips: control
                 // focus changes with no sim effect
                 "select" | "cycle" => return None,
@@ -189,6 +197,10 @@ fn main() {
                 }
                 Step::SetHoneydew(n) => {
                     sim.dev_set_honeydew(*n);
+                }
+                Step::SetRules(json) => {
+                    sim.set_rules(json)
+                        .unwrap_or_else(|errs| panic!("dev-rules replay failed: {errs:?}"));
                 }
             }
             i += 1;

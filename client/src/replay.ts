@@ -30,7 +30,8 @@ export interface ReplayCmd {
     | 'dev-honeydew'
     | 'dev-kill'
     | 'dev-kill-spiders'
-    | 'dev-soil';
+    | 'dev-soil'
+    | 'dev-rules';
   ant?: number;
   x?: number;
   y?: number;
@@ -41,6 +42,8 @@ export interface ReplayCmd {
   n?: number;
   layer?: number;
   soil?: number;
+  /** dev-rules: the whole-rules JSON document that was committed. */
+  json?: string;
 }
 
 export interface Replay {

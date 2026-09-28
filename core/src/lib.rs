@@ -9,8 +9,8 @@ mod world;
 pub use components::{AntState, Carry, Caste, Fallen, FoodKind, Layer, WorkerAi};
 pub use rules::{BroodCost, BroodRules, GameRules, SourceSpec, UnitStats};
 pub use sim::{
-    Activity, AntSnap, Colony, Command, DevSpawn, EggSnap, EntitySnap, FollowMode, FoodRole,
-    FoodSnap, Phase, Sim, SpiderSnap, Team, DT, TPS,
+    Activity, AntSnap, Blocked, Colony, Command, DevSpawn, EggSnap, EntitySnap, FollowMode,
+    FoodRole, FoodSnap, Intent, Phase, Sim, SpiderSnap, Team, DT, TPS,
 };
 pub use world::{DIRT, DRY, EMPTY, MOIST, ROCK, SOIL_NONE, SOIL_ORANGE, SOIL_SILVER};
 
@@ -21,7 +21,7 @@ use wasm_bindgen::prelude::*;
 /// (however slight), WAVE bumps per shipped feature wave, -dev is constant
 /// while the game is in development. Single source of truth: edit this one
 /// line in the same commit as any game change.
-pub const GAME_VERSION: &str = "0.1.03.57-dev";
+pub const GAME_VERSION: &str = "0.1.04.58-dev";
 
 #[wasm_bindgen]
 pub fn game_version() -> String {
@@ -66,6 +66,66 @@ impl WoaSim {
         WoaSim {
             inner: Sim::new_founding(seed, team),
         }
+    }
+
+    /// Founding start under a whole-rules JSON document (the admin panel's
+    /// "apply & new game"). Throws with every parse/validation error so the
+    /// panel can show them — it never silently drops to defaults.
+    pub fn new_founding_rules(seed: u64, team: u32, rules_json: String) -> Result<WoaSim, JsError> {
+        let rules = Sim::parse_rules(&rules_json)
+            .map_err(|errs| JsError::new(&format!("invalid rules: {}", errs.join("; "))))?;
+        let team = if team == 1 { Team::Blue } else { Team::Red };
+        Ok(WoaSim {
+            inner: Sim::new_founding_with(seed, team, rules),
+        })
+    }
+
+    // --- rules tuning surface (admin panel) ---
+
+    /// Current ruleset + digest: `{"digest":"…","rules":{…}}`.
+    pub fn rules_get(&self) -> String {
+        format!(
+            "{{\"digest\":\"{}\",\"rules\":{}}}",
+            self.inner.rules_digest_hex(),
+            self.inner.rules_json()
+        )
+    }
+
+    /// The shipped default ruleset (same shape as `rules_get`).
+    pub fn rules_default(&self) -> String {
+        format!(
+            "{{\"digest\":\"{:016x}\",\"rules\":{}}}",
+            GameRules::default().digest(),
+            serde_json::to_string(&GameRules::default()).expect("GameRules serializes")
+        )
+    }
+
+    /// The admin panel's field registry (groups, per-field live/new-game
+    /// scope, nested-shape hints) — see `GameRules::meta_json`.
+    pub fn rules_meta(&self) -> String {
+        GameRules::meta_json()
+    }
+
+    /// Atomic whole-rules commit: parse + validate, then apply to the
+    /// running sim (entity stats re-derived, digest folded into the canon).
+    /// Returns `{"ok":true,"digest":"…"}` or `{"ok":false,"errors":[…]}`.
+    pub fn rules_set(&mut self, json: String) -> String {
+        match self.inner.set_rules(&json) {
+            Ok(digest) => format!("{{\"ok\":true,\"digest\":\"{digest}\"}}"),
+            Err(errs) => {
+                let list = errs
+                    .iter()
+                    .map(|e| format!("\"{}\"", e.replace('\\', "\\\\").replace('"', "\\\"")))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("{{\"ok\":false,\"errors\":[{list}]}}")
+            }
+        }
+    }
+
+    /// Current rules digest, 16 hex chars.
+    pub fn rules_digest(&self) -> String {
+        self.inner.rules_digest_hex()
     }
 
     pub fn tick(&mut self, n: u32) {
@@ -299,19 +359,19 @@ impl WoaSim {
     }
 
     /// Flat snapshot transport: `[tick, dead, carbs, count]` header, then
-    /// stride-13 records `[id, kind, layer, x, y, p0..p7]`. The positional
+    /// stride-15 records `[id, kind, layer, x, y, p0..p9]`. The positional
     /// codes are single-sourced in `sim::snapshot` and exported through
     /// `snapshot_spec()` — the client asserts its decoder against that spec
-    /// at boot. Layout version 4 (see spec).
+    /// at boot. Layout version 5 (p8/p9: ant intent + blocked-reason codes).
     pub fn snapshot(&self) -> Vec<f64> {
         use sim::snapshot as wire; // the wire-code module (crate-private)
         let snaps = self.inner.snapshot();
-        let mut v = Vec::with_capacity(4 + snaps.len() * 13);
+        let mut v = Vec::with_capacity(4 + snaps.len() * 15);
         v.push(self.inner.tick as f64);
         v.push(self.inner.colony.dead as u8 as f64);
         v.push(self.inner.colony.carbs as f64);
         v.push(snaps.len() as f64);
-        let mut rec = |id: u32, kind: u8, layer: u8, x: f64, y: f64, p: [f64; 8]| {
+        let mut rec = |id: u32, kind: u8, layer: u8, x: f64, y: f64, p: [f64; 10]| {
             v.extend([
                 id as f64,
                 kind as f64,
@@ -326,6 +386,8 @@ impl WoaSim {
                 p[5],
                 p[6],
                 p[7],
+                p[8],
+                p[9],
             ]);
         };
         for s in snaps {
@@ -373,6 +435,9 @@ impl WoaSim {
                             a.request.map(wire::food_code).unwrap_or(wire::REQUEST_NONE) as f64,
                             // p7: downed bleed fraction (F4); -1 = standing
                             a.downed.unwrap_or(-1.0),
+                            // p8/p9: intent + blocked-reason codes (icon layer)
+                            wire::intent_code(a.intent) as f64,
+                            wire::blocked_code(a.blocked) as f64,
                         ],
                     );
                 }
@@ -387,6 +452,8 @@ impl WoaSim {
                             f.amount as f64,
                             wire::food_code(f.kind) as f64,
                             src as f64,
+                            0.0,
+                            0.0,
                             0.0,
                             0.0,
                             0.0,
@@ -416,6 +483,8 @@ impl WoaSim {
                                 0.0,
                                 0.0,
                                 0.0,
+                                0.0,
+                                0.0,
                             ],
                         );
                     }
@@ -432,6 +501,8 @@ impl WoaSim {
                         // before layout v4)
                         wire::egg_caste_code(e.caste) as f64,
                         if e.carried { 1.0 } else { 0.0 },
+                        0.0,
+                        0.0,
                         0.0,
                         0.0,
                         0.0,
@@ -454,6 +525,8 @@ impl WoaSim {
                         0.0,
                         0.0,
                         0.0,
+                        0.0,
+                        0.0,
                     ],
                 ),
                 EntitySnap::Collectible(c) => rec(
@@ -462,7 +535,18 @@ impl WoaSim {
                     c.layer as u8,
                     c.x,
                     c.y,
-                    [c.variant as f64, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [
+                        c.variant as f64,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    ],
                 ),
             }
         }

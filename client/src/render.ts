@@ -1,8 +1,22 @@
-import { Application, Container, Graphics, Text } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
 import type { Sim, Ent } from './sim';
 import { isAnt, lerpPos } from './sim';
 import type { AntEnt } from './sim';
 import { AntView, type AntFrame, type AntLayers } from './art/antView';
+import { IconAtlas, type IconGlyph } from './art/icons';
+
+/** Icons appear only when the camera is at or below this zoom (zoomed OUT —
+ * the rigs carry the detail up close; the icons are the far-zoom layer).
+ * The user's own rule. */
+export const ICON_MAX_ZOOM = 0.75;
+
+/** Icons never render smaller than this many screen pixels: the world
+ * container shrinks with the camera, so their scale is recomputed per frame
+ * to keep the pixel art legible at any zoom (16px = whole texels at dpr 1). */
+const ICON_MIN_PX = 16;
+
+/** Confirm-pulse duration (seconds) when an order lands on an ant. */
+const PULSE_T = 0.45;
 
 const SURFACE_COLORS: Record<number, number> = {
   0: 0x4a6741,
@@ -43,6 +57,10 @@ interface EntityGfx {
   /** Queen request badge ('wants carbs' / urgent 'needs carbs!'). */
   req: Text | null;
   reqShown: string;
+  /** Activity icon (far-zoom layer); null for non-ants. */
+  icon: Sprite | null;
+  /** Last drawn icon key+tint ('' = none) — change-check for texture swaps. */
+  iconShown: string;
 }
 
 const SOURCE_NAMES: Record<number, string> = {
@@ -64,6 +82,40 @@ const RES_COLORS: Record<string, number> = {
   water: 0x4a9fd9,
   honeydew: 0xd9b32b,
 };
+
+/** Which glyph (and tint) an ant's snapshot state maps to. The blocked "!"
+ * always wins — a stuck ant's reason outranks what it was trying to do. */
+function iconFor(a: AntEnt): { glyph: IconGlyph | null; tint: number | null } {
+  if (a.blocked !== 'none') return { glyph: 'blocked', tint: null };
+  switch (a.intent) {
+    case 'none':
+      return { glyph: null, tint: null }; // downed — the DOWN label covers it
+    case 'off':
+      return { glyph: 'off', tint: null };
+    case 'dig':
+      return { glyph: 'dig', tint: null };
+    case 'haulDirt':
+      return { glyph: 'haulDirt', tint: null };
+    case 'haulHome':
+      return { glyph: 'haulHome', tint: null };
+    case 'fight':
+      return { glyph: 'fight', tint: null };
+    case 'medic':
+      return { glyph: 'medic', tint: null };
+    case 'feeder':
+      return { glyph: 'feeder', tint: null };
+    case 'follow':
+      return { glyph: 'follow', tint: null };
+    case 'produce':
+      return { glyph: 'produce', tint: null };
+    default: {
+      // forageCarbs → 'carbs' → the resource tint on the harvest droplet
+      const food = a.intent.replace(/^forage([A-Z]\w*)$/, '$1');
+      const key = food.charAt(0).toLowerCase() + food.slice(1);
+      return { glyph: 'harvest', tint: RES_COLORS[key] ?? 0xffffff };
+    }
+  }
+}
 
 function labelText(s: Ent): string {
   switch (s.kind) {
@@ -201,6 +253,10 @@ export class Renderer {
   private ring = new Graphics();
   /** silver rings marking the player's squad (gold ring = leader) */
   private squadRing = new Graphics();
+  /** order-confirmation pulses: ant id → remaining seconds */
+  private pulseG = new Graphics();
+  private pulses = new Map<number, number>();
+  private atlas!: IconAtlas;
   private entranceMarks: [Text, Text] = [new Text(''), new Text('')];
   private sim: Sim;
   cam = { x: 48, y: 8, zoom: 1 };
@@ -225,9 +281,10 @@ export class Renderer {
       preserveDrawingBuffer: params.get('e2e') === '1',
     });
     const r = new Renderer(sim, app);
+    r.atlas = IconAtlas.create();
     host.appendChild(app.canvas);
     app.stage.addChild(r.world);
-    r.world.addChild(r.layerC[0], r.layerC[1], r.entities, r.squadRing, r.ring);
+    r.world.addChild(r.layerC[0], r.layerC[1], r.entities, r.squadRing, r.ring, r.pulseG);
     r.entities.addChild(r.antLayers.shadows, r.antLayers.legs, r.antLayers.bodies);
     r.layerC[0].addChild(r.tileG[0]);
     r.layerC[1].addChild(r.tileG[1]);
@@ -463,6 +520,7 @@ export class Renderer {
         let ant: AntView | null = null;
         let hpG: Graphics | null = null;
         let req: Text | null = null;
+        let icon: Sprite | null = null;
         if (isAntKind) {
           ant = new AntView(this.app.renderer, this.antLayers, ent.kind, this.sim.team(), ent.id);
           hpG = new Graphics();
@@ -474,11 +532,19 @@ export class Renderer {
             req.position.set(0, ant.labelY - 0.55);
             c.addChild(req);
           }
+          // activity icon: floats above-right of the ant, above the labels
+          icon = new Sprite(this.atlas.get('off'));
+          icon.anchor.set(0.5);
+          icon.position.set(0.62, ant.labelY - 0.62);
+          const s = 0.55 / 16;
+          icon.scale.set(s);
+          icon.visible = false;
+          c.addChild(icon);
         } else {
           g = new Graphics();
           c.addChild(g, t);
         }
-        e = { c, g, ant, hpG, t, kind: '', carrying: false, hpBucket: -1, label: '', flying: false, downed: false, haul: 'none', team: -1, req, reqShown: '' };
+        e = { c, g, ant, hpG, t, kind: '', carrying: false, hpBucket: -1, label: '', flying: false, downed: false, haul: 'none', team: -1, req, reqShown: '', icon, iconShown: '' };
         this.sprites.set(ent.id, e);
         this.entities.addChild(c);
       }
@@ -560,6 +626,49 @@ export class Renderer {
           e.ant.update(dt, frame);
         }
       }
+      // activity icon: the far-zoom intent layer (blocked "!" wins); a
+      // confirm pulse pops the icon in regardless of zoom
+      if (e.icon !== null && isAnt(ent)) {
+        const { glyph, tint } = iconFor(ent);
+        const key = glyph === null ? '' : `${glyph}|${tint ?? ''}`;
+        if (key !== e.iconShown) {
+          e.iconShown = key;
+          if (glyph === null) {
+            e.icon.visible = false;
+          } else {
+            e.icon.texture = this.atlas.get(glyph);
+            e.icon.tint = tint ?? 0xffffff;
+          }
+        }
+        const pulsing = this.pulses.has(ent.id);
+        e.icon.visible = onLayer && glyph !== null && (this.cam.zoom <= ICON_MAX_ZOOM || pulsing);
+        if (e.icon.visible) {
+          // keep a minimum screen size: the icon must stay legible pixel
+          // art no matter how far the camera pulls back
+          const units = Math.max(0.55, ICON_MIN_PX / (BASE_PX * this.cam.zoom));
+          e.icon.scale.set(units / 16);
+        }
+      }
+    }
+    // order-confirmation pulses: expanding gold ring fading out
+    this.pulseG.clear();
+    if (this.pulses.size > 0) {
+      for (const [id, left] of this.pulses) {
+        const left2 = left - dt;
+        if (left2 <= 0) {
+          this.pulses.delete(id);
+          continue;
+        }
+        this.pulses.set(id, left2);
+        const s2 = this.sim.cur.get(id);
+        if (s2 === undefined || s2.layer !== this.activeLayer) continue;
+        const p = this.sim.prev.get(id) ?? s2;
+        const pos = lerpPos(p, s2, Math.min(1, Math.max(0, alpha)));
+        const k = left2 / PULSE_T; // 1 → 0
+        this.pulseG
+          .circle(pos.x, pos.y, 0.35 + (1 - k) * 0.9)
+          .stroke({ width: 0.08, color: 0xd9c27a, alpha: k });
+      }
     }
     this.squadRing.clear();
     if (playerAnt !== null) {
@@ -590,6 +699,39 @@ export class Renderer {
   antDebug(id: number): Record<string, unknown> | null {
     const e = this.sprites.get(id);
     return e !== undefined && e.ant !== null ? e.ant.debug() : null;
+  }
+
+  /** Order confirmation: a brief expanding ring on the ant (plus its
+   * activity icon popping in above the zoom threshold for the duration). */
+  pulse(id: number): void {
+    this.pulses.set(id, PULSE_T);
+  }
+
+  /** e2e/debug: the icon layer's current state (gating, per-ant glyphs). */
+  iconsDebug(): Record<string, unknown> {
+    const icons: Record<string, unknown>[] = [];
+    for (const s of this.sim.cur.values()) {
+      if (!isAnt(s)) continue;
+      const { glyph, tint } = iconFor(s);
+      const sprite = this.sprites.get(s.id)?.icon ?? null;
+      icons.push({
+        id: s.id,
+        kind: s.kind,
+        intent: s.intent,
+        blocked: s.blocked,
+        glyph,
+        tint,
+        spriteScale: sprite !== null ? +sprite.scale.x.toFixed(4) : null,
+        spriteVisible: sprite !== null ? sprite.visible : null,
+      });
+    }
+    return {
+      visible: this.cam.zoom <= ICON_MAX_ZOOM,
+      zoom: +this.cam.zoom.toFixed(3),
+      threshold: ICON_MAX_ZOOM,
+      pulsing: [...this.pulses.keys()],
+      icons,
+    };
   }
 
   /** e2e/debug: body-sprite placement for one ant. */

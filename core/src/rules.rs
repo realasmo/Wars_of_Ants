@@ -14,7 +14,8 @@
 use crate::components::{Caste, FoodKind};
 
 /// Combat/movement stats per unit type. Times are in seconds, distances in tiles.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnitStats {
     pub hp: f64,
     pub dmg: f64,
@@ -24,7 +25,8 @@ pub struct UnitStats {
 }
 
 /// One finite map source type (see docs/WORLD-DESIGN.md).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SourceSpec {
     /// Client visual type (1..N, mirrored in the client's source art switch).
     pub src: u8,
@@ -40,7 +42,8 @@ pub struct SourceSpec {
 /// What the queen spends to lay one brood egg of a caste (F4). Costs are
 /// paid from the physical pantry (stored piles) — the first data-driven
 /// rows of the rules layer.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BroodCost {
     pub protein: u32,
     pub carbs: u32,
@@ -52,7 +55,8 @@ pub struct BroodCost {
     pub consumes_worker: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BroodRules {
     pub worker: BroodCost,
     pub soldier: BroodCost,
@@ -74,8 +78,10 @@ impl BroodRules {
 
 /// The complete ruleset a sim runs under. Field names keep the historical
 /// constant names (snake_cased) so graduating a value stays a mechanical,
-/// reviewable change.
-#[derive(Clone, Debug)]
+/// reviewable change. Serde round-trips whole-object only (unknown fields
+/// are rejected): a rules commit is atomic, all fields or nothing.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GameRules {
     // --- world & start (absorbs the old `Config`) ---
     pub width: u32,
@@ -557,5 +563,178 @@ impl GameRules {
     /// shortest-roundtrip float formatting, like every other canonical term).
     pub fn digest(&self) -> u64 {
         crate::sim::snapshot::fnv(format!("{self:?}").as_bytes())
+    }
+
+    /// The admin panel's field registry, as JSON: ordered groups with their
+    /// field paths, per-leaf scope ("live" applies to the running sim right
+    /// away, "new_game" only takes effect on the next world generation), and
+    /// the nested-shape hints (unit-stats leaves, brood castes, food kinds)
+    /// the form generator needs. Presentation sections live here too so the
+    /// panel is generated entirely from core data — one source of truth.
+    pub fn meta_json() -> String {
+        // Fields consumed exclusively by world generation / the founding
+        // ritual. Everything else is read per-tick or per-command and is
+        // live-tunable (entity-copied stats get re-derived on commit).
+        const NEW_GAME: &[&str] = &[
+            "width",
+            "height",
+            "start_workers",
+            "food_clusters",
+            "spiders",
+            "rock_chance",
+            "orange_soil_chance",
+            "silver_soil_chance",
+            "patches_per_color",
+            "patch_w",
+            "patch_h",
+            "patch_wobble",
+            "patch_min_dist",
+            "patch_grant_min",
+            "patch_grant_max",
+            "sources_near_nest",
+            "source_min_gap",
+            "near_ring_min",
+            "near_ring_max",
+            "spider_dist_min",
+            "spider_dist_max",
+            "wood_count",
+            "wool_count",
+            "sources",
+            "start_food",
+        ];
+        let groups: &[(&str, &[&str])] = &[
+            (
+                "World & start",
+                &[
+                    "width",
+                    "height",
+                    "start_workers",
+                    "food_clusters",
+                    "max_ants",
+                    "spiders",
+                ],
+            ),
+            (
+                "Worldgen scatter",
+                &[
+                    "rock_chance",
+                    "orange_soil_chance",
+                    "silver_soil_chance",
+                    "patches_per_color",
+                    "patch_w",
+                    "patch_h",
+                    "patch_wobble",
+                    "patch_min_dist",
+                    "patch_grant_min",
+                    "patch_grant_max",
+                    "sources_near_nest",
+                    "source_min_gap",
+                    "near_ring_min",
+                    "near_ring_max",
+                    "spider_dist_min",
+                    "spider_dist_max",
+                    "wood_count",
+                    "wool_count",
+                ],
+            ),
+            ("Map sources", &["sources"]),
+            (
+                "Economy",
+                &[
+                    "sight_range",
+                    "protein_per_spider",
+                    "super_per_spider",
+                    "food_cell_cap",
+                    "spoil_time",
+                    "pile_amount",
+                ],
+            ),
+            (
+                "Unit stats",
+                &[
+                    "queen",
+                    "worker",
+                    "soldier",
+                    "spider",
+                    "honey",
+                    "medic",
+                    "ant_range",
+                ],
+            ),
+            ("Brood costs", &["brood"]),
+            (
+                "Specialists",
+                &["honey_period", "bleed_time", "heal_time", "water_per_heal"],
+            ),
+            (
+                "Founding",
+                &[
+                    "queen_fly_speed",
+                    "founding_time",
+                    "founding_eggs",
+                    "founding_egg_hatch",
+                    "queen_dig_time",
+                    "dirt_capacity",
+                    "start_food",
+                ],
+            ),
+            (
+                "Queen economy",
+                &[
+                    "eat_period",
+                    "starve_time",
+                    "craving_cycle",
+                    "lay_cooldown",
+                    "egg_time",
+                ],
+            ),
+            (
+                "Nest logistics",
+                &[
+                    "dig_time",
+                    "dig_expand_radius",
+                    "loiter_radius",
+                    "loiter_hops",
+                    "home_rest_ticks",
+                ],
+            ),
+            ("Predators", &["spider_aggro", "spider_wander"]),
+            (
+                "Legacy economy",
+                &["egg_cost", "soldier_cost_green", "soldier_cost_super"],
+            ),
+        ];
+        let mut scopes = serde_json::Map::new();
+        for (name, fields) in groups {
+            for f in *fields {
+                // whole-value leaves (craving_cycle, sources, nested structs)
+                // carry one scope for the entire value
+                let scope = if NEW_GAME.contains(f) {
+                    "new_game"
+                } else {
+                    "live"
+                };
+                scopes.insert(
+                    (*f).to_string(),
+                    serde_json::json!({ "scope": scope, "group": name }),
+                );
+            }
+        }
+        serde_json::json!({
+            "groups": groups
+                .iter()
+                .map(|(name, fields)| serde_json::json!({
+                    "name": name,
+                    "fields": fields,
+                }))
+                .collect::<Vec<_>>(),
+            "fields": scopes,
+            "unit_fields": ["hp", "dmg", "atk_cd", "speed", "range"],
+            "unit_groups": ["queen", "worker", "soldier", "spider", "honey", "medic"],
+            "brood_castes": ["worker", "soldier", "honey", "medic"],
+            "brood_fields": ["protein", "carbs", "water", "honeydew", "egg_time", "consumes_worker"],
+            "food_kinds": ["green", "super", "protein", "carbs", "water", "honeydew"],
+        })
+        .to_string()
     }
 }

@@ -85,11 +85,23 @@ Size: TBD — comfortable for the above. (Current: 96×96.)
   walk to location then found the nest there (was: instant land/found).
 - ✅ **Resource economy (Wave A):** protein / carbs / water stores; green food
   removed from the founding map; the six finite source types scattered as
-  single finds (counts/spacing/yields/harvest times in `core/src/balance.rs`
-  `SOURCES`); harvest takes per-unit time; scouts discover sources by sight
-  (8 tiles) before foraging targets them; spiders drop protein; carbs below
-  CARB_LOW slow the colony. Water/honeydew sinks (healing, Honey ant) come
-  with later waves — water accumulates for now.
+  single finds (counts/spacing/yields/harvest times in `GameRules.sources`,
+  `core/src/rules.rs`); harvest takes per-unit time; scouts discover sources
+  by sight (8 tiles) before foraging targets them; spiders drop protein;
+  carbs below CARB_LOW slow the colony. Water/honeydew sinks (healing, Honey
+  ant) come with later waves — water accumulates for now.
 - ✅ Honeydew→carbs intent noted: ~20 carbs per extracted honeydew unit, once
   aphid farming lands (Wave D).
+- ✅ **Admin tuning (2026-09-28):** every number in this document that ships
+  as a `GameRules` row is live-tunable in-game — F4 / `?admin=1` drawer,
+  atomic whole-object commits (validation errors listed), live vs
+  new-game scopes, same-seed restart for worldgen tweaks, replayable
+  commits (`dev-rules`, digest folded into the canon). Balance changes no
+  longer require a rebuild.
+- ✅ **Activity indicators (2026-09-28):** zoomed out (≤0.75) every player
+  ant shows a pixel intent icon (per-resource harvest tint, dig, haul ×2,
+  fight, medic, feeder crown, follow, honey production, off-duty) + a
+  red "!" with an honest reason (empty pantry / needs water / pantry
+  full / queen starving). Settled user rule: icons are the FAR-zoom
+  layer — the rigs carry the information up close.
 - Open: worker avoid-hostile behavior, panic mechanic, aphid chamber, bosses.
