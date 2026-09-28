@@ -21,7 +21,7 @@ use wasm_bindgen::prelude::*;
 /// (however slight), WAVE bumps per shipped feature wave, -dev is constant
 /// while the game is in development. Single source of truth: edit this one
 /// line in the same commit as any game change.
-pub const GAME_VERSION: &str = "0.1.04.58-dev";
+pub const GAME_VERSION: &str = "0.1.04.59-dev";
 
 #[wasm_bindgen]
 pub fn game_version() -> String {

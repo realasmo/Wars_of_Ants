@@ -44,9 +44,11 @@ F4 toggles) generated entirely from core data:
 
 ## Part 2 — activity indicators
 
-The far-zoom information layer (the rigs carry detail up close — the
-user's rule): zoomed **out** to ≤ 0.75, every player-colony ant floats a
-pixel-art icon above its label, never smaller than 16 screen px.
+The floating information layer: every player-colony ant carries a
+pixel-art icon above its label, always on, never smaller than 16 screen
+px. (The first design gated icons to zoom ≤ 0.75 — the rigs carry detail
+up close; the user reversed their own rule after live play: icons stay on
+at every zoom.)
 
 - **Core** (`sim/snapshot.rs`): a pure projection, no new sim state,
   not part of the canonical digest.

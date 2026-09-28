@@ -8,7 +8,7 @@ Design reference: AntWar.io (see `docs/BASED-ON.md`); world content draft: `docs
 - **Remote (origin):** `git@github.com:realasmo/Wars_of_Ants.git`
 - **SSH key:** `/root/.ssh/key_Wars_of_Ants` (configured via repo-local `core.sshCommand`)
 
-## Current status (2026-09-28) — version 0.1.04.58-dev
+## Current status (2026-09-28) — version 0.1.04.59-dev
 
 **Playable:** title → team select → flying queen → found nest → excavate
 (2×2 blocks, dirt hauling) → orange-soil nursery (egg transport) → first
@@ -92,7 +92,8 @@ validates everything, applies live fields immediately (entity stats
 re-derived, hp fraction preserved) or lists every violation; "apply & new
 game" restarts under the edited rules with the same seed. Commits are
 logged (`dev-rules`) and replay byte-identically (digest in the canon).
-Zoomed out (≤0.75), every player ant floats a **pixel-art intent icon** —
+Every player ant floats a **pixel-art intent icon** (always on, never
+smaller than 16 screen px) —
 per-resource harvest droplets (tinted), dig, spoil-haul, haul-home, fight,
 medic, feeder crown, follow reticle, honey production, off-duty Zz — and a
 red **!** with an honest core-derived reason (empty pantry, medic without

@@ -199,7 +199,7 @@ function run(raw: string): void {
       const r = g.debugRules() as { digest: string };
       const iconState = g.debugIcons() as { visible: boolean; zoom: number };
       pushLine(
-        `rules digest ${r.digest} · icons layer ${iconState.visible ? 'ON' : 'off'} (zoom ${iconState.zoom})`,
+        `rules digest ${r.digest} · icons ${iconState.visible ? 'showing' : 'none on screen'} (zoom ${iconState.zoom})`,
         'sys',
       );
       pushLine('F4 or ?admin=1 opens the tuning drawer (live + new-game scopes)', 'sys');

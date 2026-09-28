@@ -616,21 +616,24 @@ try {
     if (s.phase !== 0 || s.tick > 40) failures.push(`restart not a fresh flight (phase ${s.phase}, tick ${s.tick})`);
     if (s.spiders.length !== 1) failures.push(`custom spider count not applied (${s.spiders.length})`);
 
-    // icon layer: zoom-gated far view + order-confirm pulse
+    // icon layer: always on at every zoom; an order lands a confirm pulse
     let icons = await page.evaluate(() => window.__woa.icons());
-    if (icons.visible !== false) failures.push(`icons must start hidden at zoom ${icons.zoom}`);
-    await page.mouse.move(500, 400);
-    await page.mouse.wheel(0, 700); // zoom OUT past the 0.75 threshold
-    await page.waitForTimeout(120);
-    icons = await page.evaluate(() => window.__woa.icons());
-    if (icons.visible !== true) failures.push(`zooming out did not reveal the icon layer (zoom ${icons.zoom})`);
+    if (icons.visible !== true) failures.push(`icons must show at default zoom (zoom ${icons.zoom})`);
     if (!icons.icons.some((i) => i.glyph !== null)) failures.push('no glyph assigned to any ant');
-    await shot('s09-icons-far');
-    await page.mouse.wheel(0, -1400); // back in
+    await page.mouse.move(500, 400);
+    await page.mouse.wheel(0, 700); // zoom far OUT
     await page.waitForTimeout(120);
     icons = await page.evaluate(() => window.__woa.icons());
-    if (icons.visible !== false) failures.push(`zooming in did not hide the icon layer (zoom ${icons.zoom})`);
-    // an order pops the icon + ring in regardless of zoom
+    if (icons.visible !== true) failures.push(`icons vanished when zoomed out (zoom ${icons.zoom})`);
+    if (!icons.icons.some((i) => i.spriteScale >= 0.08)) {
+      failures.push('far-zoom icons must keep the 16px screen minimum');
+    }
+    await shot('s09-icons-far');
+    await page.mouse.wheel(0, -1400); // back IN
+    await page.waitForTimeout(120);
+    icons = await page.evaluate(() => window.__woa.icons());
+    if (icons.visible !== true) failures.push(`icons must stay on when zoomed in (zoom ${icons.zoom})`);
+    // an order pops the confirm ring regardless
     const q = (await state()).queen;
     await page.evaluate((p) => window.__woa.click(p.x + 2, p.y, 0), { x: q.x, y: q.y });
     icons = await page.evaluate(() => window.__woa.icons());

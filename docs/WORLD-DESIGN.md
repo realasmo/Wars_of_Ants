@@ -98,8 +98,8 @@ Size: TBD — comfortable for the above. (Current: 96×96.)
   new-game scopes, same-seed restart for worldgen tweaks, replayable
   commits (`dev-rules`, digest folded into the canon). Balance changes no
   longer require a rebuild.
-- ✅ **Activity indicators (2026-09-28):** zoomed out (≤0.75) every player
-  ant shows a pixel intent icon (per-resource harvest tint, dig, haul ×2,
+- ✅ **Activity indicators (2026-09-28, always-on per the user's live-play
+  call):** every player ant shows a pixel intent icon (per-resource harvest tint, dig, haul ×2,
   fight, medic, feeder crown, follow, honey production, off-duty) + a
   red "!" with an honest reason (empty pantry / needs water / pantry
   full / queen starving). Settled user rule: icons are the FAR-zoom

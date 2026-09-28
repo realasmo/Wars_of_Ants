@@ -5,14 +5,11 @@ import type { AntEnt } from './sim';
 import { AntView, type AntFrame, type AntLayers } from './art/antView';
 import { IconAtlas, type IconGlyph } from './art/icons';
 
-/** Icons appear only when the camera is at or below this zoom (zoomed OUT —
- * the rigs carry the detail up close; the icons are the far-zoom layer).
- * The user's own rule. */
-export const ICON_MAX_ZOOM = 0.75;
-
 /** Icons never render smaller than this many screen pixels: the world
  * container shrinks with the camera, so their scale is recomputed per frame
- * to keep the pixel art legible at any zoom (16px = whole texels at dpr 1). */
+ * to keep the pixel art legible at any zoom (16px = whole texels at dpr 1).
+ * Always-on is the user's live-play call (2026-09-28) — it superseded the
+ * original zoomed-out-only gate; order pulses still ring + brighten. */
 const ICON_MIN_PX = 16;
 
 /** Confirm-pulse duration (seconds) when an order lands on an ant. */
@@ -626,8 +623,7 @@ export class Renderer {
           e.ant.update(dt, frame);
         }
       }
-      // activity icon: the far-zoom intent layer (blocked "!" wins); a
-      // confirm pulse pops the icon in regardless of zoom
+      // activity icon: always on; the "!" beats the activity glyph
       if (e.icon !== null && isAnt(ent)) {
         const { glyph, tint } = iconFor(ent);
         const key = glyph === null ? '' : `${glyph}|${tint ?? ''}`;
@@ -640,8 +636,7 @@ export class Renderer {
             e.icon.tint = tint ?? 0xffffff;
           }
         }
-        const pulsing = this.pulses.has(ent.id);
-        e.icon.visible = onLayer && glyph !== null && (this.cam.zoom <= ICON_MAX_ZOOM || pulsing);
+        e.icon.visible = onLayer && glyph !== null;
         if (e.icon.visible) {
           // keep a minimum screen size: the icon must stay legible pixel
           // art no matter how far the camera pulls back
@@ -707,7 +702,9 @@ export class Renderer {
     this.pulses.set(id, PULSE_T);
   }
 
-  /** e2e/debug: the icon layer's current state (gating, per-ant glyphs). */
+  /** e2e/debug: the icon layer's current state (per-ant glyphs + sprite
+   * visibility). Always-on by design — `visible` reports whether any icon
+   * is actually on screen right now. */
   iconsDebug(): Record<string, unknown> {
     const icons: Record<string, unknown>[] = [];
     for (const s of this.sim.cur.values()) {
@@ -726,9 +723,8 @@ export class Renderer {
       });
     }
     return {
-      visible: this.cam.zoom <= ICON_MAX_ZOOM,
       zoom: +this.cam.zoom.toFixed(3),
-      threshold: ICON_MAX_ZOOM,
+      visible: icons.some((i) => i.spriteVisible === true),
       pulsing: [...this.pulses.keys()],
       icons,
     };

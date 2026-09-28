@@ -76,8 +76,9 @@ Agent sequencing of the batch (one ticket per wave, playtest-gated):
   running sim (entity stats re-derived, hp fraction preserved), "apply &
   new game" restarts under the rules with the SAME seed; commits are logged
   (`dev-rules`) and replay byte-identically; rules digest displayed + folded
-  into the canon since F4. (2) **Activity indicators** — zoomed out (≤0.75)
-  every player ant floats a 16px pixel-art icon (client/src/art/icons.ts):
+  into the canon since F4. (2) **Activity indicators** — every player
+  ant floats a 16px-min pixel-art icon (client/src/art/icons.ts), always on
+  (the ≤0.75 zoom gate was the user's first call, reversed after live play):
   per-resource tinted harvest droplets, dig, spoil-haul, haul-home, fight,
   medic ✚, feeder 👑-crown, follow reticle, honey production, off-duty Zz;
   core derives an `Intent` + honest `Blocked` reason (empty pantry / medic
