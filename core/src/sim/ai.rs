@@ -247,7 +247,8 @@ impl Sim {
             }
             // walk-to-dig intents: dig the remembered block on arrival
             if let Some((bx, by)) = dig_after {
-                if matches!(self.carry_of(id), Carry::Dirt { blocks } if blocks == self.rules.dirt_capacity)
+                if matches!(self.carry_of(id), Carry::Dirt { blocks } if blocks
+                    == self.rules.stats_for(caste).dirt_capacity)
                 {
                     // hands full of spoil: haul it out before digging more
                     self.set_dig_after(id, None);
@@ -569,7 +570,8 @@ impl Sim {
                     }
                 }
                 Job::DigTile(tx, ty) => {
-                    if matches!(carrying, Carry::Dirt { blocks } if blocks == self.rules.dirt_capacity)
+                    if matches!(carrying, Carry::Dirt { blocks } if blocks
+                        == self.rules.stats_for(caste).dirt_capacity)
                     {
                         // hands full of spoil: haul it out, then come back
                         self.haul_out_dirt(id);

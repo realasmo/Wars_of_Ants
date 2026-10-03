@@ -174,7 +174,7 @@ fn meta_registry_covers_every_field_with_a_scope() {
             .iter()
             .map(|v| v.as_str().unwrap())
             .collect::<Vec<_>>(),
-        vec!["hp", "dmg", "atk_cd", "speed", "range"]
+        vec!["hp", "dmg", "atk_cd", "speed", "range", "dirt_capacity"]
     );
 }
 

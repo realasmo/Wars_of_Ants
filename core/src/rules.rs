@@ -6,10 +6,13 @@
 //! struct next). Data only — no behavior — so balancing never touches sim
 //! code, and two sims can be compared by their rules digest.
 //!
-//! Defaults are the shipped game balance. `validate()` guards the invariants
-//! every consumer assumes (min ≤ max ranges, positive times, sane caps);
-//! `digest()` folds the whole struct into the canonical state so a replay
-//! can never silently run under different rules than it was recorded with.
+//! The shipped balance lives in `data/*.jsonc` at the repo root, embedded
+//! at compile time and loaded by `crate::data` — `GameRules::default()`
+//! delegates there, so this file carries the schema and its invariants
+//! only. `validate()` guards the invariants every consumer assumes (min ≤
+//! max ranges, positive times, sane caps); `digest()` folds the whole
+//! struct into the canonical state so a replay can never silently run
+//! under different rules than it was recorded with.
 
 use crate::components::{Caste, FoodKind};
 
@@ -22,6 +25,11 @@ pub struct UnitStats {
     pub atk_cd: f64,
     pub speed: f64,
     pub range: f64,
+    /// Soil blocks this unit may carry before it must dump ("dig some,
+    /// haul once"). Only workers and the founding queen ever dig; 0 marks
+    /// the castes that are refused at the dig order itself, so the number
+    /// is inert for them.
+    pub dirt_capacity: u32,
 }
 
 /// One finite map source type (see docs/WORLD-DESIGN.md).
@@ -167,8 +175,6 @@ pub struct GameRules {
     pub founding_egg_hatch: f64,
     /// Seconds per dirt cell dug by the founding queen.
     pub queen_dig_time: f64,
-    /// Dirt blocks an ant may carry before having to dump (dig two, haul once).
-    pub dirt_capacity: u32,
     /// Starting carbs: founding reserves spawn as a physical stored pile.
     pub start_food: u32,
 
@@ -216,210 +222,11 @@ pub struct GameRules {
 }
 
 impl Default for GameRules {
+    /// The shipped balance lives in `data/*.jsonc` (embedded at compile
+    /// time — see `data.rs`); this delegates to the loader so code and
+    /// data can never drift apart.
     fn default() -> Self {
-        GameRules {
-            width: 96,
-            height: 96,
-            start_workers: 3,
-            food_clusters: 6,
-            max_ants: 24,
-            spiders: 2,
-
-            rock_chance: 0.08,
-            orange_soil_chance: 0.035,
-            silver_soil_chance: 0.035,
-            patches_per_color: 2,
-            patch_w: 10,
-            patch_h: 12,
-            patch_wobble: 2,
-            patch_min_dist: 20,
-            patch_grant_min: 3,
-            patch_grant_max: 6,
-            sources_near_nest: 2,
-            source_min_gap: 8,
-            near_ring_min: 7.0,
-            near_ring_max: 14.0,
-            spider_dist_min: 25.0,
-            spider_dist_max: 45.0,
-            wood_count: 4,
-            wool_count: 4,
-
-            sources: vec![
-                SourceSpec {
-                    src: 1,
-                    kind: FoodKind::Water,
-                    amount: (15, 20),
-                    harvest: 10.0,
-                    count: 10,
-                },
-                SourceSpec {
-                    src: 2,
-                    kind: FoodKind::Water,
-                    amount: (21, 26),
-                    harvest: 20.0,
-                    count: 7,
-                },
-                SourceSpec {
-                    src: 3,
-                    kind: FoodKind::Carbs,
-                    amount: (100, 110),
-                    harvest: 6.0,
-                    count: 6,
-                },
-                SourceSpec {
-                    src: 4,
-                    kind: FoodKind::Carbs,
-                    amount: (40, 60),
-                    harvest: 4.0,
-                    count: 8,
-                },
-                SourceSpec {
-                    src: 5,
-                    kind: FoodKind::Protein,
-                    amount: (8, 12),
-                    harvest: 15.0,
-                    count: 6,
-                },
-                SourceSpec {
-                    src: 6,
-                    kind: FoodKind::Protein,
-                    amount: (25, 35),
-                    harvest: 13.0,
-                    count: 5,
-                },
-                // F4: honeydew source until aphid farming (Wave D)
-                SourceSpec {
-                    src: 7,
-                    kind: FoodKind::Honeydew,
-                    amount: (15, 22),
-                    harvest: 10.0,
-                    count: 4,
-                },
-            ],
-            sight_range: 8,
-            protein_per_spider: 8,
-            super_per_spider: 8,
-
-            queen: UnitStats {
-                hp: 150.0,
-                dmg: 0.0,
-                atk_cd: 1.0,
-                speed: 2.5,
-                range: 0.9,
-            },
-            worker: UnitStats {
-                hp: 100.0,
-                dmg: 8.0,
-                atk_cd: 1.0,
-                speed: 3.0,
-                range: 0.9,
-            },
-            soldier: UnitStats {
-                hp: 130.0,
-                dmg: 22.0,
-                atk_cd: 1.0,
-                speed: 2.6,
-                range: 0.9,
-            },
-            spider: UnitStats {
-                hp: 130.0,
-                dmg: 15.0,
-                atk_cd: 1.2,
-                speed: 2.2,
-                range: 0.8,
-            },
-            // specialists (F4): weak fighters — their value is the special role
-            honey: UnitStats {
-                hp: 90.0,
-                dmg: 4.0,
-                atk_cd: 1.0,
-                speed: 2.8,
-                range: 0.9,
-            },
-            medic: UnitStats {
-                hp: 95.0,
-                dmg: 5.0,
-                atk_cd: 1.0,
-                speed: 3.2,
-                range: 0.9,
-            },
-            ant_range: 0.9,
-
-            // F4 settled costs (docs/WORLD-DESIGN.md): worker 2p+1w, soldier
-            // 6p+3w + consumes a worker, honey 1p+8h, medic 4p+3c
-            brood: BroodRules {
-                worker: BroodCost {
-                    protein: 2,
-                    carbs: 0,
-                    water: 1,
-                    honeydew: 0,
-                    egg_time: 45.0,
-                    consumes_worker: false,
-                },
-                soldier: BroodCost {
-                    protein: 6,
-                    carbs: 0,
-                    water: 3,
-                    honeydew: 0,
-                    egg_time: 45.0,
-                    consumes_worker: true,
-                },
-                honey: BroodCost {
-                    protein: 1,
-                    carbs: 0,
-                    water: 0,
-                    honeydew: 8,
-                    egg_time: 45.0,
-                    consumes_worker: false,
-                },
-                medic: BroodCost {
-                    protein: 4,
-                    carbs: 3,
-                    water: 0,
-                    honeydew: 0,
-                    egg_time: 45.0,
-                    consumes_worker: false,
-                },
-            },
-            honey_period: 240.0,
-            bleed_time: 60.0,
-            heal_time: 10.0,
-            water_per_heal: 2,
-
-            queen_fly_speed: 5.0,
-            founding_time: 60.0,
-            founding_eggs: 4,
-            founding_egg_hatch: 180.0,
-            queen_dig_time: 1.0,
-            dirt_capacity: 2,
-            start_food: 5,
-
-            eat_period: 25.0,
-            starve_time: 90.0,
-            craving_cycle: vec![
-                FoodKind::Carbs,
-                FoodKind::Protein,
-                FoodKind::Carbs,
-                FoodKind::Water,
-            ],
-            lay_cooldown: 3.0,
-            egg_time: 45.0,
-
-            dig_time: 1.2,
-            dig_expand_radius: 8,
-            food_cell_cap: 6,
-            spoil_time: 300.0,
-            pile_amount: 45,
-            loiter_radius: 4,
-            loiter_hops: 3,
-            home_rest_ticks: 300,
-            spider_aggro: 5.0,
-            spider_wander: 8.0,
-
-            egg_cost: 5,
-            soldier_cost_green: 3,
-            soldier_cost_super: 2,
-        }
+        crate::data::shipped()
     }
 }
 
@@ -511,6 +318,14 @@ impl GameRules {
         positive(&mut errs, "honey_period", self.honey_period);
         positive(&mut errs, "bleed_time", self.bleed_time);
         positive(&mut errs, "heal_time", self.heal_time);
+        // the two digging castes must have a carry limit — capacity 0 lets
+        // them dig while already loaded and never triggers the haul-out
+        if self.worker.dirt_capacity == 0 || self.queen.dirt_capacity == 0 {
+            errs.push(
+                "worker/queen dirt_capacity must be ≥ 1 (dig some, haul once — 0 deadlocks the dig loop)"
+                    .into(),
+            );
+        }
         for (name, cost) in [
             ("worker", &self.brood.worker),
             ("soldier", &self.brood.soldier),
@@ -674,7 +489,6 @@ impl GameRules {
                     "founding_eggs",
                     "founding_egg_hatch",
                     "queen_dig_time",
-                    "dirt_capacity",
                     "start_food",
                 ],
             ),
@@ -729,7 +543,7 @@ impl GameRules {
                 }))
                 .collect::<Vec<_>>(),
             "fields": scopes,
-            "unit_fields": ["hp", "dmg", "atk_cd", "speed", "range"],
+            "unit_fields": ["hp", "dmg", "atk_cd", "speed", "range", "dirt_capacity"],
             "unit_groups": ["queen", "worker", "soldier", "spider", "honey", "medic"],
             "brood_castes": ["worker", "soldier", "honey", "medic"],
             "brood_fields": ["protein", "carbs", "water", "honeydew", "egg_time", "consumes_worker"],

@@ -1,0 +1,39 @@
+// The food economy: what the map offers and how stored/loose food behaves.
+// Baked into the game at build time — after editing, rebuild the core
+// (`npm run wasm`), restart vite, hard-reload. ◇ng keys only take effect
+// on the next generated world. Times in seconds.
+{
+  // --- map sources (◇ng) ---
+  // One entry per source type: src = client art number, kind = resource,
+  // amount = [min, max] units rolled per placed source, harvest = seconds
+  // per unit, count = how many on the map. Nettle is the F4 honeydew
+  // source until aphid farming (Wave D).
+  "sources": [
+    { "src": 1, "kind": "water",    "amount": [15, 20],   "harvest": 10.0, "count": 10 },
+    { "src": 2, "kind": "water",    "amount": [21, 26],   "harvest": 20.0, "count": 7 },
+    { "src": 3, "kind": "carbs",    "amount": [100, 110], "harvest": 6.0,  "count": 6 },
+    { "src": 4, "kind": "carbs",    "amount": [40, 60],   "harvest": 4.0,  "count": 8 },
+    { "src": 5, "kind": "protein",  "amount": [8, 12],    "harvest": 15.0, "count": 6 },
+    { "src": 6, "kind": "protein",  "amount": [25, 35],   "harvest": 13.0, "count": 5 },
+    { "src": 7, "kind": "honeydew", "amount": [15, 22],   "harvest": 10.0, "count": 4 }
+  ],
+
+  // Protein units dropped by a killed spider.
+  "protein_per_spider": 8,
+  // Legacy worlds: "super" units dropped by a killed spider.
+  "super_per_spider": 8,
+
+  // Max food units (all kinds combined) per cell — the capacity of one
+  // food-storage tile (silver soil; one wet-wood block makes a tile
+  // silver).
+  "food_cell_cap": 6,
+  // Seconds before dropped food spoils on a non-storage cell.
+  "spoil_time": 300.0,
+  // Loose pile size for dev/test spawns and legacy clusters.
+  "pile_amount": 45,
+
+  // --- legacy founded economy (auto-laying; founding uses brood orders) ---
+  "egg_cost": 5,
+  "soldier_cost_green": 3,
+  "soldier_cost_super": 2
+}

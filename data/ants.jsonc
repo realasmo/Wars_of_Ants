@@ -1,0 +1,122 @@
+// The ants themselves: caste stats, brood (egg) costs, and the queen's
+// economy. Baked into the game at build time — after editing, rebuild the
+// core (`npm run wasm`), restart vite, hard-reload. Keys marked ◇ng only
+// take effect on the next generated world (the F4 drawer shows the same
+// mark). All times in seconds, distances in tiles.
+{
+  // Source sighting distance; also the squad recruitment range, so
+  // "visible" is one consistent rule for every ant.
+  "sight_range": 8,
+
+  // --- caste stats (hp, damage per hit, attack cooldown, speed, range) ---
+  // dirt_capacity: soil blocks a digging unit may carry before it must
+  // dump ("dig some, haul once"). Only workers and the founding queen dig;
+  // 0 marks the castes that are refused at the dig order itself.
+  "queen": {
+    "hp": 150.0,
+    "dmg": 0.0,
+    "atk_cd": 1.0,
+    "speed": 2.5,
+    "range": 0.9,
+    "dirt_capacity": 2
+  },
+  "worker": {
+    "hp": 100.0,
+    "dmg": 8.0,
+    "atk_cd": 1.0,
+    "speed": 3.0,
+    "range": 0.9,
+    "dirt_capacity": 2
+  },
+  "soldier": {
+    "hp": 130.0,
+    "dmg": 22.0,
+    "atk_cd": 1.0,
+    "speed": 2.6,
+    "range": 0.9,
+    "dirt_capacity": 0
+  },
+  // specialists (F4): weak fighters — their value is the special role
+  "honey": {
+    "hp": 90.0,
+    "dmg": 4.0,
+    "atk_cd": 1.0,
+    "speed": 2.8,
+    "range": 0.9,
+    "dirt_capacity": 0
+  },
+  "medic": {
+    "hp": 95.0,
+    "dmg": 5.0,
+    "atk_cd": 1.0,
+    "speed": 3.2,
+    "range": 0.9,
+    "dirt_capacity": 0
+  },
+  // Melee reach shared by all ant castes (kept uniform for now).
+  "ant_range": 0.9,
+
+  // --- brood production (F4): the queen X-menu egg orders ---
+  // Costs are paid from the physical pantry (stored piles). egg_time is
+  // this caste's incubation in seconds; soldier consumes one existing
+  // worker per egg (metamorphosis). F4 settled costs
+  // (docs/WORLD-DESIGN.md): worker 2p+1w, soldier 6p+3w + a worker,
+  // honey 1p+8h, medic 4p+3c.
+  "brood": {
+    "worker": {
+      "protein": 2,
+      "carbs": 0,
+      "water": 1,
+      "honeydew": 0,
+      "egg_time": 45.0,
+      "consumes_worker": false
+    },
+    "soldier": {
+      "protein": 6,
+      "carbs": 0,
+      "water": 3,
+      "honeydew": 0,
+      "egg_time": 45.0,
+      "consumes_worker": true
+    },
+    "honey": {
+      "protein": 1,
+      "carbs": 0,
+      "water": 0,
+      "honeydew": 8,
+      "egg_time": 45.0,
+      "consumes_worker": false
+    },
+    "medic": {
+      "protein": 4,
+      "carbs": 3,
+      "water": 0,
+      "honeydew": 0,
+      "egg_time": 45.0,
+      "consumes_worker": false
+    }
+  },
+
+  // --- specialists ---
+  // Seconds a Honey ant needs to secrete one honeydew unit.
+  "honey_period": 240.0,
+  // Seconds a downed ant bleeds out in (F4 medics).
+  "bleed_time": 60.0,
+  // Seconds a medic's healing takes once the patient is home.
+  "heal_time": 10.0,
+  // Stored water units consumed by one healing.
+  "water_per_heal": 2,
+
+  // --- queen economy ---
+  // Time until the founding queen is hungry again after a meal. Hungry
+  // past this, dead at eat_period + starve_time without food.
+  "eat_period": 25.0,
+  "starve_time": 90.0,
+  // The queen's craving cycle (rotates; carbs repeats by design).
+  "craving_cycle": ["carbs", "protein", "carbs", "water"],
+  // Seconds between egg orders/layings.
+  "lay_cooldown": 3.0,
+  // Seconds of incubation for a laid egg (all castes; the brood rows
+  // above carry their own per-caste egg_time).
+  "egg_time": 45.0
+}

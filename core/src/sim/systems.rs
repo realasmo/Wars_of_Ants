@@ -205,15 +205,16 @@ impl Sim {
                 self.tiles_epoch += 1;
                 self.dug_tiles += 4;
                 // excavated dirt is carried out by every digging caste (up
-                // to self.rules.dirt_capacity blocks before dumping) — workers haul
-                // spoil to the surface, the founding queen refills or dumps
+                // to the digger's per-caste dirt_capacity blocks before
+                // dumping) — workers haul spoil to the surface, the
+                // founding queen refills or dumps
                 if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
                     let blocks = match *q {
                         Carry::Dirt { blocks } => blocks,
                         _ => 0,
                     };
                     *q = Carry::Dirt {
-                        blocks: (blocks + 1).min(self.rules.dirt_capacity),
+                        blocks: (blocks + 1).min(self.rules.stats_for(caste).dirt_capacity),
                     };
                 }
                 match resume {

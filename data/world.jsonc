@@ -1,0 +1,60 @@
+// The generated world: map size, what gets scattered where, and the
+// predators. Every key here is ◇ng — world generation reads them once, so
+// edits apply to the NEXT generated world (the F4 drawer marks them the
+// same way). Distances in tiles.
+{
+  // --- world & start ---
+  "width": 96,
+  "height": 96,
+  "start_workers": 3,
+  "food_clusters": 6,
+  "max_ants": 24,
+  "spiders": 2,
+
+  // --- worldgen scatter ---
+  // Chance an interior underground cell is rock.
+  "rock_chance": 0.08,
+  // Chance per 2×2 underground block of being orange (nursery) or silver
+  // (pantry) soil, hidden until dug — this is how often digging reveals
+  // food-storage / egg-friendly blocks.
+  "orange_soil_chance": 0.035,
+  "silver_soil_chance": 0.035,
+  // Surface dust patches of each color (indicator + founding bonus source).
+  "patches_per_color": 2,
+  "patch_w": 10,
+  "patch_h": 12,
+  "patch_wobble": 2,
+  // Minimum center distance between dust patches.
+  "patch_min_dist": 20,
+  // Founding inside a patch grants this many hidden soil blocks nearby.
+  "patch_grant_min": 3,
+  "patch_grant_max": 6,
+  // Carb sources placed near the founding center so the first workers can
+  // survive; the rest scatter wide.
+  "sources_near_nest": 2,
+  // Minimum chebyshev gap between placed sources.
+  "source_min_gap": 8,
+  // Ring radius around the founding center for near-nest carb sources.
+  "near_ring_min": 7.0,
+  "near_ring_max": 14.0,
+  // Spider spawn distance from the nest center.
+  "spider_dist_min": 25.0,
+  "spider_dist_max": 45.0,
+  // Surface collectibles per founding map: wet wood (food-storage block)
+  // and dry wool (egg-friendly block).
+  "wood_count": 4,
+  "wool_count": 4,
+
+  // --- predator stats (the spider; same stat shape as the ant castes) ---
+  "spider": {
+    "hp": 130.0,
+    "dmg": 15.0,
+    "atk_cd": 1.2,
+    "speed": 2.2,
+    "range": 0.8,
+    "dirt_capacity": 0
+  },
+  // Aggro radius / wander radius in tiles.
+  "spider_aggro": 5.0,
+  "spider_wander": 8.0
+}

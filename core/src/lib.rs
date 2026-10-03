@@ -1,4 +1,5 @@
 mod components;
+mod data;
 mod math;
 mod path;
 mod rng;
@@ -7,6 +8,7 @@ mod sim;
 mod world;
 
 pub use components::{AntState, Carry, Caste, Fallen, FoodKind, Layer, WorkerAi};
+pub use data::{load_shipped_rules, merge_rules, strip_jsonc, DATA_FILES};
 pub use rules::{BroodCost, BroodRules, GameRules, SourceSpec, UnitStats};
 pub use sim::{
     Activity, AntSnap, Blocked, Colony, Command, DevSpawn, EggSnap, EntitySnap, FollowMode,
@@ -21,7 +23,7 @@ use wasm_bindgen::prelude::*;
 /// (however slight), WAVE bumps per shipped feature wave, -dev is constant
 /// while the game is in development. Single source of truth: edit this one
 /// line in the same commit as any game change.
-pub const GAME_VERSION: &str = "0.1.04.59-dev";
+pub const GAME_VERSION: &str = "0.1.05.60-dev";
 
 #[wasm_bindgen]
 pub fn game_version() -> String {

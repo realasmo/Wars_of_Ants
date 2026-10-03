@@ -1,0 +1,34 @@
+// Colony life: the founding ritual (lone queen → first workers) and how
+// workers move soil / spend idle time. Times in seconds, tick counts are
+// sim ticks (60/s).
+{
+  // --- founding (game start) ---
+  // Flight speed of the founding queen over the surface (tiles/s).
+  "queen_fly_speed": 5.0,
+  // Seconds the founding queen has to excavate before laying the first brood.
+  "founding_time": 60.0,
+  // Eggs laid when the founding timer ends (up to free-tile availability).
+  "founding_eggs": 4,
+  // Seconds until founding eggs hatch into the first workers.
+  "founding_egg_hatch": 180.0,
+  // Seconds per dirt cell dug by the founding queen (workers use dig_time;
+  // her per-caste carry limit lives in ants.jsonc → queen.dirt_capacity).
+  "queen_dig_time": 1.0,
+  // Starting carbs: founding reserves spawn as a physical stored pile (◇ng).
+  "start_food": 5,
+
+  // --- nest logistics ---
+  // Seconds per soft block dug by a worker.
+  "dig_time": 1.2,
+  // How far from the queen AI nest-expansion searches for the next soft
+  // block to dig. Radius 3 deadlocks: once that zone is dug out, the
+  // pantry stays full, deliveries halt, and the colony starves beside
+  // surface food.
+  "dig_expand_radius": 8,
+  // Taskless workers: random hops within this radius of where they idled.
+  "loiter_radius": 4,
+  // Loiter hops before heading home.
+  "loiter_hops": 3,
+  // Rest in the nest (ticks) between loiter cycles.
+  "home_rest_ticks": 300
+}

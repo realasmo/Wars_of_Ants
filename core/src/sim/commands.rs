@@ -37,7 +37,7 @@ impl Sim {
                 };
                 let hands_diggable = match carrying {
                     Carry::None => true,
-                    Carry::Dirt { blocks } => blocks < self.rules.dirt_capacity,
+                    Carry::Dirt { blocks } => blocks < self.rules.stats_for(caste).dirt_capacity,
                     Carry::Egg | Carry::Food(_) | Carry::Wood | Carry::Wool | Carry::Fallen => {
                         false
                     }

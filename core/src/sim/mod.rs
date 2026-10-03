@@ -280,11 +280,13 @@ impl Sim {
         Self::build(seed, rules, true, team)
     }
 
-    /// Parse + validate a whole-rules JSON document. Shared by the wasm
-    /// boundary and the replay path so a commit and its replay apply the
-    /// exact same bytes.
+    /// Parse + validate a whole-rules JSON document (JSONC: `//` and
+    /// `/* */` comments are stripped first, exactly like the shipped data
+    /// files). Shared by the wasm boundary and the replay path so a commit
+    /// and its replay apply the exact same bytes.
     pub fn parse_rules(json: &str) -> Result<GameRules, Vec<String>> {
-        match serde_json::from_str::<GameRules>(json) {
+        let clean = crate::data::strip_jsonc(json);
+        match serde_json::from_str::<GameRules>(&clean) {
             Ok(rules) => match rules.validate() {
                 Ok(()) => Ok(rules),
                 Err(errs) => Err(errs),

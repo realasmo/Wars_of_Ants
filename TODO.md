@@ -1,4 +1,4 @@
-## NEXT: wave C — neutral creatures (earthworm / snail / rove beetle — designs + costs in docs/WORLD-DESIGN.md; the F4 admin drawer makes their tuning live from day one). After that: D (aphid farming — honeydew already flows from nettles + Honey ants), E (bosses), then the lighting ticket menu (baked AO first; one effect per ticket, rendering-only).
+## NEXT: wave C — neutral creatures (earthworm / snail / rove beetle — designs + costs in docs/WORLD-DESIGN.md; the F4 admin drawer makes their tuning live from day one, and their shipped numbers go straight into data/*.jsonc). After that: D (aphid farming — honeydew already flows from nettles + Honey ants), E (bosses), then the lighting ticket menu (baked AO first; one effect per ticket, rendering-only).
 
 ## User TODO batch (2026-09-27, verbatim — sequenced into waves below)
 
@@ -87,6 +87,21 @@ Agent sequencing of the batch (one ticket per wave, playtest-gated):
   digs explain themselves (soldiers can't dig); the controlling HUD line
   carries the intent + blocked reason. 87 core tests, e2e ×green with
   determinism byte-match.
+
+- **DONE (data files, 2026-10-03, ticket docs/TICKET-json-data.md;
+  0.1.05.60-dev):** the shipped balance lives in **data/*.jsonc**
+  (ants / resources / world / colony + data/README.md) — JSONC with
+  comments, embedded into the core at build time (one source of truth for
+  browser, native tests, and replays; `GameRules::default()` delegates to
+  the loader, the ~200-line default literal block is deleted).
+  `dirt_capacity` moved per-caste into the unit stats (worker/queen 2,
+  non-diggers an honest 0; F4 drawer renders it per caste). The comment
+  stripper also runs in `parse_rules`, so the drawer's JSON box accepts
+  annotated documents. Tuning workflow: edit files → `npm run wasm` →
+  restart vite → hard reload, or experiment live in F4 and copy the JSON
+  over. Values proven byte-identical to the old compiled defaults (one
+  recorded diff = exactly the dirt_capacity schema move); 96 core tests,
+  e2e ×green with determinism byte-match.
 
 ---
 
