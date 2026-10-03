@@ -23,7 +23,7 @@ use wasm_bindgen::prelude::*;
 /// (however slight), WAVE bumps per shipped feature wave, -dev is constant
 /// while the game is in development. Single source of truth: edit this one
 /// line in the same commit as any game change.
-pub const GAME_VERSION: &str = "0.1.05.60-dev";
+pub const GAME_VERSION: &str = "0.1.06.61-dev";
 
 #[wasm_bindgen]
 pub fn game_version() -> String {
@@ -323,13 +323,11 @@ impl WoaSim {
         self.inner.colony.phase as u8
     }
 
-    /// Seconds left in the founding excavation window (0.0 otherwise).
-    pub fn phase_time(&self) -> f64 {
-        if self.inner.colony.phase == Phase::Founding {
-            self.inner.colony.phase_t.max(0.0)
-        } else {
-            0.0
-        }
+    /// Founding water quest progress: water units stored on food blocks so
+    /// far. The brood can be laid once this reaches the rules'
+    /// `founding_quest_water` (1 by default).
+    pub fn quest_water_tally(&self) -> u32 {
+        self.inner.colony.quest_water_tally
     }
 
     /// Team color: 0 red, 1 blue.

@@ -464,12 +464,13 @@ impl Sim {
         }
         // loaded carrier: no pantry cell with room and nowhere soft left to
         // dig within the expansion radius (worker_ai's pantry-full branch)
-        if matches!(carry, Carry::Food(_))
-            && matches!(job, Some(Job::Idle) | Some(Job::Deliver(_, _)) | None)
-            && self.pantry_tile().is_none()
-            && self.pick_dig_target().is_none()
-        {
-            return Blocked::PantryFull;
+        if let Carry::Food(kind) = carry {
+            if matches!(job, Some(Job::Idle) | Some(Job::Deliver(_, _)) | None)
+                && self.pantry_tile(kind).is_none()
+                && self.pick_dig_target().is_none()
+            {
+                return Blocked::PantryFull;
+            }
         }
         // founding queen: hunger fuse burning, pantry can't cover the
         // craving, and she isn't holding the craved unit herself
@@ -659,7 +660,7 @@ impl Sim {
             .unwrap_or_else(|| "-".to_string());
         let (rng_state, rng_inc) = self.rng.state_pair();
         s.push_str(&format!(
-            "t={};c={} p={} w={} del={} eggs={} dead={} q={} ants={} starve={:.4} eat={:.4} lay={:.4} q_len={} phase={:?}({}) phase_t={:.4} team={:?}({}) ent={} cr={:?} hu={:.4} fd={:?};rng={:016x}{:016x};dug={} nid={} rules={:016x}",
+            "t={};c={} p={} w={} del={} eggs={} dead={} q={} ants={} starve={:.4} eat={:.4} lay={:.4} q_len={} phase={:?}({}) qw={} hd={} team={:?}({}) ent={} cr={:?} hu={:.4} fd={:?};rng={:016x}{:016x};dug={} nid={} rules={:016x}",
             self.tick,
             c.carbs,
             c.protein,
@@ -675,7 +676,8 @@ impl Sim {
             c.dig_queue.len(),
             c.phase,
             c.phase as u8,
-            c.phase_t,
+            c.quest_water_tally,
+            c.honeydew,
             c.team,
             c.team as u8,
             entrance,

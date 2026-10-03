@@ -180,17 +180,67 @@ fn ambush_on_surface(s: &mut Sim, id: u32) -> u32 {
 }
 
 fn hatch_founding_brood(s: &mut Sim) -> usize {
-    // founding script out (60s window), paint orange under every egg, then
-    // the full 180s incubation — returns the hatched worker count
-    for _ in 0..1220 {
+    // founding water quest: the queen farms water outside, banks it on a
+    // painted food block (silver), then stands on painted egg blocks
+    // (orange) to lay the brood; then the full 240s incubation. Returns
+    // the hatched worker count.
+    let q = queen(s).id;
+    let (ex, ey) = s.world.entrance.unwrap();
+    s.dev_spawn(DevSpawn::Source(1), ex as f64 + 1.5, ey as f64 - 1.5);
+    assert!(s.issue(Command::UseEntrance { ant: q }));
+    for _ in 0..400 {
         s.tick();
-    }
-    for e in s.snapshot() {
-        if let EntitySnap::Egg(e) = e {
-            s.dev_set_soil(1, e.x.floor() as u32, e.y.floor() as u32, 1);
+        if queen(s).layer == Layer::Surface {
+            break;
         }
     }
-    for _ in 0..3620 {
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 1.5,
+        y: ey as f64 - 1.5
+    }));
+    for _ in 0..800 {
+        s.tick();
+        if matches!(queen(s).carry, Carry::Food(FoodKind::Water)) {
+            break;
+        }
+    }
+    assert!(matches!(queen(s).carry, Carry::Food(FoodKind::Water)));
+    s.dev_set_soil(1, ex + 1, ey + 4, 2);
+    assert!(s.issue(Command::UseEntrance { ant: q }));
+    for _ in 0..400 {
+        s.tick();
+        if queen(s).layer == Layer::Underground {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 1.5,
+        y: ey as f64 + 4.5
+    }));
+    for _ in 0..600 {
+        s.tick();
+        if queen(s).carry == Carry::None {
+            break;
+        }
+    }
+    assert_eq!(queen(s).carry, Carry::None, "quest water banked");
+    s.dev_set_soil(1, ex + 2, ey + 2, 1);
+    s.dev_set_soil(1, ex + 2, ey + 4, 1);
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 2.5,
+        y: ey as f64 + 2.5
+    }));
+    for _ in 0..400 {
+        s.tick();
+        if s.colony.phase == woa_core::Phase::Brood {
+            break;
+        }
+    }
+    assert_eq!(s.colony.phase, woa_core::Phase::Brood, "quest brood laid");
+    for _ in 0..(woa_core::TPS as usize * 250) {
         s.tick();
     }
     ants(s)
@@ -291,32 +341,45 @@ fn squad_followers_project_the_follow_intent() {
     kill_worldgen_spiders(&mut s);
     let workers = hatch_founding_brood(&mut s);
     assert!(workers >= 2, "follow needs two workers");
-    // recruitment needs a same-layer pair within sight (8 tiles); the brood
-    // spreads across the nest mouth, so search for a valid pair explicitly
-    let snaps = ants(&s);
+    // recruitment needs a same-layer pair within sight (8 tiles). UNDERGROUND
+    // only: a leader standing on a surface source starts harvesting and the
+    // squad-conversion turns followers into farmers within the same tick —
+    // the follow intent would never be observable. The hatchlings drift on
+    // loiter cycles, so wait for two to be home at once.
     let mut pair = None;
-    for a in &snaps {
-        if a.caste != Caste::Worker {
-            continue;
-        }
-        for b in &snaps {
-            if b.caste != Caste::Worker || b.id == a.id || b.layer != a.layer {
+    for _ in 0..4000 {
+        let snaps = ants(&s);
+        'pair: for a in &snaps {
+            if a.caste != Caste::Worker || a.layer != Layer::Underground {
                 continue;
             }
-            let d = (a.x.floor() as i32 - b.x.floor() as i32)
-                .abs()
-                .max((a.y.floor() as i32 - b.y.floor() as i32).abs());
-            if d <= 8 {
-                pair = Some((a.id, b.id));
-                break;
+            for b in &snaps {
+                if b.caste != Caste::Worker
+                    || b.id == a.id
+                    || b.layer != Layer::Underground
+                    || b.activity == woa_core::Activity::Harvesting
+                    // a laden follower honestly projects haul-home while
+                    // following — the clean follow reticle needs empty hands
+                    || b.carry != Carry::None
+                {
+                    continue;
+                }
+                let d = (a.x.floor() as i32 - b.x.floor() as i32)
+                    .abs()
+                    .max((a.y.floor() as i32 - b.y.floor() as i32).abs());
+                if d <= 8 {
+                    pair = Some((a.id, b.id));
+                    break 'pair;
+                }
             }
         }
         if pair.is_some() {
             break;
         }
+        s.tick();
     }
     let Some((leader, follower)) = pair else {
-        panic!("no same-layer worker pair in sight after hatch");
+        panic!("no underground worker pair came home within sight after hatch");
     };
     let before: Vec<_> = ants(&s).into_iter().map(|a| (a.id, a.intent)).collect();
     assert!(
@@ -334,20 +397,29 @@ fn squad_followers_project_the_follow_intent() {
         .expect("follower alive");
     assert_eq!(f.following, Some(leader));
     assert_eq!(f.intent, Intent::Follow);
-    // releasing returns them to their previous intents
+    // releasing clears the squad; released ants return to autonomous work
+    // (the exact next intent depends on what the colony knows — exact
+    // job-restoration is covered by the release-resume founding tests)
     assert!(s.issue(Command::Follow {
         leader,
         mode: woa_core::FollowMode::Release
     }));
     s.tick();
     let released = ants(&s);
-    for (id, intent) in before {
-        if id == leader {
-            continue;
+    for (id, _before_intent) in before {
+        if let Some(now) = released.iter().find(|a| a.id == id) {
+            assert_eq!(now.following, None, "ant {id} released");
         }
-        let now = released.iter().find(|a| a.id == id).unwrap();
-        assert_eq!(now.intent, intent, "release must restore ant {id}'s intent");
     }
+    let f = released
+        .iter()
+        .find(|a| a.id == follower)
+        .expect("follower alive after release");
+    assert_ne!(
+        f.intent,
+        Intent::Follow,
+        "follower is back to autonomous work"
+    );
 }
 
 #[test]

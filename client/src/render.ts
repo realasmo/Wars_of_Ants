@@ -443,7 +443,7 @@ export class Renderer {
   private drawEntity(g: Graphics, s: Ent): void {
     g.clear();
     if (s.kind === 'food') {
-      const r = 0.18 + 0.1 * Math.min(1, s.amount / 6);
+      const r = 0.18 + 0.1 * Math.min(1, s.amount / this.sim.foodBlockCap());
       g.circle(0, 0, r).fill(RES_COLORS[s.food] ?? 0x3fa34d);
     } else if (s.kind === 'source') {
       drawSource(g, s);

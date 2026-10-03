@@ -5,12 +5,12 @@ does not have a separate copy in code: they are embedded into the core at
 build time and are the single source of truth for the shipped balance —
 the browser client, native tests, and replays all read the same bytes.
 
-| File | Owns |
-|---|---|
-| `ants.jsonc` | caste stats (hp, damage, speed, dig capacity), egg/brood costs + incubation, specialists, queen economy |
-| `resources.jsonc` | map sources (amounts, harvest speed, counts), storage caps, spoil, spider drops, legacy costs |
-| `world.jsonc` | map size, world generation scatter (incl. how often digging reveals storage/nursery soil), spider stats |
-| `colony.jsonc` | founding ritual timings, dig speed, nest logistics, loiter/rest |
+| File              | Owns                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------- |
+| `ants.jsonc`      | caste stats (hp, damage, speed, dig capacity), egg/brood costs + incubation, specialists, queen economy |
+| `resources.jsonc` | map sources (amounts, harvest speed, counts), storage caps, spoil, spider drops, legacy costs           |
+| `world.jsonc`     | map size, world generation scatter (incl. how often digging reveals storage/nursery soil), spider stats |
+| `colony.jsonc`    | founding ritual timings, dig speed, nest logistics, loiter/rest                                         |
 
 ## How to tune
 

@@ -58,9 +58,10 @@ const HELP_COLONY =
   'F2: dev tools · F3: perf · F4: rules drawer · the camera follows your ant; spectate (Tab, drag, WASD) when it dies';
 
 const HELP_FOUNDING =
-  'Right-click dirt: walk there and dig (2×2) · You can carry two blocks — right-click empty space to refill one, haul out and drop above ground to discard all · ' +
-  'Orange soil = eggs only hatch there · Silver = food never spoils there · Right-click an egg to carry it, again to place · ' +
-  'X: brood menu (order eggs for pantry food) · F2 · F3 · F4: rules';
+  'Founding quest: harvest WATER outside, carry it home, store it on a food block (silver — dig to find one, or build it with wet wood) · ' +
+  'Then stand on an egg block (orange soil — dig, or build it with dry wool) to lay the founding brood · ' +
+  'Right-click dirt: walk there and dig (2×2) · You can carry blocks of dirt — right-click empty space to refill one, drop above ground to discard · ' +
+  'Right-click an egg to carry it, again to place · F2: dev tools · F3: perf · F4: rules';
 
 const HELP_FLIGHT = 'Hold left button: fly toward the cursor · Right-click: land here · F2: dev tools · F3: perf';
 
@@ -106,7 +107,7 @@ export class Hud {
         : phase === 1
           ? 'grounded'
           : phase === 2
-            ? `founding ${Math.ceil(sim.phaseTime())}s`
+            ? `founding · water ${Math.min(sim.questWaterTally(), sim.questWaterNeeded())}/${sim.questWaterNeeded()}`
             : phase === 3
               ? 'brood'
               : 'colony'

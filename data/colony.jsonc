@@ -5,12 +5,14 @@
   // --- founding (game start) ---
   // Flight speed of the founding queen over the surface (tiles/s).
   "queen_fly_speed": 5.0,
-  // Seconds the founding queen has to excavate before laying the first brood.
-  "founding_time": 60.0,
-  // Eggs laid when the founding timer ends (up to free-tile availability).
+  // The water quest: water units the queen must store on food blocks
+  // (silver soil) before she can lay the founding brood by standing on an
+  // egg block (orange soil). No timer — take as long as you need.
+  "founding_quest_water": 1,
+  // Eggs laid when the quest completes (up to free-tile availability).
   "founding_eggs": 4,
   // Seconds until founding eggs hatch into the first workers.
-  "founding_egg_hatch": 180.0,
+  "founding_egg_hatch": 240.0,
   // Seconds per dirt cell dug by the founding queen (workers use dig_time;
   // her per-caste carry limit lives in ants.jsonc → queen.dirt_capacity).
   "queen_dig_time": 1.0,

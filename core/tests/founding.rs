@@ -55,6 +55,106 @@ fn founded(seed: u64) -> Sim {
     s
 }
 
+/// One founding water round trip, exactly as a player drives it: out
+/// through the entrance, farm one water unit at the moss by the hole,
+/// come home, bank it on the painted food block (silver) in the chamber.
+/// Requires the queen to be in the founded chamber when called; leaves
+/// her there with empty mandibles and the tally +1.
+fn farm_and_bank_water(s: &mut Sim) {
+    let q = queen(s).id;
+    let (ex, ey) = s.world.entrance.unwrap();
+    s.dev_spawn(DevSpawn::Source(1), ex as f64 + 1.5, ey as f64 - 1.5);
+    assert!(s.issue(Command::UseEntrance { ant: q }));
+    for _ in 0..400 {
+        s.tick();
+        if queen(s).layer == Layer::Surface {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 1.5,
+        y: ey as f64 - 1.5
+    }));
+    for _ in 0..800 {
+        s.tick();
+        if matches!(queen(s).carry, Carry::Food(FoodKind::Water)) {
+            break;
+        }
+    }
+    assert!(
+        matches!(queen(s).carry, Carry::Food(FoodKind::Water)),
+        "the queen farms the quest water"
+    );
+    s.dev_set_soil(1, ex + 1, ey + 4, 2);
+    assert!(s.issue(Command::UseEntrance { ant: q }));
+    for _ in 0..400 {
+        s.tick();
+        if queen(s).layer == Layer::Underground {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 1.5,
+        y: ey as f64 + 4.5
+    }));
+    for _ in 0..600 {
+        s.tick();
+        if queen(s).carry == Carry::None {
+            break;
+        }
+    }
+    assert_eq!(
+        queen(s).carry,
+        Carry::None,
+        "the quest water is banked on the food block"
+    );
+}
+
+/// Drive the founding water quest to completion: one water unit banked on
+/// a food block, then the queen stands on a painted egg block (orange) to
+/// lay the founding brood. Returns in Phase::Brood with the 4 eggs down —
+/// all on orange cells, so they hatch without being carried.
+fn complete_founding_quest(s: &mut Sim) {
+    kill_worldgen_spiders(s);
+    farm_and_bank_water(s);
+    assert_eq!(s.colony.quest_water_tally, 1);
+    let q = queen(s).id;
+    let (ex, ey) = s.world.entrance.unwrap();
+    // two orange blocks beside the food block: 8 orange cells minus the
+    // queen's own tile is plenty for the 4 eggs to all land on orange
+    s.dev_set_soil(1, ex + 2, ey + 2, 1);
+    s.dev_set_soil(1, ex + 2, ey + 4, 1);
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 2.5,
+        y: ey as f64 + 2.5
+    }));
+    for _ in 0..400 {
+        s.tick();
+        if s.colony.phase == Phase::Brood {
+            break;
+        }
+    }
+    assert_eq!(
+        s.colony.phase,
+        Phase::Brood,
+        "founding brood laid on the egg block"
+    );
+    assert_eq!(eggs(s), 4);
+}
+
+/// Reach Phase::Colony the way a player does: quest → founding brood on
+/// the egg block → hatch. Returns with the founding workers alive.
+fn hatch_founding_colony(s: &mut Sim) {
+    complete_founding_quest(s);
+    for _ in 0..(TPS as f64 * s.rules.founding_egg_hatch) as usize + 60 {
+        s.tick();
+    }
+    assert_eq!(phase(s), Phase::Colony);
+}
+
 fn neighbors(x: u32, y: u32) -> Vec<(u32, u32)> {
     let mut v = Vec::new();
     for dy in -1i32..=1 {
@@ -204,7 +304,6 @@ fn found_nest_creates_entrance_and_chamber() {
         y: q.y
     }));
     assert_eq!(s.colony.phase, Phase::Founding);
-    assert_eq!(s.colony.phase_t, 60.0);
     // 2×2 entrance hole + 4×4 starter chamber (block-aligned)
     assert_eq!(s.world.entrance, Some((48, 48)));
     for y in 48..=49 {
@@ -299,36 +398,35 @@ fn dirt_dumped_on_the_surface_disappears() {
 }
 
 #[test]
-fn founding_timer_lays_four_eggs_then_workers_hatch_on_orange() {
+fn founding_water_quest_lays_four_eggs_then_workers_hatch() {
     let mut s = founded(42);
-    // 60s window (plus a margin: DT is not binary-exact, so the timer can
-    // need one extra tick to cross zero)
-    for _ in 0..1220 {
-        s.tick();
-    }
-    assert_eq!(s.colony.phase, Phase::Brood);
-    assert_eq!(eggs(&s), 4);
-    assert_eq!(s.colony.eggs_laid, 4);
-    // eggs only transform on orange cells — with none, they wait forever
-    for _ in 0..3620 {
+    // no timer anymore: without the quest nothing happens, however long
+    // the queen waits in the founding chamber
+    for _ in 0..2000 {
         s.tick();
     }
     assert_eq!(
         phase(&s),
-        Phase::Brood,
-        "eggs must wait without orange soil"
+        Phase::Founding,
+        "no brood without the water quest"
     );
-    assert_eq!(workers(&s), 0);
-    // paint orange under one egg — it hatches and the colony phase begins
-    let egg = first_egg(&s);
-    let (ex, ey) = (egg.x.floor() as u32, egg.y.floor() as u32);
-    s.dev_set_soil(1, ex, ey, 1);
-    for _ in 0..30 {
+    assert_eq!(eggs(&s), 0);
+
+    complete_founding_quest(&mut s);
+
+    assert_eq!(s.colony.eggs_laid, 4);
+    // founding eggs incubate 240s and were laid on the orange blocks the
+    // queen stood on — no egg-carrying needed (the orange preference
+    // exists for exactly this)
+    for _ in 0..(TPS as usize * 250) {
         s.tick();
     }
+    assert_eq!(
+        workers(&s),
+        4,
+        "the founding brood hatches on the egg block"
+    );
     assert_eq!(phase(&s), Phase::Colony);
-    assert_eq!(workers(&s), 1);
-    assert_eq!(eggs(&s), 3, "the other eggs still wait for orange");
     // once workers exist the queen loses her digging rights: walk her to a
     // wall first so the refusal can't be explained by distance
     let ((sx, sy), (tx, ty)) = dig_site(&s);
@@ -528,9 +626,7 @@ fn distant_dig_command_walks_there_and_digs() {
 #[test]
 fn eggs_can_be_carried_and_placed_keeping_hatch_state() {
     let mut s = founded(42);
-    for _ in 0..1220 {
-        s.tick();
-    }
+    complete_founding_quest(&mut s);
     let q = queen(&s);
     let egg = first_egg(&s);
     let frac0 = egg.hatch_left; // remaining incubation fraction
@@ -669,10 +765,14 @@ fn food_piles_respect_cell_cap() {
     assert!(piles.len() > before, "spreading created cells");
     assert!(!piles.is_empty());
     for p in &piles {
-        assert!(p.amount <= 6, "pile of {} exceeds the cell cap", p.amount);
+        assert!(
+            p.amount <= s.rules.food_block_cap,
+            "pile of {} exceeds the surface cell cap",
+            p.amount
+        );
     }
     let total: u32 = piles.iter().map(|p| p.amount).sum();
-    assert_eq!(total, 45, "no food lost to spreading");
+    assert_eq!(total, s.rules.pile_amount, "no food lost to spreading");
 }
 
 #[test]
@@ -695,66 +795,79 @@ fn founding_soil_is_seeded_deterministically() {
 }
 
 #[test]
-fn queen_hauls_two_dirt_blocks_before_dumping() {
+fn queen_hauls_dirt_to_capacity_before_dumping() {
     let mut s = founded(42);
-    let q = queen(&s);
-    // two distinct frontier blocks
-    let (a_tx, a_ty) = walk_and_dig(&mut s, 60);
-    // still carrying one block — a second dig elsewhere is allowed
-    let ((sx, sy), (b_tx, b_ty)) = dig_site(&s);
-    assert!(s.issue(Command::Move {
-        ant: q.id,
-        x: sx as f64 + 0.5,
-        y: sy as f64 + 0.5
-    }));
-    for _ in 0..60 {
-        s.tick();
+    // capacity is per-caste rules data (tunable) — honor whatever it says
+    let cap = s.rules.queen.dirt_capacity.max(1) as usize;
+    let mut dug = vec![walk_and_dig(&mut s, 60)];
+    // dig distinct frontier blocks until the queen is at capacity
+    while dug.len() < cap {
+        let ((sx, sy), (b_tx, b_ty)) = dig_site(&s);
+        assert!(s.issue(Command::Move {
+            ant: queen(&s).id,
+            x: sx as f64 + 0.5,
+            y: sy as f64 + 0.5
+        }));
+        for _ in 0..60 {
+            s.tick();
+        }
+        assert!(s.issue(Command::Dig {
+            ant: queen(&s).id,
+            tx: b_tx,
+            ty: b_ty
+        }));
+        for _ in 0..140 {
+            s.tick();
+        }
+        dug.push((b_tx, b_ty));
     }
-    assert!(s.issue(Command::Dig {
-        ant: q.id,
-        tx: b_tx,
-        ty: b_ty
-    }));
-    for _ in 0..140 {
-        s.tick();
-    }
-    // full: a third dig is refused until dumped
-    let ((sx3, sy3), (c_tx, c_ty)) = dig_site(&s);
-    let _ = (sx3, sy3);
+    assert_eq!(
+        queen(&s).carry,
+        Carry::Dirt { blocks: cap as u32 },
+        "queen digs up to her dirt capacity"
+    );
+    // full: one more dig is refused until dumped
+    let ((_, _), (c_tx, c_ty)) = dig_site(&s);
     assert!(
         !s.issue(Command::Dig {
-            ant: q.id,
+            ant: queen(&s).id,
             tx: c_tx,
             ty: c_ty
         }),
-        "third dig must be refused at capacity"
+        "dig at capacity must be refused"
     );
-    // each dump refills one adjacent block: dump B where she stands first
+    // each dump refills one fully-empty block: dump the last one dug
+    // (she stands adjacent to it), capacity drops by one
     assert!(s.issue(Command::Drop {
-        ant: q.id,
-        tx: b_tx,
-        ty: b_ty
+        ant: queen(&s).id,
+        tx: dug[cap - 1].0,
+        ty: dug[cap - 1].1
     }));
     assert_eq!(
         queen(&s).carry,
-        Carry::Dirt { blocks: 1 },
-        "still hauling one block after the first dump"
+        Carry::Dirt {
+            blocks: (cap - 1) as u32
+        },
+        "still hauling one block less after the dump"
     );
-    // walk back into the dug-out block A and refill it
-    assert!(s.issue(Command::Move {
-        ant: q.id,
-        x: a_tx as f64 + 0.5,
-        y: a_ty as f64 + 0.5
-    }));
-    for _ in 0..140 {
+    // the rest of the load goes out with the spoil run — a surface drop
+    // discards everything (refilling dug blocks could seal the route back)
+    assert!(s.issue(Command::UseEntrance { ant: queen(&s).id }));
+    for _ in 0..600 {
         s.tick();
+        if queen(&s).layer == Layer::Surface {
+            break;
+        }
     }
-    assert!(s.issue(Command::Drop {
-        ant: q.id,
-        tx: a_tx,
-        ty: a_ty
-    }));
-    assert_eq!(queen(&s).carry, Carry::None, "all dirt dumped");
+    assert!(
+        s.issue(Command::Drop {
+            ant: queen(&s).id,
+            tx: 0,
+            ty: 0
+        }),
+        "surface dump discards the spoil"
+    );
+    assert_eq!(queen(&s).carry, Carry::None, "all dirt discarded");
 }
 
 #[test]
@@ -881,9 +994,7 @@ fn soil_blocks_align_with_dig_blocks_and_are_diggable() {
 #[test]
 fn distant_pick_and_drop_send_the_ant_walking() {
     let mut s = founded(42);
-    for _ in 0..1220 {
-        s.tick();
-    }
+    complete_founding_quest(&mut s);
     // walk the queen to the chamber edge first, then target the farthest egg
     let q = queen(&s);
     let entrance = s.world.entrance.unwrap();
@@ -1081,17 +1192,8 @@ fn founding_world_has_scattered_finite_sources_and_no_green() {
 #[test]
 fn scouts_discover_sources_and_harvest_takes_time() {
     let mut s = founded(42);
-    // fast-forward to the colony phase with a painted nursery
-    for _ in 0..1220 {
-        s.tick();
-    }
-    let e = first_egg(&s);
-    s.dev_set_soil(1, e.x.floor() as u32, e.y.floor() as u32, 1);
-    s.dev_set_soil(1, e.x.floor() as u32 + 2, e.y.floor() as u32, 1);
-    for _ in 0..3620 + 60 {
-        s.tick();
-    }
-    assert_eq!(phase(&s), Phase::Colony);
+    // fast-forward to the colony phase via the water quest
+    hatch_founding_colony(&mut s);
     // dev-spawn a strawberry (4s harvest) far from the nest, unknown —
     // pick a spot clear of worldgen sources (their placement shifted with
     // the soil-alignment fix)
@@ -1201,15 +1303,7 @@ fn scouts_discover_sources_and_harvest_takes_time() {
 #[test]
 fn spider_drops_protein() {
     let mut s = founded(42);
-    for _ in 0..1220 {
-        s.tick();
-    }
-    let e = first_egg(&s);
-    s.dev_set_soil(1, e.x.floor() as u32, e.y.floor() as u32, 1);
-    s.dev_set_soil(1, e.x.floor() as u32 + 2, e.y.floor() as u32, 1);
-    for _ in 0..3620 + 60 {
-        s.tick();
-    }
+    hatch_founding_colony(&mut s);
     // spider drop = protein units
     let q = queen(&s);
     s.dev_spawn(DevSpawn::Spider, q.x, q.y - 6.0);
@@ -1250,17 +1344,22 @@ fn event_log_records_causes_and_discoveries() {
         x: q.x,
         y: q.y,
     });
-    // through founding (60s) + the full brood timer (180s): eggs go ready
-    for _ in 0..4900 {
+    // the water quest + the full brood incubation (240s)
+    kill_worldgen_spiders(&mut s);
+    complete_founding_quest(&mut s);
+    for _ in 0..(TPS as usize * 250) {
         s.tick();
     }
     let log = s.event_lines().join("\n");
     assert!(log.contains("queen landed"), "landed event: {log}");
     assert!(log.contains("nest founded"), "founded event: {log}");
+    assert!(
+        log.contains("water stored on a food block"),
+        "quest event: {log}"
+    );
     assert!(log.contains("brood laid"), "brood event: {log}");
     assert!(log.contains("egg #"), "egg laid events: {log}");
-    // egg ready + waiting for orange (no nursery in this flow)
-    assert!(log.contains("waiting for orange"), "waiting event: {log}");
+    assert!(log.contains("hatched"), "hatch events: {log}");
     // death with cause: kill the queen via dev
     let total_before = s.event_total();
     s.dev_kill(s.colony.queen_id);
@@ -2063,25 +2162,29 @@ fn leader_harvesting_converts_followers_to_farmers() {
         f1_fetch > 1900,
         "converted farmer keeps farming after the leader stops ({f1_fetch}/2000)"
     );
-    // re-recruit brings them back to the squad
+    // re-recruit brings them back to the squad — the converted farmers
+    // loop surface↔nest, so wait until one is within the leader's sight
     assert!(s.issue(Command::Move {
         ant: leader,
         x: ex as f64 + 1.5,
         y: ey as f64 + 1.5
     }));
-    for _ in 0..1200 {
+    let mut recruited = false;
+    for _ in 0..4000 {
         s.tick();
+        if s.issue(Command::Follow {
+            leader,
+            mode: FollowMode::All,
+        }) && s
+            .snapshot()
+            .iter()
+            .any(|e| matches!(e, EntitySnap::Ant(a) if a.following == Some(leader)))
+        {
+            recruited = true;
+            break;
+        }
     }
-    assert!(s.issue(Command::Follow {
-        leader,
-        mode: FollowMode::All
-    }));
-    let following = s
-        .snapshot()
-        .iter()
-        .filter(|e| matches!(e, EntitySnap::Ant(a) if a.following == Some(leader)))
-        .count();
-    assert!(following >= 1, "all-join re-recruits converted workers");
+    assert!(recruited, "all-join re-recruits converted workers");
 }
 
 #[test]
@@ -2285,19 +2388,21 @@ fn brood_order_pays_the_physical_pantry_and_lays_an_egg() {
     // nothing in the pantry: the refusal names the missing resource
     let err = s.try_brood(q.id, Caste::Worker).unwrap_err();
     assert!(err.contains("not enough protein"), "got: {err}");
-    // pay with real stored piles at the queen's tile
+    // pay with real stored piles at the queen's tile (worker = 2p + 1c;
+    // the founding reserves already hold start_food carbs there)
+    let reserve_carbs = s.colony.carbs;
     for _ in 0..2 {
         s.dev_spawn(DevSpawn::PantryProtein, q.x, q.y);
     }
-    s.dev_spawn(DevSpawn::PantryWater, q.x, q.y);
+    s.dev_spawn(DevSpawn::PantryCarbs, q.x, q.y);
     assert_eq!(s.colony.protein, 2);
-    assert_eq!(s.colony.water, 1);
+    assert_eq!(s.colony.carbs, reserve_carbs + 1);
     assert!(s.try_brood(q.id, Caste::Worker).is_ok());
     assert_eq!(
         s.colony.protein, 0,
         "ledger synced with the physical withdraw"
     );
-    assert_eq!(s.colony.water, 0);
+    assert_eq!(s.colony.carbs, reserve_carbs);
     assert_eq!(s.colony.eggs_laid, 1);
     assert_eq!(first_egg(&s).caste, Caste::Worker);
     // an immediate second order hits the lay cooldown
@@ -2316,7 +2421,7 @@ fn soldier_order_consumes_one_worker() {
         s.dev_spawn(DevSpawn::PantryProtein, q.x, q.y);
     }
     for _ in 0..3 {
-        s.dev_spawn(DevSpawn::PantryWater, q.x, q.y);
+        s.dev_spawn(DevSpawn::PantryCarbs, q.x, q.y);
     }
     let ants_before = s.colony.ant_count;
     assert!(s.try_brood(q.id, Caste::Soldier).is_ok());
@@ -2328,14 +2433,17 @@ fn soldier_order_consumes_one_worker() {
     assert_eq!(s.colony.ant_count, ants_before - 1);
     assert_eq!(first_egg(&s).caste, Caste::Soldier);
     assert_eq!(s.colony.protein, 0);
-    assert_eq!(s.colony.water, 0);
+    assert_eq!(
+        s.colony.carbs, 5,
+        "soldier = 6p + 3c over the 5-carb reserves"
+    );
     // without a living worker the order is refused with the reason (re-pay
     // and re-wait so the cost/cooldown gates don't shadow the worker gate)
     for _ in 0..6 {
         s.dev_spawn(DevSpawn::PantryProtein, q.x, q.y);
     }
     for _ in 0..3 {
-        s.dev_spawn(DevSpawn::PantryWater, q.x, q.y);
+        s.dev_spawn(DevSpawn::PantryCarbs, q.x, q.y);
     }
     cooldown_over(&mut s);
     let err = s.try_brood(q.id, Caste::Soldier).unwrap_err();
@@ -2348,14 +2456,16 @@ fn honey_ant_secretes_one_honeydew_per_period() {
     let q = queen(&s);
     kill_worldgen_spiders(&mut s);
     s.rules.founding_eggs = 0; // isolate: no founding brood hatching mid-test
-                               // silver under the queen's tile: secretion banks straight into the pantry
-    s.dev_set_soil(1, q.x as u32, q.y as u32, 2);
-    // stand the honey ant still on the queen's tile (Manual parks it)
-    let h = s.dev_spawn(DevSpawn::HoneyAnt, q.x, q.y);
+                               // silver on a block the carb RESERVES don't occupy — typed
+                               // blocks: honeydew cannot bank beside another kind
+    let (hx, hy) = ((q.x - 2.0).floor(), q.y.floor());
+    s.dev_set_soil(1, hx as u32, hy as u32, 2);
+    // stand the honey ant still on that block (Manual parks it)
+    let h = s.dev_spawn(DevSpawn::HoneyAnt, hx + 0.5, hy + 0.5);
     assert!(s.issue(Command::Move {
         ant: h,
-        x: q.x,
-        y: q.y
+        x: hx + 0.5,
+        y: hy + 0.5
     }));
     let period = (s.rules.honey_period * TPS as f64) as usize + 5;
     for _ in 0..period {
@@ -2458,12 +2568,9 @@ fn medic_rescues_and_heals_a_fallen_ant() {
 #[test]
 fn queen_brood_recovers_the_founder_softlock() {
     let mut s = founded(16);
-    // run the founding script out: 4 eggs, then kill them all — the exact
+    // run the quest out: 4 eggs, then kill them all — the exact
     // softlock state the user hit live (0 eggs + 0 workers, forever)
-    let founding = (TPS as f64 * s.rules.founding_time) as usize + 5;
-    for _ in 0..founding {
-        s.tick();
-    }
+    complete_founding_quest(&mut s);
     assert_eq!(eggs(&s), 4);
     let egg_ids: Vec<u32> = s
         .snapshot()
@@ -2482,13 +2589,14 @@ fn queen_brood_recovers_the_founder_softlock() {
         !s.colony.dead,
         "the softlock is a live queen, stuck forever"
     );
-    // F4 is the fix: pay the pantry and order a new worker
+    // F4 is the fix: pay the pantry (worker = 2 protein + 1 carbs) and
+    // order a new worker
     cooldown_over(&mut s);
     let q = queen(&s);
     for _ in 0..2 {
         s.dev_spawn(DevSpawn::PantryProtein, q.x, q.y);
     }
-    s.dev_spawn(DevSpawn::PantryWater, q.x, q.y);
+    s.dev_spawn(DevSpawn::PantryCarbs, q.x, q.y);
     assert!(s.try_brood(q.id, Caste::Worker).is_ok());
     assert_eq!(eggs(&s), 1);
     // hatch it: orange under the egg, incubation out
@@ -2532,4 +2640,182 @@ fn squad_retaliates_when_the_leader_is_attacked() {
 #[test]
 fn game_rules_default_validates() {
     assert!(GameRules::default().validate().is_ok());
+}
+
+#[test]
+fn food_blocks_are_typed_one_kind_per_block() {
+    let mut s = founded(42);
+    kill_worldgen_spiders(&mut s);
+    let q = queen(&s).id;
+    let (ex, ey) = s.world.entrance.unwrap();
+    // farm one water unit at the moss by the hole
+    s.dev_spawn(DevSpawn::Source(1), ex as f64 + 1.5, ey as f64 - 1.5);
+    assert!(s.issue(Command::UseEntrance { ant: q }));
+    for _ in 0..400 {
+        s.tick();
+        if queen(&s).layer == Layer::Surface {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 1.5,
+        y: ey as f64 - 1.5
+    }));
+    for _ in 0..800 {
+        s.tick();
+        if matches!(queen(&s).carry, Carry::Food(FoodKind::Water)) {
+            break;
+        }
+    }
+    assert!(matches!(queen(&s).carry, Carry::Food(FoodKind::Water)));
+    assert!(s.issue(Command::UseEntrance { ant: q }));
+    for _ in 0..400 {
+        s.tick();
+        if queen(&s).layer == Layer::Underground {
+            break;
+        }
+    }
+    // stand beside the founding carb reserves (the 5-carb pile block):
+    // dropping water there must be refused — a block holds one kind
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 1.5,
+        y: ey as f64 + 4.5
+    }));
+    for _ in 0..300 {
+        s.tick();
+        if queen(&s).carry == Carry::None {
+            break;
+        }
+    }
+    // (if she auto-banked on the way the test set-up is wrong — the block
+    // beside her is not silver here)
+    if queen(&s).carry == Carry::None {
+        panic!("queen banked the water before the drop test — set-up crossed silver");
+    }
+    assert!(
+        !s.issue(Command::Drop {
+            ant: q,
+            tx: ex + 2,
+            ty: ey + 4
+        }),
+        "water refused on the carb reserves block"
+    );
+    // the empty chamber block next to her takes it
+    assert!(
+        s.issue(Command::Drop {
+            ant: q,
+            tx: ex,
+            ty: ey + 3
+        }),
+        "water accepted on an empty block"
+    );
+    assert_eq!(queen(&s).carry, Carry::None);
+}
+
+#[test]
+fn a_full_storage_block_refuses_more_of_its_kind() {
+    let mut s = founded(42);
+    kill_worldgen_spiders(&mut s);
+    let q = queen(&s).id;
+    let (ex, ey) = s.world.entrance.unwrap();
+    // fill the block at (ex, ey+2) with 15 dev carb units — dev piles bypass
+    // placement rules by design (they are the set-up tool) and 15 is the cap
+    for _ in 0..15 {
+        s.dev_spawn(DevSpawn::PantryCarbs, ex as f64 + 0.5, ey as f64 + 2.5);
+    }
+    // farm one carb unit
+    s.dev_spawn(DevSpawn::Source(4), ex as f64 + 1.5, ey as f64 - 1.5);
+    assert!(s.issue(Command::UseEntrance { ant: q }));
+    for _ in 0..400 {
+        s.tick();
+        if queen(&s).layer == Layer::Surface {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 1.5,
+        y: ey as f64 - 1.5
+    }));
+    for _ in 0..800 {
+        s.tick();
+        if matches!(queen(&s).carry, Carry::Food(FoodKind::Carbs)) {
+            break;
+        }
+    }
+    assert!(matches!(queen(&s).carry, Carry::Food(FoodKind::Carbs)));
+    assert!(s.issue(Command::UseEntrance { ant: q }));
+    for _ in 0..400 {
+        s.tick();
+        if queen(&s).layer == Layer::Underground {
+            break;
+        }
+    }
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 0.5,
+        y: ey as f64 + 3.5
+    }));
+    for _ in 0..300 {
+        s.tick();
+    }
+    // the full block refuses its own kind too
+    assert!(
+        !s.issue(Command::Drop {
+            ant: q,
+            tx: ex,
+            ty: ey + 2
+        }),
+        "carbs refused on a full carb block"
+    );
+    // a different block takes it
+    assert!(
+        s.issue(Command::Drop {
+            ant: q,
+            tx: ex + 2,
+            ty: ey + 2
+        }),
+        "carbs accepted on a block with room"
+    );
+}
+
+#[test]
+fn the_quest_needs_all_required_water_units() {
+    let mut s = founded(42);
+    kill_worldgen_spiders(&mut s);
+    s.rules.founding_quest_water = 2;
+    farm_and_bank_water(&mut s);
+    // 1/2 water: standing on an egg block lays nothing
+    let q = queen(&s).id;
+    let (ex, ey) = s.world.entrance.unwrap();
+    s.dev_set_soil(1, ex + 2, ey + 4, 1);
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 2.5,
+        y: ey as f64 + 4.5
+    }));
+    for _ in 0..300 {
+        s.tick();
+    }
+    assert_eq!(phase(&s), Phase::Founding, "1/2 water — no brood yet");
+    assert_eq!(eggs(&s), 0);
+    // the second unit completes the ritual
+    farm_and_bank_water(&mut s);
+    assert_eq!(s.colony.quest_water_tally, 2);
+    assert!(s.issue(Command::Move {
+        ant: q,
+        x: ex as f64 + 2.5,
+        y: ey as f64 + 4.5
+    }));
+    for _ in 0..300 {
+        s.tick();
+    }
+    assert_eq!(
+        phase(&s),
+        Phase::Brood,
+        "2/2 water — brood on the egg block"
+    );
+    assert_eq!(eggs(&s), 4);
 }

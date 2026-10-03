@@ -178,32 +178,56 @@ try {
     if (s.dead) failures.push('colony died during the founding haul');
   }
 
-  // --- founding timer → brood: eggs wait until orange soil exists ---
-  await page.evaluate(() => window.__woa.step(1250));
+  // --- founding water quest → brood: farm water, bank it on a painted
+  // food block (silver), stand on a painted egg block (orange). The old
+  // excavation timer is gone — no brood without the ritual. ---
+  await page.evaluate((p) => window.__woa.spawn('moss', p.x + 1.5, p.y - 1.5), { x: ex, y: ey });
+  await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: ex, y: ey });
+  await page.evaluate(() => window.__woa.step(140));
+  await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: ex + 1.5, y: ey - 1.5 });
+  // the queen farms one water unit at the moss (10s per unit)
+  for (let i = 0; i < 60; i++) {
+    await page.evaluate(() => window.__woa.step(10));
+    s = await state();
+    if (s.queen.carry === 'water') break;
+  }
+  if (s.queen.carry !== 'water') {
+    failures.push(`queen did not farm the quest water (carry ${s.queen.carry})`);
+  }
+  // home; paint the food block; she banks on it by standing on it
+  await page.evaluate((p) => window.__woa.setsoil(1, p.x + 1, p.y + 4, 2), { x: ex, y: ey });
+  await page.evaluate((p) => window.__woa.click(p.x + 0.5, p.y + 0.5, 2), { x: ex, y: ey });
+  await page.evaluate(() => window.__woa.step(140));
+  await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: ex + 1.5, y: ey + 4.5 });
+  for (let i = 0; i < 60; i++) {
+    await page.evaluate(() => window.__woa.step(5));
+    s = await state();
+    if (s.queen.carry === 'none') break;
+  }
+  if (s.questWater !== 1) failures.push(`quest water not tallied (${s.questWater})`);
+  // egg blocks beside it; standing on one lays the founding brood. The
+  // stand tile must stay OUT of the entrance radius (within 2 tiles of the
+  // hole a right-click means "cross the entrance", not "walk there")
+  await page.evaluate((p) => window.__woa.setsoil(1, p.x + 2, p.y + 2, 1), { x: ex, y: ey });
+  await page.evaluate((p) => window.__woa.setsoil(1, p.x + 2, p.y + 4, 1), { x: ex, y: ey });
+  await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: ex + 3.5, y: ey + 5.5 });
+  for (let i = 0; i < 60; i++) {
+    await page.evaluate(() => window.__woa.step(5));
+    s = await state();
+    if (s.phase === 3) break;
+  }
   s = await dump('s03-brood');
   console.log('brood:', JSON.stringify({ phase: s.phase, eggs: s.eggs }));
-  if (s.phase !== 3) failures.push(`founding timer did not end in brood (${s.phase})`);
+  if (s.phase !== 3) failures.push(`the water quest did not end in brood (${s.phase})`);
   if (s.eggs !== 4) failures.push(`expected 4 founding eggs, got ${s.eggs}`);
-  await page.evaluate(() => window.__woa.step(3700));
-  s = await state();
-  // the starter chamber may carve through NATURAL orange soil (~17% of
-  // seeds) — then the eggs hatch without any painting, by design
-  const naturalOrange = s.phase === 4;
-  if (!naturalOrange && (s.phase !== 3 || s.workers !== 0)) {
-    failures.push(`eggs hatched without orange soil (phase ${s.phase}, workers ${s.workers})`);
-  }
-  if (!naturalOrange) {
-    // paint orange under the queen only: some eggs hatch, the rest wait —
-    // leaving eggs for the transport round-trip below
-    const q0 = s.queen;
-    await page.evaluate((p) => window.__woa.setsoil(1, Math.floor(p.x), Math.floor(p.y), 1), { x: q0.x, y: q0.y });
-  }
-  if (!naturalOrange) await page.evaluate(() => window.__woa.step(80));
+  // the founding eggs were laid on the orange blocks by design — the full
+  // 240s incubation hatches them with no egg-carrying
+  await page.evaluate(() => window.__woa.step(4950));
   s = await dump('s04-colony');
   await shot('s04-colony');
-  console.log('colony:', JSON.stringify({ phase: s.phase, workers: s.workers, dead: s.dead, naturalOrange }));
-  if (s.phase !== 4) failures.push(`hatching on orange did not start the colony phase (${s.phase})`);
-  if (s.workers < 1) failures.push(`no egg hatched on orange soil (workers ${s.workers})`);
+  console.log('colony:', JSON.stringify({ phase: s.phase, workers: s.workers, dead: s.dead }));
+  if (s.phase !== 4) failures.push(`founding brood did not hatch on the egg block (${s.phase})`);
+  if (s.workers < 1) failures.push(`no egg hatched (workers ${s.workers})`);
   // physical feeding: the queen eats real pantry units now, so abstract
   // setfood can't protect her — spawn the source trio by the nest (carbs +
   // water + protein) like the core test does. This is the same "no foraging
@@ -228,14 +252,41 @@ try {
   const squadHidden = await page.evaluate(() => document.getElementById('squadmenu').classList.contains('hidden'));
   const squadDisplayed = await page.evaluate(() => getComputedStyle(document.getElementById('squadmenu')).display === 'none');
   if (!squadHidden || !squadDisplayed) failures.push('squad menu visible before the X key');
-  // egg transport round-trip with one of the remaining eggs
-  const eggState = await state();
+  // egg transport round-trip — with the whole founding brood hatched at
+  // once, provide a dev egg on the first EMPTY tile beside the queen (the
+  // queen often stands at the chamber edge — a fixed offset can land the
+  // egg inside a dirt wall, and the right-click then digs instead of picking)
+  let eggClick = null;
+  let eggState = await state();
+  if (eggState.eggs === 0) {
+    eggClick = await page.evaluate((q) => {
+      const qx = Math.floor(q.x);
+      const qy = Math.floor(q.y);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+        const x = qx + dx;
+        const y = qy + dy;
+        if (window.__woa.tile(1, x, y) === 0) {
+          const sx = x + 0.5;
+          const sy = y + 0.5;
+          window.__woa.spawn('egg', sx, sy);
+          window.__woa.step(3); // force a snapshot pull
+          return { x: sx, y: sy };
+        }
+      }
+      return null;
+    }, eggState.queen);
+    eggState = await state();
+  }
+  if (eggClick === null && eggState.eggs === 0) {
+    failures.push('no empty tile beside the queen for the egg round-trip');
+  }
   if (eggState.eggs > 0) {
-    // walk the queen onto an egg cell, then right-click to pick it up
     const eg = eggState.queen;
-    await page.evaluate((p) => window.__woa.click(p.x, p.y, 0), { x: eg.x + 1, y: eg.y });
+    const pickX = eggClick !== null ? eggClick.x : eg.x + 1;
+    const pickY = eggClick !== null ? eggClick.y : eg.y;
+    await page.evaluate((p) => window.__woa.click(p.x, p.y, 0), { x: eg.x, y: eg.y });
     await page.evaluate(() => window.__woa.step(60));
-    await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: eg.x + 1, y: eg.y });
+    await page.evaluate((p) => window.__woa.click(p.x, p.y, 2), { x: pickX, y: pickY });
     await page.evaluate(() => window.__woa.step(3));
     s = await state();
     if (s.queen.carry !== 'egg') failures.push(`queen not marked as egg-carrier (carry ${s.queen.carry})`);
@@ -450,8 +501,10 @@ try {
   if (!broodBtnText || !broodBtnText.includes('protein')) {
     failures.push(`brood menu costs missing from the core spec: ${broodBtnText}`);
   }
-  // order with an empty physical pantry → the refusal explains itself
-  await page.keyboard.press('Digit1');
+  // order honey with no honeydew in the world (the workers may genuinely
+  // have farmed protein by now) → the refusal explains itself, and no
+  // cooldown is consumed for the paid worker order below
+  await page.keyboard.press('Digit3');
   await page.waitForTimeout(120);
   const hint = await page.evaluate(() => document.getElementById('help').textContent);
   if (!hint || !hint.includes('not enough')) {
@@ -462,8 +515,9 @@ try {
   );
   if (!menuClosed) failures.push('brood menu did not close after ordering');
   // pay with real stored piles at the queen's tile → the order lands
+  // (worker = 2 protein + 1 carbs)
   const q4 = (await state()).queen;
-  for (const kind of ['pantry-protein', 'pantry-protein', 'pantry-water']) {
+  for (const kind of ['pantry-protein', 'pantry-protein', 'pantry-carbs']) {
     await page.evaluate(({ k, x, y }) => window.__woa.spawn(k, x, y), { k: kind, x: q4.x, y: q4.y });
   }
   await page.evaluate(() => window.__woa.step(3)); // force a snapshot pull
@@ -475,10 +529,10 @@ try {
   if (a4.eggs !== b4.eggs + 1) {
     failures.push(`brood order laid no egg (${b4.eggs} → ${a4.eggs})`);
   }
-  if (a4.protein !== b4.protein - 2 || a4.water !== b4.water - 1) {
-    failures.push(`brood cost not paid physically (P ${b4.protein}→${a4.protein}, W ${b4.water}→${a4.water})`);
+  if (a4.protein !== b4.protein - 2 || a4.carbs !== b4.carbs - 1) {
+    failures.push(`brood cost not paid physically (P ${b4.protein}→${a4.protein}, C ${b4.carbs}→${a4.carbs})`);
   }
-  console.log('brood:', JSON.stringify({ eggs: a4.eggs, protein: a4.protein, water: a4.water }));
+  console.log('brood:', JSON.stringify({ eggs: a4.eggs, protein: a4.protein, carbs: a4.carbs }));
   await page.evaluate(() => window.__woa.pause());
   await page.evaluate(() => window.__woa.pause()); // resume (double pause from F4 flow)
 

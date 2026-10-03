@@ -167,9 +167,11 @@ pub struct GameRules {
     // --- founding (game start) ---
     /// Flight speed of the founding queen over the surface (tiles/s).
     pub queen_fly_speed: f64,
-    /// Seconds the founding queen has to excavate before laying the first brood.
-    pub founding_time: f64,
-    /// Eggs laid when the founding timer ends (up to free-tile availability).
+    /// Water units the queen must store on food blocks (silver soil)
+    /// before she can lay the founding brood on an egg block (orange
+    /// soil). The water quest replaced the old excavation timer.
+    pub founding_quest_water: u32,
+    /// Eggs laid when the quest completes (up to free-tile availability).
     pub founding_eggs: u32,
     /// Seconds until founding eggs hatch into the first workers.
     pub founding_egg_hatch: f64,
@@ -200,8 +202,10 @@ pub struct GameRules {
     /// pantry stays full, deliveries halt, and the colony starves beside
     /// surface food.
     pub dig_expand_radius: u32,
-    /// Max food units (all kinds combined) per cell.
-    pub food_cell_cap: u32,
+    /// Max food units in one underground 2×2 storage block — and the block
+    /// holds exactly ONE kind at a time (typed blocks). Surface cells keep
+    /// per-tile mixed behavior with the same number.
+    pub food_block_cap: u32,
     /// Seconds before dropped food spoils on a non-silver cell.
     pub spoil_time: f64,
     /// Loose pile size for dev/test spawns and legacy clusters.
@@ -305,8 +309,15 @@ impl GameRules {
                 ));
             }
         }
+        // the founding water quest must be solvable: no water source means
+        // the brood can never be laid
+        if !self.sources.iter().any(|s| s.kind == FoodKind::Water) {
+            errs.push("sources must include at least one water source (the founding quest requires water)".into());
+        }
         positive(&mut errs, "queen_fly_speed", self.queen_fly_speed);
-        positive(&mut errs, "founding_time", self.founding_time);
+        if self.founding_quest_water == 0 {
+            errs.push("founding_quest_water must be ≥ 1 (0 would skip the founding ritual)".into());
+        }
         positive(&mut errs, "founding_egg_hatch", self.founding_egg_hatch);
         positive(&mut errs, "queen_dig_time", self.queen_dig_time);
         positive(&mut errs, "eat_period", self.eat_period);
@@ -459,7 +470,7 @@ impl GameRules {
                     "sight_range",
                     "protein_per_spider",
                     "super_per_spider",
-                    "food_cell_cap",
+                    "food_block_cap",
                     "spoil_time",
                     "pile_amount",
                 ],
@@ -485,7 +496,7 @@ impl GameRules {
                 "Founding",
                 &[
                     "queen_fly_speed",
-                    "founding_time",
+                    "founding_quest_water",
                     "founding_eggs",
                     "founding_egg_hatch",
                     "queen_dig_time",

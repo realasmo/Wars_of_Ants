@@ -115,7 +115,7 @@ function run(raw: string): void {
     case 'help':
       pushLine(
         'spawn <kind> [x y] — worker soldier egg spider wood wool moss mushroom raspberry strawberry cockroach caterpillar nettle honey medic\n' +
-          '  pantry units: pantry-protein | pantry-water | pantry-honeydew (physical piles)\n' +
+          '  pantry units: pantry-protein | pantry-carbs | pantry-water | pantry-honeydew (physical piles)\n' +
           'setfood <n> | setsuper <n> | setwater <n> | sethoneydew <n> — stores\n' +
           'brood <worker|soldier|honey|medic> — queen X-menu order\n' +
           'soil <layer> <x> <y> <0|1|2> — paint soil block (orange=1 silver=2)\n' +

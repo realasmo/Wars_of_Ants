@@ -1,12 +1,12 @@
 //! Food logistics: piles, finite sources, dropped units, the pantry, harvest
 //! progress and spoiling.
 
-use super::Sim;
+use super::{Phase, Sim};
 use crate::components::{Carry, Collectible, CollectibleVariant, Food, FoodKind, Layer, Pos};
 use crate::math::Vec2;
 use crate::path::tile_of;
 use crate::rules::SourceSpec;
-use crate::world::{tile_center, EMPTY};
+use crate::world::{block_of, tile_center, EMPTY, SOIL_SILVER};
 use hecs::Entity;
 
 impl Sim {
@@ -25,6 +25,44 @@ impl Sim {
             total += self.ecs.get::<&Food>(ent).map(|f| f.amount).unwrap_or(0);
         }
         total
+    }
+
+    /// Room for `kind` at a cell. Underground 2×2 storage blocks are
+    /// TYPED: the block holds at most `food_block_cap` units of exactly
+    /// one kind — a block holding another kind has no room. Surface cells
+    /// have no blocks: per-tile mixed storage with the same number.
+    pub(crate) fn block_room(&self, layer: Layer, tile: (u32, u32), kind: FoodKind) -> u32 {
+        if layer == Layer::Surface {
+            return self
+                .rules
+                .food_block_cap
+                .saturating_sub(self.cell_food(layer, tile));
+        }
+        let (bx, by) = block_of(tile.0, tile.1);
+        let mut total = 0u32;
+        let mut foreign = false;
+        for dy in 0..2u32 {
+            for dx in 0..2u32 {
+                for fid in self.food_on(Layer::Underground, (bx + dx, by + dy)) {
+                    let ent = self.ids[&fid];
+                    let Ok(f) = self.ecs.get::<&Food>(ent) else {
+                        continue;
+                    };
+                    if f.amount == 0 {
+                        continue;
+                    }
+                    if f.kind != kind {
+                        foreign = true;
+                    }
+                    total += f.amount;
+                }
+            }
+        }
+        if foreign {
+            0
+        } else {
+            self.rules.food_block_cap.saturating_sub(total)
+        }
     }
 
     pub(crate) fn spawn_food_entity(
@@ -75,10 +113,7 @@ impl Sim {
                 if self.grid_of(Layer::Surface).get(tile.0, tile.1) != EMPTY {
                     continue;
                 }
-                let room = self
-                    .rules
-                    .food_cell_cap
-                    .saturating_sub(self.cell_food(Layer::Surface, tile));
+                let room = self.block_room(Layer::Surface, tile, kind);
                 if room == 0 {
                     continue;
                 }
@@ -123,20 +158,27 @@ impl Sim {
         id
     }
 
-    /// One unit of loose (spoiling) dropped food on a cell with room.
+    /// One unit of dropped/banked food at a cell that has room for its
+    /// kind (typed blocks). Joins a same-kind pile when possible. Returns
+    /// false without placing when the cell's block is full or holds
+    /// another kind — callers refuse (player drop), pick another cell
+    /// (AI), or spill (a falling carrier).
     pub(crate) fn spawn_unit_food(
         &mut self,
         layer: Layer,
         tile: (u32, u32),
         kind: FoodKind,
         spoil: Option<f64>,
-    ) {
+    ) -> bool {
+        if self.block_room(layer, tile, kind) == 0 {
+            return false;
+        }
         for fid in self.food_on(layer, tile) {
             let ent = self.ids[&fid];
             let room = self
                 .ecs
                 .get::<&Food>(ent)
-                .map(|f| f.kind == kind && f.amount < self.rules.food_cell_cap)
+                .map(|f| f.kind == kind && f.amount > 0)
                 .unwrap_or(false);
             if room {
                 if let Ok(mut q) = self.ecs.get::<&mut Food>(ent) {
@@ -150,19 +192,46 @@ impl Sim {
                         q.spoil = spoil;
                     }
                 }
-                return;
+                self.note_unit_food(layer, tile, kind);
+                return true;
             }
         }
         self.spawn_food_entity(layer, tile, 1, kind, false, spoil);
+        self.note_unit_food(layer, tile, kind);
+        true
+    }
+
+    /// Side effects of a unit landing: the founding water quest counts
+    /// every water unit placed on a food block (silver cell) while the
+    /// quest is live. One chokepoint — banking and manual drops both pass
+    /// through `spawn_unit_food`.
+    fn note_unit_food(&mut self, layer: Layer, tile: (u32, u32), kind: FoodKind) {
+        if kind == FoodKind::Water
+            && layer == Layer::Underground
+            && self.colony.phase == Phase::Founding
+            && self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER
+        {
+            self.colony.quest_water_tally += 1;
+            self.ev(format!(
+                "founding: water stored on a food block ({}/{})",
+                self.colony.quest_water_tally, self.rules.founding_quest_water
+            ));
+        }
     }
 
     /// Bank carried food at a cell: credits the store, leaves a visible pile.
+    /// Refuses (carries on holding the unit) when the cell's typed block is
+    /// full or holds another kind — callers pre-check, so this is rare.
     pub(crate) fn store_food(&mut self, ant: u32, tile: (u32, u32)) {
         let ent = self.ids[&ant];
         let kind = match self.ecs.get::<&Carry>(ent).map(|c| *c) {
             Ok(Carry::Food(kind)) => kind,
             _ => return, // nothing edible in hand — nothing to bank
         };
+        // place first, credit only when the unit really landed
+        if !self.spawn_unit_food(Layer::Underground, tile, kind, None) {
+            return;
+        }
         match kind {
             FoodKind::Green | FoodKind::Carbs => self.colony.carbs += 1,
             FoodKind::Super | FoodKind::Protein => self.colony.protein += 1,
@@ -180,13 +249,15 @@ impl Sim {
             "ant #{ant} banked 1 {rname} at ({},{})",
             tile.0, tile.1
         ));
-        self.spawn_unit_food(Layer::Underground, tile, kind, None);
-        // pantry piles never spoil and are not forage targets
+        // pantry piles never spoil and are not forage targets (same kind
+        // only — typed blocks keep foreign kinds off this block anyway)
         for fid in self.food_on(Layer::Underground, tile) {
             let fent = self.ids[&fid];
             if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
-                q.stored = true;
-                q.spoil = None;
+                if q.kind == kind {
+                    q.stored = true;
+                    q.spoil = None;
+                }
             }
         }
         if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {

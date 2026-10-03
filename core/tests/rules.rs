@@ -3,7 +3,7 @@
 //! world generation, and the field-registry metadata.
 
 use serde_json::Value;
-use woa_core::{GameRules, Sim, Team};
+use woa_core::{FoodKind, GameRules, Sim, Team};
 
 fn founded(seed: u64) -> Sim {
     let mut s = Sim::new_founding(seed, Team::Red);
@@ -195,4 +195,24 @@ fn rules_change_is_deterministic_under_replay() {
         b.tick();
     }
     assert_eq!(a.canonical_state(), b.canonical_state());
+}
+
+#[test]
+fn quest_rules_must_stay_solvable() {
+    // the founding quest must be completable: 0 required water would skip
+    // the ritual entirely
+    let r = GameRules {
+        founding_quest_water: 0,
+        ..Default::default()
+    };
+    let errs = r.validate().unwrap_err();
+    assert!(
+        errs.iter().any(|e| e.contains("founding_quest_water")),
+        "{errs:?}"
+    );
+    // and the map must grow at least one water source to farm
+    let mut r = GameRules::default();
+    r.sources.retain(|s| s.kind != FoodKind::Water);
+    let errs = r.validate().unwrap_err();
+    assert!(errs.iter().any(|e| e.contains("water source")), "{errs:?}");
 }

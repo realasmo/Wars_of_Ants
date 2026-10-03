@@ -158,6 +158,7 @@ pub enum DevSpawn {
     /// brood costs and medic water are paid from PHYSICAL piles, so dev tools
     /// must place real ones (dev_set_* only writes the ledger).
     PantryProtein,
+    PantryCarbs,
     PantryWater,
     PantryHoneydew,
     /// F4 specialist castes (dev tools / tests).
@@ -185,6 +186,7 @@ impl DevSpawn {
             "caterpillar" => DevSpawn::Source(6),
             "nettle" => DevSpawn::Source(7),
             "pantry-protein" => DevSpawn::PantryProtein,
+            "pantry-carbs" => DevSpawn::PantryCarbs,
             "pantry-water" => DevSpawn::PantryWater,
             "pantry-honeydew" => DevSpawn::PantryHoneydew,
             "honey" => DevSpawn::HoneyAnt,
@@ -208,14 +210,17 @@ pub struct Colony {
     pub eat_t: f64,
     pub lay_cooldown: f64,
     pub dig_queue: Vec<(u32, u32)>,
-    /// Game-start phase (see `Phase`); Founding timer lives in `phase_t`.
+    /// Game-start phase (see `Phase`).
     pub phase: Phase,
-    /// Seconds remaining in Phase::Founding (0.0 outside it).
-    pub phase_t: f64,
     pub team: Team,
     /// True when started via `new_founding`: the founding script (4 eggs,
     /// no auto-laying) governs brood; false in the legacy founded start.
     pub founding: bool,
+    /// Founding water quest: water units the queen has stored on food
+    /// blocks (silver). She can lay the founding brood on an egg block
+    /// once this reaches `rules.founding_quest_water`. One-way — the
+    /// ritual payment is not refunded if the water is later eaten.
+    pub quest_water_tally: u32,
     /// Seconds since the founding queen last ate (physical feeding model);
     /// hungry at `eat_period`, dead at `eat_period + starve_time` (rules).
     pub hunger_t: f64,
@@ -412,6 +417,7 @@ impl Sim {
             DevSpawn::Wood => self.spawn_collectible(Vec2::new(x, y), CollectibleVariant::Wood),
             DevSpawn::Wool => self.spawn_collectible(Vec2::new(x, y), CollectibleVariant::Wool),
             DevSpawn::PantryProtein => self.dev_pantry_unit(x, y, FoodKind::Protein),
+            DevSpawn::PantryCarbs => self.dev_pantry_unit(x, y, FoodKind::Carbs),
             DevSpawn::PantryWater => self.dev_pantry_unit(x, y, FoodKind::Water),
             DevSpawn::PantryHoneydew => self.dev_pantry_unit(x, y, FoodKind::Honeydew),
             DevSpawn::HoneyAnt => self.spawn_ant(Caste::Honey, p, Layer::Underground),

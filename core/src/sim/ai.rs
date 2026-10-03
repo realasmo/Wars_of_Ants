@@ -4,7 +4,7 @@
 use super::{Phase, Sim};
 use crate::components::*;
 use crate::path::{chebyshev, manhattan, tile_of};
-use crate::world::{block_of, EMPTY, SOIL_SILVER};
+use crate::world::{block_of, EMPTY, SOIL_ORANGE, SOIL_SILVER};
 
 impl Sim {
     pub(crate) fn worker_ai(&mut self) {
@@ -195,10 +195,12 @@ impl Sim {
                     }
                 } else if pos.layer == Layer::Underground && matches!(carrying, Carry::Food(_)) {
                     let tile = tile_of(pos.p);
-                    if self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER
-                        && self.cell_food(Layer::Underground, tile) < self.rules.food_cell_cap
-                    {
-                        self.store_food(id, tile);
+                    if let Carry::Food(kind) = carrying {
+                        if self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER
+                            && self.block_room(Layer::Underground, tile, kind) > 0
+                        {
+                            self.store_food(id, tile);
+                        }
                     }
                 }
                 continue;
@@ -362,10 +364,12 @@ impl Sim {
                         let on_silver =
                             self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER;
                         let near_queen = chebyshev(tile, self.queen_tile()) <= 1;
-                        if (on_silver || near_queen)
-                            && self.cell_food(Layer::Underground, tile) < self.rules.food_cell_cap
-                        {
-                            self.store_food(id, tile);
+                        if let Carry::Food(kind) = carrying {
+                            if (on_silver || near_queen)
+                                && self.block_room(Layer::Underground, tile, kind) > 0
+                            {
+                                self.store_food(id, tile);
+                            }
                         }
                     }
                 }
@@ -374,8 +378,8 @@ impl Sim {
                         if matches!(carrying, Carry::Dirt { .. }) {
                             // spoil goes to the surface, never into the nest
                             self.haul_out_dirt(id);
-                        } else {
-                            match self.pantry_tile() {
+                        } else if let Carry::Food(kind) = carrying {
+                            match self.pantry_tile(kind) {
                                 Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
                                 None => {
                                     // pantry full: dig out more nest, then deliver
@@ -420,7 +424,7 @@ impl Sim {
                                 self.set_retry(id, 60);
                             }
                         }
-                        Carry::Food(_) => {
+                        Carry::Food(kind) => {
                             // craving moved on (the queen self-fed): re-bank
                             // this unit, then fetch the new craving
                             if pos.layer == Layer::Underground {
@@ -429,11 +433,10 @@ impl Sim {
                                     self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER;
                                 let near_queen = chebyshev(tile, self.queen_tile()) <= 1;
                                 if (on_silver || near_queen)
-                                    && self.cell_food(Layer::Underground, tile)
-                                        < self.rules.food_cell_cap
+                                    && self.block_room(Layer::Underground, tile, kind) > 0
                                 {
                                     self.store_food(id, tile);
-                                } else if let Some((px, py)) = self.pantry_tile() {
+                                } else if let Some((px, py)) = self.pantry_tile(kind) {
                                     if tile != (px, py)
                                         && !self.route(id, Layer::Underground, (px, py))
                                     {
@@ -442,7 +445,7 @@ impl Sim {
                                 } else {
                                     self.set_retry(id, 100);
                                 }
-                            } else if let Some((px, py)) = self.pantry_tile() {
+                            } else if let Some((px, py)) = self.pantry_tile(kind) {
                                 if !self.route(id, Layer::Underground, (px, py)) {
                                     self.set_retry(id, 60);
                                 }
@@ -750,8 +753,8 @@ impl Sim {
                     }
                     // unit already in the mandibles → hand off to delivery
                     // (pantry run, or dig out more nest when it's full)
-                    if let Carry::Food(_) = carrying {
-                        match self.pantry_tile() {
+                    if let Carry::Food(kind) = carrying {
+                        match self.pantry_tile(kind) {
                             Some(t) => self.set_job(id, Job::Deliver(t.0, t.1)),
                             None => {
                                 self.ev(format!("pantry full — ant #{id} digs expansion"));
@@ -790,13 +793,14 @@ impl Sim {
                     if pos.layer == Layer::Underground {
                         let tile = tile_of(pos.p);
                         if tile == (tx, ty) {
-                            if self.cell_food(Layer::Underground, tile) < self.rules.food_cell_cap {
-                                self.store_food(id, tile);
-                                self.set_job(id, Job::Idle);
-                            } else {
-                                // pantry cell filled up on the way — re-pick
-                                self.set_job(id, Job::Idle);
+                            if let Carry::Food(kind) = carrying {
+                                if self.block_room(Layer::Underground, tile, kind) > 0 {
+                                    self.store_food(id, tile);
+                                }
+                                // else: pantry cell filled (or its block went
+                                // typed-foreign) on the way — re-pick
                             }
+                            self.set_job(id, Job::Idle);
                         } else if !self.route(id, Layer::Underground, (tx, ty)) {
                             self.set_retry(id, 60);
                             self.set_job(id, Job::Idle);
@@ -1046,9 +1050,10 @@ impl Sim {
         best.map(|k| k.3)
     }
 
-    /// Where carriers place collected food: the nearest silver cell to the
-    /// entrance with room, else the first free cell (both visible + safe).
-    pub(crate) fn pantry_tile(&self) -> Option<(u32, u32)> {
+    /// Where carriers place collected food of `kind`: the nearest silver
+    /// cell to the entrance whose typed block has room for that kind,
+    /// else the first free cell that does (both visible + safe).
+    pub(crate) fn pantry_tile(&self, kind: FoodKind) -> Option<(u32, u32)> {
         let (ex, ey) = self.world.entrance?;
         let mut fallback: Option<(u32, u32)> = None;
         for r in 0..=14u32 {
@@ -1056,7 +1061,7 @@ impl Sim {
                 if self.world.underground.get(tile.0, tile.1) != EMPTY {
                     continue;
                 }
-                if self.cell_food(Layer::Underground, tile) >= self.rules.food_cell_cap {
+                if self.block_room(Layer::Underground, tile, kind) == 0 {
                     continue;
                 }
                 if self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER {
@@ -1129,28 +1134,36 @@ impl Sim {
             })
     }
 
+    /// Nearest free egg cell around the queen — preferring ORANGE soil
+    /// cells (eggs only hatch on orange, so the founding brood lands where
+    /// it can hatch without being carried), falling back to any empty
+    /// cell within the same radius.
     pub(crate) fn free_egg_tile(&self) -> Option<(u32, u32)> {
         let (qx, qy) = self.queen_tile();
-        for r in 0u32..=3 {
-            for dy in -(r as i32)..=(r as i32) {
-                for dx in -(r as i32)..=(r as i32) {
-                    if dx.abs() != r as i32 && dy.abs() != r as i32 {
-                        continue;
-                    }
-                    let x = qx as i32 + dx;
-                    let y = qy as i32 + dy;
-                    if x < 1
-                        || y < 1
-                        || x >= self.rules.width as i32 - 1
-                        || y >= self.rules.height as i32 - 1
-                    {
-                        continue;
-                    }
-                    let (x, y) = (x as u32, y as u32);
-                    if self.world.underground.get(x, y) == EMPTY
-                        && !self.tile_occupied((x, y), Layer::Underground)
-                    {
-                        return Some((x, y));
+        for prefer_orange in [true, false] {
+            for r in 0u32..=3 {
+                for dy in -(r as i32)..=(r as i32) {
+                    for dx in -(r as i32)..=(r as i32) {
+                        if dx.abs() != r as i32 && dy.abs() != r as i32 {
+                            continue;
+                        }
+                        let x = qx as i32 + dx;
+                        let y = qy as i32 + dy;
+                        if x < 1
+                            || y < 1
+                            || x >= self.rules.width as i32 - 1
+                            || y >= self.rules.height as i32 - 1
+                        {
+                            continue;
+                        }
+                        let (x, y) = (x as u32, y as u32);
+                        if self.world.underground.get(x, y) == EMPTY
+                            && !self.tile_occupied((x, y), Layer::Underground)
+                            && (!prefer_orange
+                                || self.soil_at(Layer::Underground, x, y) == SOIL_ORANGE)
+                        {
+                            return Some((x, y));
+                        }
                     }
                 }
             }

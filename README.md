@@ -8,12 +8,15 @@ Design reference: AntWar.io (see `docs/BASED-ON.md`); world content draft: `docs
 - **Remote (origin):** `git@github.com:realasmo/Wars_of_Ants.git`
 - **SSH key:** `/root/.ssh/key_Wars_of_Ants` (configured via repo-local `core.sshCommand`)
 
-## Current status (2026-10-03) — version 0.1.05.60-dev
+## Current status (2026-10-03) — version 0.1.06.61-dev
 
-**Playable:** title → team select → flying queen → found nest → excavate
-(2×2 blocks, dirt hauling) → orange-soil nursery (egg transport) → first
-workers → harvest sighted finite sources (protein/carbs/water; foragers
-prioritize what the queen craves) → survive spiders → **squad play**
+**Playable:** title → team select → flying queen → found nest → **water quest**
+(she farms water outside, stores it on a food block — silver soil, dug or
+built from wet wood — then stands on an egg block — orange soil — to lay the
+founding brood; 4-minute incubation) → first workers → excavate
+(2×2 blocks, dirt hauling) → harvest sighted finite sources
+(protein/carbs/water/honeydew; foragers prioritize what the queen craves) →
+survive spiders → **squad play**
 (X-menu: recruit/release followers, silver rings, released ants resume
 their interrupted work; a leader who farms **converts the squad** — they
 keep farming until re-recruited; an attack order is shared — the whole
@@ -21,11 +24,13 @@ squad fights that enemy, then returns to you; a leader under attack calls
 the squad to **retaliate**) → **physical queen feeding** (one feeder worker serves her
 rotating cravings; the request shows above her and in the HUD) →
 **brood production** (X as the queen: order Worker/Soldier/Honey/Medic
-eggs for physical pantry costs; soldier orders consume a worker; honeydew
-from nettle sources and Honey ants; medics rescue downed ants for water).
-Engine: deterministic 20 tps core (native + WASM byte-identical), replays
-(v2), e2e playtest suite, in-game dev console (`` ` ``) with a live sim
-event log. Every game change bumps `GAME_VERSION` (menu + corner).
+eggs for physical pantry costs — protein + sugars; soldier orders consume
+a worker; honeydew from nettle sources and Honey ants; medics rescue
+downed ants for water). **Typed food blocks:** one 2×2 storage block holds
+15 units of a single food type. Engine: deterministic 20 tps core (native +
+WASM byte-identical), replays (v2), e2e playtest suite, in-game dev console
+(`` ` ``) with a live sim event log. Every game change bumps `GAME_VERSION`
+(menu + corner).
 
 **Ants are procedural and alive** (ticket `docs/TICKET-procedural-ants.md`,
 shipped): part-based rigs — planted-feet tripod gait (feet never slide),

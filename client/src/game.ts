@@ -492,6 +492,28 @@ export class Game {
     this.log.push({ type: 'cmd', act: 'dev-soil', layer, x, y, soil });
   }
 
+  /** Why a food drop on this underground block was refused: the typed
+   * block holds another kind, or it is at its cap. Diagnosed locally from
+   * the decoded entities (the core just refuses). */
+  private foodBlockRefusal(tx: number, ty: number, carried: string): string {
+    const bx = tx & ~1;
+    const by = ty & ~1;
+    let foreign: string | null = null;
+    let total = 0;
+    for (const s of this.sim.cur.values()) {
+      if (s.kind !== 'food' || s.layer !== 1) continue;
+      const fx = Math.floor(s.x);
+      const fy = Math.floor(s.y);
+      if (fx < bx || fx > bx + 1 || fy < by || fy > by + 1) continue;
+      if (s.food !== carried) foreign = s.food;
+      total += s.amount;
+    }
+    if (foreign !== null) {
+      return `This food block stores ${foreign} — each block holds one food type (${carried} needs another block)`;
+    }
+    return `This food block is full (${total} units) — place the ${carried} somewhere else`;
+  }
+
   debugState(): Record<string, unknown> {
     const counts = this.sim.casteCounts();
     const spiders: Record<string, unknown>[] = [];
@@ -510,7 +532,7 @@ export class Game {
       tick: this.sim.tickCount,
       dead: this.sim.dead,
       phase: this.sim.phase(),
-      phaseTime: +this.sim.phaseTime().toFixed(1),
+      questWater: this.sim.questWaterTally(),
       team: this.sim.team(),
       map: [this.sim.w, this.sim.h],
       rulesDigest: this.sim.rulesDigest(),
@@ -885,11 +907,18 @@ export class Game {
           entR !== null &&
           Math.max(Math.abs(tx - (entR[0] + 1)), Math.abs(ty - (entR[1] + 1))) <= 2;
         const kind = this.sim.tileAt(me.layer, tx, ty);
-        if (!nearHole && kind === 0 && this.sim.drop(this.playerAnt, tx, ty)) {
-          this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'food' });
-          this.renderer.pulse(this.playerAnt);
-          this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
-          return;
+        if (!nearHole && kind === 0) {
+          if (this.sim.drop(this.playerAnt, tx, ty)) {
+            this.log.push({ type: 'cmd', act: 'drop', ant: this.playerAnt, tx, ty, note: 'food' });
+            this.renderer.pulse(this.playerAnt);
+            this.hud.update(this.sim, this.playerAnt, this.renderer.activeLayer);
+            return;
+          }
+          // refused underground: the typed block is full or holds another
+          // kind — say which (every refusal must produce feedback)
+          if (me.layer === 1) {
+            this.hud.flashHint(this.foodBlockRefusal(tx, ty, me.carry.food));
+          }
         }
       }
       // empty hands + adjacent egg under the cursor → pick it up

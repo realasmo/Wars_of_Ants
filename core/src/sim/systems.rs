@@ -512,14 +512,22 @@ impl Sim {
         if self.colony.dead {
             return;
         }
-        // founding script: excavation window ends → the first brood is laid
-        if self.colony.phase == Phase::Founding {
-            self.colony.phase_t -= DT;
-            if self.colony.phase_t <= 0.0 {
+        // founding quest: once the queen has stored the ritual water on
+        // food blocks, standing on an egg block (orange soil) lays the
+        // first brood — no timer, she digs and searches as long as she
+        // needs. The eggs prefer the orange cells she is standing on so
+        // they can hatch without being carried anywhere.
+        if self.colony.phase == Phase::Founding
+            && self.colony.quest_water_tally >= self.rules.founding_quest_water
+        {
+            let qt = self.queen_tile();
+            if self.colony.founding && self.soil_at(Layer::Underground, qt.0, qt.1) == SOIL_ORANGE {
                 self.colony.phase = Phase::Brood;
-                self.colony.phase_t = 0.0;
-                self.ev("founding time over — brood laid".to_string());
-                for _ in 0..self.rules.founding_eggs {
+                let n = self.rules.founding_eggs;
+                self.ev(format!(
+                    "founding brood laid on the egg block — {n} eggs incubating"
+                ));
+                for _ in 0..n {
                     let Some(tile) = self.free_egg_tile() else {
                         break;
                     };
@@ -753,7 +761,7 @@ impl Sim {
             let tile = crate::path::tile_of(pos.p);
             let on_silver = pos.layer == Layer::Underground
                 && self.soil_at(Layer::Underground, tile.0, tile.1) == SOIL_SILVER;
-            if on_silver {
+            if on_silver && self.block_room(Layer::Underground, tile, FoodKind::Honeydew) > 0 {
                 self.colony.honeydew += 1;
                 self.colony.delivered += 1;
                 self.spawn_unit_food(Layer::Underground, tile, FoodKind::Honeydew, None);
@@ -762,23 +770,31 @@ impl Sim {
                 for fid in self.food_on(Layer::Underground, tile) {
                     let fent = self.ids[&fid];
                     if let Ok(mut q) = self.ecs.get::<&mut Food>(fent) {
-                        q.stored = true;
-                        q.spoil = None;
+                        if q.kind == FoodKind::Honeydew {
+                            q.stored = true;
+                            q.spoil = None;
+                        }
                     }
                 }
                 self.ev(format!(
                     "honey ant #{id} banked 1 honeydew at ({},{})",
                     tile.0, tile.1
                 ));
-            } else {
-                self.spawn_unit_food(
-                    pos.layer,
-                    tile,
-                    FoodKind::Honeydew,
-                    Some(self.rules.spoil_time),
-                );
+            } else if self.spawn_unit_food(
+                pos.layer,
+                tile,
+                FoodKind::Honeydew,
+                Some(self.rules.spoil_time),
+            ) {
                 self.ev(format!(
                     "honey ant #{id} secreted 1 honeydew at ({},{}) — haul it home",
+                    tile.0, tile.1
+                ));
+            } else {
+                // the block here can't take honeydew (full or typed to
+                // another kind) — the secretion is lost
+                self.ev(format!(
+                    "honey ant #{id} spilled 1 honeydew at ({},{}) — no room",
                     tile.0, tile.1
                 ));
             }
@@ -891,7 +907,14 @@ impl Sim {
                     }
                 }
                 Carry::Food(kind) => {
-                    self.spawn_unit_food(pos.layer, tile, kind, Some(self.rules.spoil_time));
+                    // a falling carrier spills its food where it drops —
+                    // lost when the block there has no room for it
+                    if !self.spawn_unit_food(pos.layer, tile, kind, Some(self.rules.spoil_time)) {
+                        self.ev(format!(
+                            "ant #{id} dropped 1 {} — no room, spilled",
+                            super::snapshot::food_name(kind)
+                        ));
+                    }
                 }
                 Carry::Wood => {
                     self.spawn_collectible(tile_center(tile.0, tile.1), CollectibleVariant::Wood);

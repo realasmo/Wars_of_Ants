@@ -1,10 +1,10 @@
 {
  "version": 2,
  "seed": 42,
- "name": "session-2026-10-03T07:29:57",
+ "name": "session-2026-10-03T09:56:20",
  "core": "woa-core 0.1.05.60-dev",
  "team": 0,
- "ticks": 10706,
+ "ticks": 11144,
  "cmds": [
   {
    "t": 15,
@@ -17,237 +17,284 @@
    "t": 19,
    "act": "move",
    "ant": 0,
-   "x": 57.73,
-   "y": 44.93
+   "x": 58.84,
+   "y": 44.88
   },
   {
-   "t": 101,
+   "t": 100,
    "act": "move",
    "ant": 0,
-   "x": 59.59,
-   "y": 44.69
+   "x": 59.32,
+   "y": 44.81
   },
   {
-   "t": 103,
+   "t": 102,
    "act": "land",
    "ant": 0,
-   "x": 58,
+   "x": 59,
    "y": 44.5
   },
   {
-   "t": 106,
+   "t": 105,
    "act": "move",
    "ant": 0,
-   "x": 62.38,
+   "x": 63.38,
    "y": 44.5
   },
   {
-   "t": 188,
+   "t": 186,
    "act": "found",
    "ant": 0,
-   "x": 62.5,
+   "x": 63.5,
    "y": 44.5
   },
   {
-   "t": 198,
+   "t": 196,
    "act": "dig",
    "ant": 0,
    "tx": 64,
    "ty": 44
   },
   {
-   "t": 342,
+   "t": 340,
    "act": "drop",
    "ant": 0,
    "tx": 64,
    "ty": 44
   },
   {
-   "t": 348,
+   "t": 345,
    "act": "dig",
    "ant": 0,
    "tx": 64,
    "ty": 44
   },
   {
-   "t": 489,
+   "t": 486,
    "act": "entrance",
    "ant": 0
   },
   {
-   "t": 614,
+   "t": 611,
    "act": "drop",
    "ant": 0,
    "tx": 0,
    "ty": 0
   },
   {
-   "t": 619,
+   "t": 617,
    "act": "entrance",
    "ant": 0
   },
   {
-   "t": 5704,
+   "t": 740,
+   "act": "dev-spawn",
+   "x": 63.5,
+   "y": 42.5,
+   "kind": "moss"
+  },
+  {
+   "t": 740,
+   "act": "entrance",
+   "ant": 0
+  },
+  {
+   "t": 881,
+   "act": "move",
+   "ant": 0,
+   "x": 63.5,
+   "y": 42.5
+  },
+  {
+   "t": 1110,
    "act": "dev-soil",
    "x": 63,
-   "y": 45,
+   "y": 48,
+   "layer": 1,
+   "soil": 2
+  },
+  {
+   "t": 1111,
+   "act": "entrance",
+   "ant": 0
+  },
+  {
+   "t": 1253,
+   "act": "drop",
+   "ant": 0,
+   "tx": 63,
+   "ty": 48
+  },
+  {
+   "t": 1287,
+   "act": "dev-soil",
+   "x": 64,
+   "y": 46,
    "layer": 1,
    "soil": 1
   },
   {
-   "t": 5791,
+   "t": 1287,
+   "act": "dev-soil",
+   "x": 64,
+   "y": 48,
+   "layer": 1,
+   "soil": 1
+  },
+  {
+   "t": 1287,
+   "act": "move",
+   "ant": 0,
+   "x": 65.5,
+   "y": 49.5
+  },
+  {
+   "t": 6253,
    "act": "dev-food",
    "n": 200
   },
   {
-   "t": 5791,
+   "t": 6253,
    "act": "dev-spawn",
    "x": 65.5,
    "y": 47.5,
    "kind": "strawberry"
   },
   {
-   "t": 5791,
+   "t": 6253,
    "act": "dev-spawn",
    "x": 58.5,
    "y": 47.5,
    "kind": "moss"
   },
   {
-   "t": 5791,
+   "t": 6253,
    "act": "dev-spawn",
    "x": 62.5,
    "y": 40.5,
    "kind": "cockroach"
   },
   {
-   "t": 5794,
+   "t": 6258,
+   "act": "dev-spawn",
+   "x": 64.5,
+   "y": 49.5,
+   "kind": "egg"
+  },
+  {
+   "t": 6263,
    "act": "move",
    "ant": 0,
-   "x": 64,
-   "y": 45
+   "x": 65.5,
+   "y": 49.5
   },
   {
-   "t": 5855,
+   "t": 6324,
    "act": "pick-egg",
    "ant": 0,
-   "target": 61
+   "target": 71
   },
   {
-   "t": 5862,
+   "t": 6331,
    "act": "drop",
    "ant": 0,
-   "tx": 64,
-   "ty": 48
+   "tx": 65,
+   "ty": 49
   },
   {
-   "t": 5893,
+   "t": 6338,
    "act": "cycle"
   },
   {
-   "t": 5893,
+   "t": 6338,
    "act": "entrance",
-   "ant": 62
+   "ant": 64
   },
   {
-   "t": 6045,
+   "t": 6490,
    "act": "move",
-   "ant": 62,
-   "x": 69.17,
+   "ant": 64,
+   "x": 69.5,
    "y": 41.17
   },
   {
-   "t": 6049,
+   "t": 6494,
    "act": "move",
-   "ant": 62,
-   "x": 70.88,
-   "y": 41
+   "ant": 64,
+   "x": 71.9,
+   "y": 40.99
   },
   {
-   "t": 6053,
+   "t": 6577,
    "act": "move",
-   "ant": 62,
-   "x": 72.68,
-   "y": 40.82
+   "ant": 64,
+   "x": 73.31,
+   "y": 40.81
   },
   {
-   "t": 6137,
-   "act": "move",
-   "ant": 62,
-   "x": 73.81,
-   "y": 40.64
-  },
-  {
-   "t": 6139,
+   "t": 6580,
    "act": "attack",
-   "ant": 62,
+   "ant": 64,
    "target": 55
   },
   {
-   "t": 10668,
+   "t": 11107,
    "act": "dev-food",
    "n": 999
   },
   {
-   "t": 10668,
+   "t": 11107,
    "act": "dev-spawn",
    "x": 50.5,
    "y": 3.5,
    "kind": "spider"
   },
   {
-   "t": 10679,
+   "t": 11116,
    "act": "dev-spawn",
-   "x": 17.82,
-   "y": 42.52,
+   "x": 8.95,
+   "y": 44.06,
    "kind": "moss"
   },
   {
-   "t": 10685,
+   "t": 11122,
    "act": "dev-water",
    "n": 7
   },
   {
-   "t": 10700,
+   "t": 11137,
    "act": "cycle"
   },
   {
-   "t": 10700,
+   "t": 11137,
+   "act": "brood",
+   "ant": 0,
+   "kind": "2"
+  },
+  {
+   "t": 11137,
+   "act": "dev-spawn",
+   "x": 65.5,
+   "y": 49.5,
+   "kind": "pantry-protein"
+  },
+  {
+   "t": 11137,
+   "act": "dev-spawn",
+   "x": 65.5,
+   "y": 49.5,
+   "kind": "pantry-protein"
+  },
+  {
+   "t": 11140,
    "act": "brood",
    "ant": 0,
    "kind": "0"
   },
   {
-   "t": 10700,
-   "act": "dev-spawn",
-   "x": 64.5,
-   "y": 48.5,
-   "kind": "pantry-protein"
-  },
-  {
-   "t": 10700,
-   "act": "dev-spawn",
-   "x": 64.5,
-   "y": 48.5,
-   "kind": "pantry-protein"
-  },
-  {
-   "t": 10700,
-   "act": "dev-spawn",
-   "x": 64.5,
-   "y": 48.5,
-   "kind": "pantry-water"
-  },
-  {
-   "t": 10703,
-   "act": "brood",
-   "ant": 0,
-   "kind": "0"
-  },
-  {
-   "t": 10706,
+   "t": 11144,
    "act": "dev-rules",
-   "json": "{\"width\":96,\"height\":96,\"start_workers\":3,\"food_clusters\":6,\"max_ants\":24,\"spiders\":2,\"rock_chance\":0.08,\"orange_soil_chance\":0.035,\"silver_soil_chance\":0.035,\"patches_per_color\":2,\"patch_w\":10,\"patch_h\":12,\"patch_wobble\":2,\"patch_min_dist\":20,\"patch_grant_min\":3,\"patch_grant_max\":6,\"sources_near_nest\":2,\"source_min_gap\":8,\"near_ring_min\":7,\"near_ring_max\":14,\"spider_dist_min\":25,\"spider_dist_max\":45,\"wood_count\":4,\"wool_count\":4,\"sources\":[{\"src\":1,\"kind\":\"water\",\"amount\":[15,20],\"harvest\":10,\"count\":10},{\"src\":2,\"kind\":\"water\",\"amount\":[21,26],\"harvest\":20,\"count\":7},{\"src\":3,\"kind\":\"carbs\",\"amount\":[100,110],\"harvest\":6,\"count\":6},{\"src\":4,\"kind\":\"carbs\",\"amount\":[40,60],\"harvest\":4,\"count\":8},{\"src\":5,\"kind\":\"protein\",\"amount\":[8,12],\"harvest\":15,\"count\":6},{\"src\":6,\"kind\":\"protein\",\"amount\":[25,35],\"harvest\":13,\"count\":5},{\"src\":7,\"kind\":\"honeydew\",\"amount\":[15,22],\"harvest\":10,\"count\":4}],\"sight_range\":8,\"protein_per_spider\":8,\"super_per_spider\":8,\"queen\":{\"hp\":150,\"dmg\":0,\"atk_cd\":1,\"speed\":2.5,\"range\":0.9,\"dirt_capacity\":2},\"worker\":{\"hp\":100,\"dmg\":8,\"atk_cd\":1,\"speed\":3,\"range\":0.9,\"dirt_capacity\":2},\"soldier\":{\"hp\":130,\"dmg\":22,\"atk_cd\":1,\"speed\":2.6,\"range\":0.9,\"dirt_capacity\":0},\"spider\":{\"hp\":130,\"dmg\":15,\"atk_cd\":1.2,\"speed\":2.2,\"range\":0.8,\"dirt_capacity\":0},\"honey\":{\"hp\":90,\"dmg\":4,\"atk_cd\":1,\"speed\":2.8,\"range\":0.9,\"dirt_capacity\":0},\"medic\":{\"hp\":95,\"dmg\":5,\"atk_cd\":1,\"speed\":3.2,\"range\":0.9,\"dirt_capacity\":0},\"ant_range\":0.9,\"brood\":{\"worker\":{\"protein\":2,\"carbs\":0,\"water\":1,\"honeydew\":0,\"egg_time\":45,\"consumes_worker\":false},\"soldier\":{\"protein\":6,\"carbs\":0,\"water\":3,\"honeydew\":0,\"egg_time\":45,\"consumes_worker\":true},\"honey\":{\"protein\":1,\"carbs\":0,\"water\":0,\"honeydew\":8,\"egg_time\":45,\"consumes_worker\":false},\"medic\":{\"protein\":4,\"carbs\":3,\"water\":0,\"honeydew\":0,\"egg_time\":45,\"consumes_worker\":false}},\"honey_period\":240,\"bleed_time\":60,\"heal_time\":10,\"water_per_heal\":2,\"queen_fly_speed\":5,\"founding_time\":60,\"founding_eggs\":4,\"founding_egg_hatch\":180,\"queen_dig_time\":1,\"start_food\":5,\"eat_period\":25,\"starve_time\":90,\"craving_cycle\":[\"carbs\",\"protein\",\"carbs\",\"water\"],\"lay_cooldown\":3,\"egg_time\":45,\"dig_time\":0.5,\"dig_expand_radius\":8,\"food_cell_cap\":6,\"spoil_time\":300,\"pile_amount\":45,\"loiter_radius\":4,\"loiter_hops\":3,\"home_rest_ticks\":300,\"spider_aggro\":5,\"spider_wander\":8,\"egg_cost\":5,\"soldier_cost_green\":3,\"soldier_cost_super\":2}"
+   "json": "{\"width\":96,\"height\":96,\"start_workers\":3,\"food_clusters\":6,\"max_ants\":24,\"spiders\":2,\"rock_chance\":0.08,\"orange_soil_chance\":0.035,\"silver_soil_chance\":0.035,\"patches_per_color\":2,\"patch_w\":10,\"patch_h\":12,\"patch_wobble\":2,\"patch_min_dist\":20,\"patch_grant_min\":3,\"patch_grant_max\":6,\"sources_near_nest\":2,\"source_min_gap\":8,\"near_ring_min\":7,\"near_ring_max\":14,\"spider_dist_min\":25,\"spider_dist_max\":45,\"wood_count\":4,\"wool_count\":4,\"sources\":[{\"src\":1,\"kind\":\"water\",\"amount\":[15,20],\"harvest\":10,\"count\":10},{\"src\":2,\"kind\":\"water\",\"amount\":[21,26],\"harvest\":20,\"count\":7},{\"src\":3,\"kind\":\"carbs\",\"amount\":[100,110],\"harvest\":6,\"count\":6},{\"src\":4,\"kind\":\"carbs\",\"amount\":[40,60],\"harvest\":4,\"count\":8},{\"src\":5,\"kind\":\"protein\",\"amount\":[8,12],\"harvest\":15,\"count\":6},{\"src\":6,\"kind\":\"protein\",\"amount\":[25,35],\"harvest\":13,\"count\":5},{\"src\":7,\"kind\":\"honeydew\",\"amount\":[15,22],\"harvest\":10,\"count\":4}],\"sight_range\":8,\"protein_per_spider\":8,\"super_per_spider\":8,\"queen\":{\"hp\":150,\"dmg\":0,\"atk_cd\":1,\"speed\":2.5,\"range\":0.9,\"dirt_capacity\":3},\"worker\":{\"hp\":100,\"dmg\":8,\"atk_cd\":1,\"speed\":3,\"range\":0.9,\"dirt_capacity\":2},\"soldier\":{\"hp\":130,\"dmg\":22,\"atk_cd\":1,\"speed\":2.6,\"range\":0.9,\"dirt_capacity\":0},\"spider\":{\"hp\":130,\"dmg\":15,\"atk_cd\":1.2,\"speed\":2.2,\"range\":0.8,\"dirt_capacity\":0},\"honey\":{\"hp\":90,\"dmg\":4,\"atk_cd\":1,\"speed\":2.8,\"range\":0.9,\"dirt_capacity\":0},\"medic\":{\"hp\":95,\"dmg\":5,\"atk_cd\":1,\"speed\":3.2,\"range\":0.9,\"dirt_capacity\":0},\"ant_range\":0.9,\"brood\":{\"worker\":{\"protein\":2,\"carbs\":1,\"water\":0,\"honeydew\":0,\"egg_time\":120,\"consumes_worker\":false},\"soldier\":{\"protein\":6,\"carbs\":3,\"water\":0,\"honeydew\":0,\"egg_time\":120,\"consumes_worker\":true},\"honey\":{\"protein\":1,\"carbs\":0,\"water\":0,\"honeydew\":8,\"egg_time\":120,\"consumes_worker\":false},\"medic\":{\"protein\":4,\"carbs\":3,\"water\":0,\"honeydew\":0,\"egg_time\":120,\"consumes_worker\":false}},\"honey_period\":240,\"bleed_time\":60,\"heal_time\":10,\"water_per_heal\":2,\"queen_fly_speed\":5,\"founding_quest_water\":1,\"founding_eggs\":4,\"founding_egg_hatch\":240,\"queen_dig_time\":1,\"start_food\":5,\"eat_period\":25,\"starve_time\":90,\"craving_cycle\":[\"carbs\",\"protein\",\"carbs\",\"water\"],\"lay_cooldown\":3,\"egg_time\":120,\"dig_time\":0.5,\"dig_expand_radius\":8,\"food_block_cap\":15,\"spoil_time\":300,\"pile_amount\":456,\"loiter_radius\":4,\"loiter_hops\":3,\"home_rest_ticks\":300,\"spider_aggro\":5,\"spider_wander\":8,\"egg_cost\":5,\"soldier_cost_green\":3,\"soldier_cost_super\":2}"
   }
  ]
 }

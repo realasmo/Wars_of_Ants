@@ -8,11 +8,12 @@ confirmed in playtesting.
 
 ## Creatures
 
-### Player-controlled (F4 SHIPPED 2026-09-28 — all costs are paid from the
-physical pantry via the queen's X-menu; refusals explain themselves)
-- **Worker** — 2× protein, 1× water to spawn. Idle: feeds the queen, otherwise
+### Player-controlled (F4 SHIPPED 2026-09-28, costs rebalanced 2026-10-03 to
+protein + sugars — all paid from the physical pantry via the queen's X-menu;
+refusals explain themselves)
+- **Worker** — 2× protein, 1× carbs to spawn. Idle: feeds the queen, otherwise
   farms resources. Very weak.
-- **Soldier** — 6× protein, 3× water to convert from worker — the order
+- **Soldier** — 6× protein, 3× carbs to convert from worker — the order
   CONSUMES one living worker (it spins into the soldier brood). Muscles;
   attacks neutral/hostile creatures.
 - **Honey** — 1× protein, 8× aphid honeydew. Produces 1× aphid honeydew / 4 min
@@ -104,4 +105,19 @@ Size: TBD — comfortable for the above. (Current: 96×96.)
   red "!" with an honest reason (empty pantry / needs water / pantry
   full / queen starving). Settled user rule: icons are the FAR-zoom
   layer — the rigs carry the information up close.
+- ✅ **Data files (2026-10-03):** every `GameRules` number now lives in
+  `data/*.jsonc` at the repo root — JSONC with comments, embedded into the
+  core at build time (one source of truth for browser, native tests, and
+  replays); balance edits are file edits + rebuild, live experiments stay
+  in the F4 drawer.
+- ✅ **Founding water quest + typed food blocks (2026-10-03):** founding
+  opens with a ritual instead of a timer — the queen must store water on
+  a food block (silver), then stand on an egg block (orange) to lay the
+  founding brood (4 worker eggs, 4-minute incubation; all later eggs
+  2-minute). Food blocks are TYPED: one 2×2 underground block holds up to
+  15 units of a single food type (`food_block_cap`; surface cells stay
+  mixed). New eggs cost protein + sugars (worker 2p+1c, soldier 6p+3c,
+  medic 4p+3c, honey 1p+8h) — water left the brood economy and is the
+  founding ritual's currency. Full design + verification record in
+  `docs/TICKET-founding-rework.md`.
 - Open: worker avoid-hostile behavior, panic mechanic, aphid chamber, bosses.

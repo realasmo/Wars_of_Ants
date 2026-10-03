@@ -169,11 +169,6 @@ export class Sim {
     return this.sim.phase();
   }
 
-  /** Seconds left in the founding excavation window (0 otherwise). */
-  phaseTime(): number {
-    return this.sim.phase_time();
-  }
-
   /** Team color: 0 red, 1 blue. */
   team(): number {
     return this.sim.team();
@@ -203,6 +198,33 @@ export class Sim {
     return JSON.parse(this.sim.rules_get()) as { digest: string; rules: Record<string, unknown> };
   }
 
+  /** One cached decoded rules read for gameplay consumers (HUD, render) —
+   * the same cache-invalidation contract as the other derived caches. */
+  private rulesNum(key: string): number {
+    if (this.rulesNumCache === null) {
+      this.rulesNumCache = this.rulesGet().rules;
+    }
+    const v = this.rulesNumCache[key];
+    if (typeof v !== 'number') throw new Error(`rules: '${key}' is missing or not a number`);
+    return v;
+  }
+  private rulesNumCache: Record<string, unknown> | null = null;
+
+  /** Founding water quest: water units stored on food blocks so far. */
+  questWaterTally(): number {
+    return this.sim.quest_water_tally();
+  }
+
+  /** Founding water quest: units required before the brood can be laid. */
+  questWaterNeeded(): number {
+    return this.rulesNum('founding_quest_water');
+  }
+
+  /** Typed-block storage capacity (underground blocks; pile-dot sizing). */
+  foodBlockCap(): number {
+    return this.rulesNum('food_block_cap');
+  }
+
   rulesDefault(): { digest: string; rules: Record<string, unknown> } {
     return JSON.parse(this.sim.rules_default()) as { digest: string; rules: Record<string, unknown> };
   }
@@ -217,9 +239,11 @@ export class Sim {
   private rulesMetaCache: RulesMeta | null = null;
 
   /** Atomic whole-rules commit; ok, else every validation error. Clears
-   * derived caches (brood menu costs) — they come from the rules. */
+   * derived caches (brood menu costs, gameplay rules reads) — they come
+   * from the rules. */
   rulesSet(json: string): { ok: boolean; digest?: string; errors?: string[] } {
     this.broodSpecCache = null;
+    this.rulesNumCache = null;
     return JSON.parse(this.sim.rules_set(json));
   }
 

@@ -23,14 +23,14 @@
   // Legacy worlds: "super" units dropped by a killed spider.
   "super_per_spider": 8,
 
-  // Max food units (all kinds combined) per cell — the capacity of one
-  // food-storage tile (silver soil; one wet-wood block makes a tile
-  // silver).
-  "food_cell_cap": 6,
+  // Max food units in one underground 2×2 storage block — and the block
+  // holds exactly ONE kind at a time (typed blocks). Surface cells keep
+  // per-tile mixed behavior with the same number.
+  "food_block_cap": 15,
   // Seconds before dropped food spoils on a non-storage cell.
   "spoil_time": 300.0,
   // Loose pile size for dev/test spawns and legacy clusters.
-  "pile_amount": 45,
+  "pile_amount": 456,
 
   // --- legacy founded economy (auto-laying; founding uses brood orders) ---
   "egg_cost": 5,

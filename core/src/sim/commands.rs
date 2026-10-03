@@ -308,8 +308,9 @@ impl Sim {
             }
         }
         self.colony.phase = Phase::Founding;
-        self.colony.phase_t = self.rules.founding_time;
-        self.ev(format!("nest founded at ({bx},{by}) — 60s excavation"));
+        self.ev(format!(
+            "nest founded at ({bx},{by}) — store water on a food block, then brood on an egg block"
+        ));
         true
     }
 
@@ -565,19 +566,24 @@ impl Sim {
                 placed
             }
             Carry::Food(kind) => {
-                // drop one unit as loose (spoiling) food
+                // drop one unit as loose (spoiling) food — refused when the
+                // cell is at its cap, or underground when its typed block is
+                // full / holds another kind
                 let tile = (tx, ty);
                 if !self.grid_of(layer).in_bounds(tx, ty)
                     || chebyshev(self.ant_tile(ant), tile) > 1
-                    || self.cell_food(layer, tile) >= self.rules.food_cell_cap
+                    || self.block_room(layer, tile, kind) == 0
                 {
                     return false;
                 }
-                self.spawn_unit_food(layer, tile, kind, Some(self.rules.spoil_time));
-                if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
-                    *q = Carry::None;
+                if self.spawn_unit_food(layer, tile, kind, Some(self.rules.spoil_time)) {
+                    if let Ok(mut q) = self.ecs.get::<&mut Carry>(ent) {
+                        *q = Carry::None;
+                    }
+                    true
+                } else {
+                    false
                 }
-                true
             }
             Carry::Fallen => {
                 // set the downed ant down on the adjacent cell — a medic's

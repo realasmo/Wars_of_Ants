@@ -153,7 +153,7 @@ impl Sim {
                 } else {
                     Phase::Colony
                 },
-                phase_t: 0.0,
+                quest_water_tally: 0,
                 team,
                 founding,
                 known: std::collections::BTreeSet::new(),
